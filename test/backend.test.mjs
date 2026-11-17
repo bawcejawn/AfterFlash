@@ -430,6 +430,41 @@ t('owner can add/remove admins; admins have their own keys and limited rights', 
   assert.equal(env.post({ a: 'adminDelete', k: env.adminKey, e: mine.id, confirm: mine.id }).ok, true);
 });
 
+t('Drive refusing link sharing does not lose photos; admin sees the problem', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = joinGuest(env, ev.id);
+  env.gas.faults.sharing = true;
+  const up = upload(env, ev.id, g);
+  assert.equal(up.ok, true, JSON.stringify(up));
+  assert.equal(env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items.length, 1);
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id }).ok, true, 'fallback still serves it');
+  const probs = env.post({ a: 'adminProblems', k: env.adminKey }).problems;
+  assert.ok(probs.length >= 1 && /sharing/i.test(probs[0].m));
+  assert.equal(env.post({ a: 'adminClearProblems', k: env.adminKey }).ok, true);
+  assert.equal(env.post({ a: 'adminProblems', k: env.adminKey }).problems.length, 0);
+});
+
+t('a failure after saving the file leaves no orphan files and refunds the shot', () => {
+  const env = boot();
+  const ev = makeEvent(env, { shotsPerGuest: 2 });
+  const g = joinGuest(env, ev.id);
+  const before = [...env.gas.files.values()].filter((f) => !f.trashed).length;
+  env.gas.faults.append = true;
+  const r = upload(env, ev.id, g, { clientId: 'retryme00001' });
+  assert.equal(r.ok, false);
+  env.gas.faults.append = false;
+  const live = [...env.gas.files.values()].filter((f) => !f.trashed).length;
+  assert.equal(live, before, 'created files were trashed');
+  const probs = env.post({ a: 'adminProblems', k: env.adminKey }).problems;
+  assert.ok(probs.some((p) => /Unexpected error/.test(p.m)));
+  // the retry of the same photo succeeds and the roll is intact
+  env.gas.cache.clear();
+  const again = upload(env, ev.id, g, { clientId: 'retryme00001' });
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal(again.guest.shotsLeft, 1);
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }

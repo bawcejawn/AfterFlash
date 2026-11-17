@@ -65,9 +65,10 @@ async function dashboard(created) {
         h('td', null, fmtDate(ev.date)),
         h('td', null, fmtWhen(ev.createdAt), h('div', { class: 'small muted' }, ev.createdBy ? `by ${ev.createdBy}` : '')),
         h('td', null, h('div', { class: 'row' },
-          h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder'),
+          me.role === 'owner' ? h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder') : null,
           ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
           ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
+    problemsPanel(),
     me.role === 'owner' ? adminsPanel() : null);
 }
 
@@ -123,6 +124,25 @@ async function del(ev) {
   if (typed == null) return;
   if (typed.trim() !== ev.id) { toast('The code didn’t match. Nothing was deleted.'); return; }
   try { await api(studio, 'adminDelete', { k: adminKey, e: ev.id, confirm: ev.id }); toast('Event deleted', 'ok'); dashboard(); } catch (e) { toast(e.message, 'error'); }
+}
+
+// ---------------------------------------------------------------- recent problems
+function problemsPanel() {
+  const panel = h('section', { class: 'panel stack section', hidden: true });
+  (async () => {
+    try {
+      const { problems } = await api(studio, 'adminProblems', { k: adminKey });
+      if (!problems.length) return;
+      clear(panel).append(
+        h('h2', null, 'Recent problems'),
+        h('p', { class: 'muted' }, 'Things the backend noticed going wrong. Photos are kept safe; this helps find the cause.'),
+        h('table', { class: 'list' }, h('tbody', null, problems.slice(0, 20).map((p) => h('tr', null,
+          h('td', { class: 'small' }, fmtWhen(p.t)), h('td', { class: 'small muted' }, p.e || ''), h('td', null, p.m))))),
+        me.role === 'owner' ? h('button', { class: 'btn small', onclick: async () => { await api(studio, 'adminClearProblems', { k: adminKey }); panel.hidden = true; } }, 'Clear list') : null);
+      panel.hidden = false;
+    } catch { /* older backend */ }
+  })();
+  return panel;
 }
 
 // ---------------------------------------------------------------- admins (owner only)

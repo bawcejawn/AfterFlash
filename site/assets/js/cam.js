@@ -202,7 +202,13 @@ async function startCamera() {
         if (e.error.code === 'no_shots') shotsLeftServer = 0;
         renderCounter();
       } else if (e.type === 'waiting') {
-        updateQueuePill(`${e.count} saved on your phone, uploading when there’s signal`);
+        // Say what is really happening: no signal, a weak connection, or the server saying "not yet".
+        const n = `${e.count} saved on your phone`;
+        const code = e.error && e.error.code;
+        if (!navigator.onLine) updateQueuePill(`No signal. ${n}, they’ll upload when you’re back online.`);
+        else if (!code || code === 'network') updateQueuePill(`Weak connection. ${n}, retrying…`);
+        else if (code === 'busy' || code === 'rate_limited' || code === 'in_progress' || code === 'server_error') updateQueuePill(`Lots of photos arriving. ${n}, retrying shortly…`);
+        else updateQueuePill(`${e.error.message || 'Can’t upload yet.'} ${n}, still trying.`);
       } else if (e.type === 'auth') {
         store.del(authKey()); auth = null; welcome('Please join again to keep uploading. Your saved photos will upload afterwards.');
       }
