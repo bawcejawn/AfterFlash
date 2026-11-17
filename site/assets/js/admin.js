@@ -7,6 +7,7 @@ const root = $('#app');
 const studios = Object.keys(config.backends || {});
 let studio = studios[0];
 let adminKey = '';
+let me = { name: '', role: '' };
 const KEY = () => `ps:ak:${studio}`;
 
 function login(msg) {
@@ -25,7 +26,7 @@ function login(msg) {
     if (studioSel) studio = studioSel.value;
     adminKey = keyIn.value.trim();
     try {
-      await api(studio, 'adminCheck', { k: adminKey }, { retries: 0 });
+      me = (await api(studio, 'adminCheck', { k: adminKey }, { retries: 0 })).me || me;
       store.set(KEY(), adminKey, sessionStorage);
       dashboard();
     } catch (err) {
@@ -50,8 +51,10 @@ async function dashboard(created) {
     if (e.code === 'unauthorized') { store.del(KEY(), sessionStorage); return login('Please sign in again.'); }
     toast(e.message, 'error');
   }
+  if (!me.role) { try { me = (await api(studio, 'adminCheck', { k: adminKey })).me || me; } catch { /* handled below */ } }
   clear(root).append(
-    h('div', { class: 'row spread' }, h('h1', null, 'Events'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out')),
+    h('div', { class: 'row spread' }, h('h1', null, 'Events'),
+      h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     created ? createdPanel(created) : null,
     createForm(),
     h('h2', { class: 'section' }, `Your events (${events.length})`),
@@ -60,11 +63,12 @@ async function dashboard(created) {
       h('tbody', null, events.map((ev) => h('tr', null,
         h('td', null, h('b', null, ev.name), h('div', { class: 'small muted' }, ev.id)),
         h('td', null, fmtDate(ev.date)),
-        h('td', null, fmtWhen(ev.createdAt)),
+        h('td', null, fmtWhen(ev.createdAt), h('div', { class: 'small muted' }, ev.createdBy ? `by ${ev.createdBy}` : '')),
         h('td', null, h('div', { class: 'row' },
           h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder'),
-          h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link'),
-          h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete'))))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'));
+          ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
+          ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
+    me.role === 'owner' ? adminsPanel() : null);
 }
 
 function createdPanel({ id, hostKey, name }) {
@@ -121,7 +125,45 @@ async function del(ev) {
   try { await api(studio, 'adminDelete', { k: adminKey, e: ev.id, confirm: ev.id }); toast('Event deleted', 'ok'); dashboard(); } catch (e) { toast(e.message, 'error'); }
 }
 
-function signOut() { store.del(KEY(), sessionStorage); adminKey = ''; login(); }
+// ---------------------------------------------------------------- admins (owner only)
+function adminsPanel() {
+  const panel = h('section', { class: 'panel stack section' }, h('h2', null, 'Studio admins'),
+    h('p', null, 'Give each person their own admin key so you can remove one without affecting anyone else. Admins can create events and manage the ones they created. Only you can add or remove admins.'));
+  const listEl = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
+  const nameIn = h('input', { type: 'text', maxlength: 40, placeholder: 'Their name', required: true });
+  const form = h('form', { class: 'row' }, nameIn, h('button', { class: 'btn primary', type: 'submit' }, 'Create admin key'));
+  const result = h('div');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api(studio, 'adminAddAdmin', { k: adminKey, name: nameIn.value.trim() });
+      nameIn.value = '';
+      clear(result).append(h('div', { class: 'panel stack' },
+        h('h3', null, `Admin key for ${r.admin.name}`),
+        h('p', null, 'Send this privately (a password manager share, or tell them in person). It’s shown once. They sign in on this page with it.'),
+        h('div', { class: 'keybox' }, r.key),
+        h('button', { class: 'btn', onclick: () => copy(r.key) }, 'Copy key')));
+      loadAdmins();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  async function loadAdmins() {
+    try {
+      const { admins } = await api(studio, 'adminListAdmins', { k: adminKey });
+      clear(listEl).append(admins.length ? h('table', { class: 'list' },
+        h('tbody', null, admins.map((a) => h('tr', null, h('td', null, h('b', null, a.name)), h('td', null, `added ${fmtWhen(a.createdAt)}`),
+          h('td', null, h('button', { class: 'btn small danger', onclick: () => removeAdmin(a) }, 'Remove')))))) : h('p', { class: 'muted' }, 'No other admins yet.'));
+    } catch (err) { clear(listEl).append(h('p', null, err.message)); }
+  }
+  async function removeAdmin(a) {
+    if (!confirm(`Remove ${a.name}? Their key stops working immediately. Events they created stay.`)) return;
+    try { await api(studio, 'adminRemoveAdmin', { k: adminKey, id: a.id }); toast('Admin removed', 'ok'); loadAdmins(); } catch (err) { toast(err.message, 'error'); }
+  }
+  loadAdmins();
+  panel.append(listEl, form, result);
+  return panel;
+}
+
+function signOut() { store.del(KEY(), sessionStorage); adminKey = ''; me = { name: '', role: '' }; login(); }
 
 adminKey = store.get(KEY(), sessionStorage) || '';
 if (adminKey) dashboard(); else login();

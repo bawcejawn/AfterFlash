@@ -403,6 +403,33 @@ t('settings updates ignore unknown keys and __proto__', () => {
   assert.equal(r.event.settings.name, 'Ok');
 });
 
+t('owner can add/remove admins; admins have their own keys and limited rights', () => {
+  const env = boot();
+  const add = env.post({ a: 'adminAddAdmin', k: env.adminKey, name: 'Sarah' });
+  assert.equal(add.ok, true); assert.ok(add.key.length >= 40);
+  const sarah = add.key;
+  assert.equal(env.post({ a: 'adminCheck', k: sarah }).me.role, 'admin');
+  assert.ok(!JSON.stringify(env.gas.props.get('ADMINS')).includes(sarah), 'only the hash is stored');
+  // admins can't manage admins
+  assert.equal(env.post({ a: 'adminAddAdmin', k: sarah, name: 'Eve' }).error, 'forbidden');
+  assert.equal(env.post({ a: 'adminListAdmins', k: sarah }).error, 'forbidden');
+  // admin creates own event and can manage it; can't delete the owner's event
+  const mine = env.post({ a: 'adminCreate', k: sarah, settings: { name: 'Sarah party' } });
+  const owners = makeEvent(env);
+  const list = env.post({ a: 'adminList', k: sarah }).events;
+  assert.equal(list.find((e) => e.id === mine.id).createdBy, 'Sarah');
+  assert.equal(list.find((e) => e.id === owners.id).canManage, false);
+  assert.equal(env.post({ a: 'adminDelete', k: sarah, e: owners.id, confirm: owners.id }).error, 'forbidden');
+  assert.equal(env.post({ a: 'adminHostLink', k: sarah, e: owners.id }).error, 'forbidden');
+  assert.equal(env.post({ a: 'adminHostLink', k: sarah, e: mine.id }).ok, true);
+  // owner can manage everything, and revoking works immediately
+  const admins = env.post({ a: 'adminListAdmins', k: env.adminKey }).admins;
+  assert.equal(admins.length, 1); assert.equal(admins[0].hash, undefined);
+  assert.equal(env.post({ a: 'adminRemoveAdmin', k: env.adminKey, id: admins[0].id }).ok, true);
+  assert.equal(env.post({ a: 'adminCheck', k: sarah }).error, 'unauthorized');
+  assert.equal(env.post({ a: 'adminDelete', k: env.adminKey, e: mine.id, confirm: mine.id }).ok, true);
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }

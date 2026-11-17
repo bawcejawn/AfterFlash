@@ -53,6 +53,14 @@ with sync_playwright() as p:
     host_url = page.locator(".keybox").inner_text().strip()
     event_id = re.search(r"e=([A-Za-z0-9]+)", host_url).group(1)
     page.screenshot(path=f"{SHOTS}/02-admin.png", full_page=True)
+    # owner adds a second admin with their own key
+    expect(page.locator("text=Signed in as Owner")).to_be_visible()
+    page.fill("input[placeholder='Their name']", "Sarah")
+    page.click("text=Create admin key")
+    expect(page.locator("text=Admin key for Sarah")).to_be_visible()
+    second_key = page.locator(".keybox").last.inner_text().strip()
+    assert second_key != ADMIN_KEY and len(second_key) > 30
+    expect(page.locator("table.list").last).to_contain_text("Sarah")
 
     # ---- host dashboard
     host = desk.new_page(); watch(host, "host")
