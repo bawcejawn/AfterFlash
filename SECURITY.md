@@ -6,7 +6,8 @@ PhotoShare is built for a hostile internet: anyone can find a guest link, and th
 
 | Secret | Holder | Grants | Stored as |
 |---|---|---|---|
-| Admin key | Studio owner | Create, delete and list events; reissue host links | SHA-256 in Script Properties |
+| Owner admin key | Studio owner | Everything below, plus add/remove admins and manage every event | SHA-256 in Script Properties |
+| Additional admin keys | People the owner adds | Create and list events; reissue host links and delete only their own events | SHA-256 in Script Properties (revocable individually) |
 | Host key | Hosts (e.g. the couple, a planner) | One event: settings, moderation, guests, originals | SHA-256 in the index sheet |
 | Wall key | TV screens | View one event's wall even when guest browsing is off | Derived from the host key hash; rotating the host key rotates it |
 | Guest token | One phone | Upload and report in one event | SHA-256 in the event sheet |

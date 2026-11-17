@@ -71,6 +71,16 @@ Commit and push to `main`.
 - **Moderation:** with **Approve photos before anyone sees them** on, nothing reaches the wall until you approve it. Reported photos hide immediately.
 - **After:** open the Drive folder from the dashboard and download it. Google zips it for you, with every original at full resolution.
 
+## Adding another admin (e.g. a business partner)
+
+Don't share your own admin key. Give each person their own:
+
+1. Sign in to `admin.html` with your key (the one from `setup`). You're the **Owner**.
+2. Scroll to **Studio admins**, type their name, and click **Create admin key**.
+3. Send them the key privately. It's shown only once.
+
+Admins can create events, see all events, and manage (new host link, delete) the events **they** created. Only the owner can add or remove admins or manage everyone's events. **Remove** turns a key off immediately; their events stay.
+
 ## Running more than one studio (scaling)
 
 Each Google account that deploys the backend is a "studio" with its own free Drive storage. Add more studios to `config.js`:

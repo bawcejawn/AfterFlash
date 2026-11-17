@@ -44,7 +44,7 @@ var LIMITS = {
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
   'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
-var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted'];
+var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
 
 // ---------------------------------------------------------------- entry points
 
@@ -98,6 +98,9 @@ var ACTIONS = {
   hostMarkArchived: aHostMarkArchived,
   // admin
   adminCheck: aAdminCheck,
+  adminListAdmins: aAdminListAdmins,
+  adminAddAdmin: aAdminAddAdmin,
+  adminRemoveAdmin: aAdminRemoveAdmin,
   adminCreate: aAdminCreate,
   adminList: aAdminList,
   adminDelete: aAdminDelete,
@@ -497,12 +500,66 @@ function aHostMarkArchived(req) {
 // ---------------------------------------------------------------- admin actions
 
 function aAdminCheck(req) {
-  authAdmin_(req);
-  return { version: APP_VERSION };
+  var me = authAdmin_(req);
+  return { version: APP_VERSION, me: { name: me.name, role: me.role } };
+}
+
+// ---- additional admins (owner only). Each admin has their own key; only its hash is stored.
+
+function readAdmins_() {
+  var list = parseJson_(PropertiesService.getScriptProperties().getProperty('ADMINS') || '[]');
+  return Array.isArray(list) ? list : [];
+}
+
+function writeAdmins_(list) {
+  PropertiesService.getScriptProperties().setProperty('ADMINS', JSON.stringify(list));
+}
+
+function aAdminListAdmins(req) {
+  requireOwner_(authAdmin_(req));
+  return { admins: readAdmins_().map(function (a) { return { id: a.id, name: a.name, createdAt: a.createdAt }; }) };
+}
+
+function aAdminAddAdmin(req) {
+  requireOwner_(authAdmin_(req));
+  var name = cleanText_(req.name, 40);
+  if (!name) throw err_('bad_request', 'Give the admin a name, like “Sarah”.');
+  var key = randomKey_(32);
+  var entry = { id: randomId_(8), name: name, hash: sha256Hex_(key), createdAt: Date.now() };
+  withLock_(function () {
+    var list = readAdmins_();
+    if (list.length >= 25) throw err_('bad_request', 'Too many admins. Remove one first.');
+    list.push(entry);
+    writeAdmins_(list);
+  });
+  return { admin: { id: entry.id, name: entry.name }, key: key };
+}
+
+function aAdminRemoveAdmin(req) {
+  requireOwner_(authAdmin_(req));
+  var id = str_(req.id, 20);
+  var removed = false;
+  withLock_(function () {
+    var list = readAdmins_().filter(function (a) { if (a.id === id) { removed = true; return false; } return true; });
+    writeAdmins_(list);
+  });
+  if (!removed) throw err_('not_found', 'Admin not found');
+  return {};
+}
+
+function requireOwner_(me) {
+  if (me.role !== 'owner') throw err_('forbidden', 'Only the studio owner can manage admins.');
+}
+
+/** Owners may act on any event; other admins only on events they created. */
+function requireEventAdmin_(me, eventId) {
+  if (me.role === 'owner') return;
+  var row = findEventRow_(eventId);
+  if (!row || String(row.row[9]) !== me.id) throw err_('forbidden', 'Only the studio owner or the admin who created this event can do that.');
 }
 
 function aAdminCreate(req) {
-  authAdmin_(req);
+  var me = authAdmin_(req);
   var settings = sanitizeSettings_(req.settings || {});
   if (!settings.name) throw err_('bad_request', 'Event name required');
   var id = randomId_(10);
@@ -517,25 +574,30 @@ function aAdminCreate(req) {
   var guests = ss.insertSheet('guests');
   guests.getRange(1, 1, 1, GUEST_COLS.length).setValues([GUEST_COLS]);
   withLock_(function () {
-    indexSheet_().appendRow([id, settings.name, Date.now(), folder.getId(), ss.getId(), sha256Hex_(hostKey), JSON.stringify(settings), '', false]);
+    indexSheet_().appendRow([id, settings.name, Date.now(), folder.getId(), ss.getId(), sha256Hex_(hostKey), JSON.stringify(settings), '', false, me.id]);
   });
   return { id: id, hostKey: hostKey };
 }
 
 function aAdminList(req) {
-  authAdmin_(req);
+  var me = authAdmin_(req);
+  var names = { owner: 'Owner' };
+  readAdmins_().forEach(function (a) { names[a.id] = a.name; });
   var rows = indexSheet_().getDataRange().getValues().slice(1);
   var events = rows.filter(function (r) { return r[8] !== true; }).slice(-LIMITS.MAX_EVENTS_LIST).map(function (r) {
     var s = parseJson_(r[6]);
-    return { id: r[0], name: r[1], createdAt: r[2], date: s.date || '', folderUrl: 'https://drive.google.com/drive/folders/' + r[3] };
+    var by = String(r[9] || 'owner');
+    return { id: r[0], name: r[1], createdAt: r[2], date: s.date || '', folderUrl: 'https://drive.google.com/drive/folders/' + r[3],
+      createdBy: names[by] || 'Removed admin', canManage: me.role === 'owner' || by === me.id };
   });
   return { events: events.reverse() };
 }
 
 /** Admin can mint a fresh host key for an event (e.g. if the host link was lost). */
 function aAdminHostLink(req) {
-  authAdmin_(req);
+  var me = authAdmin_(req);
   var ev = loadEvent_(req.e);
+  requireEventAdmin_(me, ev.id);
   var key = randomKey_(32);
   withLock_(function () {
     var row = findEventRow_(ev.id);
@@ -546,8 +608,9 @@ function aAdminHostLink(req) {
 }
 
 function aAdminDelete(req) {
-  authAdmin_(req);
+  var me = authAdmin_(req);
   var ev = loadEvent_(req.e);
+  requireEventAdmin_(me, ev.id);
   if (req.confirm !== ev.id) throw err_('bad_request', 'Confirmation does not match');
   DriveApp.getFolderById(ev.folderId).setTrashed(true);
   withLock_(function () {
@@ -560,13 +623,18 @@ function aAdminDelete(req) {
 
 // ---------------------------------------------------------------- auth
 
+/** Returns { id, name, role } for the owner key (from setup) or an added admin's key. */
 function authAdmin_(req) {
-  var hash = prop_('ADMIN_KEY_HASH');
+  var ownerHash = prop_('ADMIN_KEY_HASH');
   if (!rateOk_('badadmin', LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
-  if (!req.k || !hash || !safeEq_(sha256Hex_(String(req.k)), hash)) {
-    rateHit_('badadmin', 600);
-    throw err_('unauthorized', 'Invalid admin key');
+  var given = req.k ? sha256Hex_(String(req.k)) : '';
+  if (given && safeEq_(given, ownerHash)) return { id: 'owner', name: 'Owner', role: 'owner' };
+  var admins = readAdmins_();
+  for (var i = 0; i < admins.length; i++) {
+    if (given && safeEq_(given, admins[i].hash)) return { id: admins[i].id, name: admins[i].name, role: 'admin' };
   }
+  rateHit_('badadmin', 600);
+  throw err_('unauthorized', 'Invalid admin key');
 }
 
 function authHost_(req) {
