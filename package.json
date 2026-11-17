@@ -1,0 +1,13 @@
+{
+  "name": "photoshare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Zero-cost shared event camera: static site + Google Apps Script backend + optional Koinos archive",
+  "scripts": {
+    "test": "node test/backend.test.mjs && npm --prefix contract test",
+    "serve": "node test/server.mjs 8787",
+    "e2e": "python3 test/e2e.py"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "PhotoShare",
+  "short_name": "PhotoShare",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef1f4",
+  "theme_color": "#1d2433",
+  "icons": [{ "src": "assets/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,67 @@
+# Security
+
+PhotoShare is built for a hostile internet: anyone can find a guest link, and the backend is a public URL. This page explains the protections and how to report problems.
+
+## Secrets and who holds them
+
+| Secret | Holder | Grants | Stored as |
+|---|---|---|---|
+| Admin key | Studio owner | Create, delete and list events; reissue host links | SHA-256 in Script Properties |
+| Host key | Hosts (e.g. the couple, a planner) | One event: settings, moderation, guests, originals | SHA-256 in the index sheet |
+| Wall key | TV screens | View one event's wall even when guest browsing is off | Derived from the host key hash; rotating the host key rotates it |
+| Guest token | One phone | Upload and report in one event | SHA-256 in the event sheet |
+| Koinos keys | You, on your computer or in Kondor | Contract upgrade (contract key), event writes and mana (owner/payer) | **Never** in the site, backend or repo |
+
+- All keys are 192–256-bit random values. Comparisons are constant-time.
+- Host and wall keys travel in the URL **fragment** (`#k=…`), which browsers never send to servers or in `Referer` headers. The dashboard removes it from the address bar right after loading.
+- Every page sets `<meta name="referrer" content="no-referrer">`.
+- Failed admin, host and event-code attempts are rate-limited.
+
+## Backend (Apps Script) protections
+
+- **No path to the rest of your Drive.** Every Drive file ID in a request is looked up in that event's own media index before use, so a host key for event A can't read or delete files from event B or anything else in the Drive. This is covered by tests.
+- **Uploads are verified by content, not by what the client claims.** Photos must be JPEG (magic bytes) and videos MP4 or WebM; anything else is rejected. File names and MIME types are set by the server.
+- **Metadata stripping:** EXIF, GPS, XMP and comment segments are removed from every JPEG on the server, even if a modified client sends them.
+- **Size limits:** 8 MB photos, 20 MB videos, 400 KB previews, 30 MB request bodies.
+- **Abuse limits:** shot limits per guest are reserved under a lock (parallel uploads can't exceed the roll), with idempotent retries, per-guest and per-event upload rate limits, a guest cap that only counts guests who actually upload, an event-wide total cap, and limits on reports per guest.
+- **Formula injection:** text written to Google Sheets is cleaned (leading `= + - @` removed, control characters and `<>` stripped). Transaction IDs must match a hex pattern.
+- **No stack traces or internal IDs** are returned to clients. Public responses never include folder, sheet or host data.
+- Unknown actions are rejected via an explicit allowlist (including `__proto__`-style names).
+- Hidden, reported and pending photos are switched to **private** in Drive, so a previously seen link stops working.
+
+## Website protections
+
+- **Strict Content-Security-Policy** on every page: `script-src 'self'`, no inline scripts or styles, no third-party origins except Google Drive images and the Apps Script endpoint. The two Koinos pages (`archive.html`, `recover.html`) additionally allow `'unsafe-eval'` (koilib's protobuf code generation needs it) and `https://api.koinos.io`. The guest, host, admin, album and TV pages do not.
+- **No `innerHTML`.** All text is inserted with `textContent` through a single helper, and URLs are filtered to `http(s)`, `blob:` and image `data:` schemes.
+- **Frame-busting** on every page (GitHub Pages can't send `X-Frame-Options`).
+- **Backend allowlist:** the site only talks to backend URLs listed in `config.js`. A link's `?s=` can only pick one of those, so a crafted link can't send guests' photos elsewhere.
+- **No CDNs:** third-party libraries are vendored and checked against their npm releases (`scripts/vendor.sh`, run in CI).
+- The service worker caches only the site's own files and never API or Drive responses.
+- Recovered keepsakes are rendered only after their bytes pass the same image magic-byte check the contract enforces.
+
+## Smart contract protections
+
+- Every write requires the owner's authority (`System.requireAuthority`, with the SDK's enhanced caller check).
+- Events are keyed by owner + event ID, so there's no squatting or overwriting another owner's event.
+- Strict input validation: event ID charset and length, 32-byte roots, keepsake MIME allowlist with magic bytes, size caps, and a per-event keepsake cap.
+- No token transfers, no `authorize` override, and no calls to other contracts.
+- Reproducible build, checked in CI. `deploy-contract.mjs` refuses a wasm that doesn't match the committed hash.
+
+## What you should do
+
+- Keep the **admin key** and **Koinos keys** in a password manager. Never paste them into chats, tickets or commits.
+- Share host links only with people who should moderate. Use **Access → Make a new host link** if one leaks.
+- Turn on **Approve photos before anyone sees them** for events where an inappropriate photo on the wall would be a problem. Automatic image classification isn't included (it would need a large model download on every guest's phone), so human approval is the reliable control.
+- Turn on 2-step verification for the Google account that owns the backend.
+- When updating the backend, read the diff to `backend/Code.gs` before pasting it into Apps Script.
+
+## Known limitations
+
+- Photos visible in the album are "anyone with the link" files in Drive. The IDs are long and unguessable, but anyone a guest forwards a photo link to can see that photo, as with any shared album.
+- A determined guest can clear their browser and rejoin to get a fresh roll. The guest cap and the event-wide total cap bound the impact.
+- Guest reports hide a photo immediately (by design, as on PartyCam), so a malicious guest could hide good photos, up to the report limit. Hosts can restore them in one click and turn reporting off.
+- GitHub Actions in workflows are pinned to major version tags of GitHub's own `actions/*`. Pin to commit SHAs if your threat model requires it.
+
+## Reporting a vulnerability
+
+Open a private security advisory on this repository (Security → Advisories → Report a vulnerability). Please don't open a public issue for security problems.

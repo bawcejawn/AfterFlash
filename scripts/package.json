@@ -1,0 +1,17 @@
+{
+  "name": "photoshare-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Command-line tools: deploy the Koinos contract, archive an album unattended, recover keepsakes",
+  "scripts": {
+    "deploy-contract": "node deploy-contract.mjs",
+    "archive": "node archive-album.mjs",
+    "recover": "node recover.mjs"
+  },
+  "dependencies": {
+    "koilib": "10.0.0",
+    "sharp": "0.34.5"
+  }
+}

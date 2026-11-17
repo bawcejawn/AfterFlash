@@ -1,0 +1,16 @@
+{
+  "name": "photoshare-contract",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "PhotoShare Koinos smart contract: event registry, album fingerprints and on-chain keepsakes",
+  "scripts": {
+    "build": "./build.sh",
+    "test": "./build.sh --test && node test/contract.test.mjs && node test/koilib.test.mjs"
+  },
+  "devDependencies": {
+    "@koinos/mock-vm": "1.3.0",
+    "@koinos/sdk-as": "1.5.1",
+    "koilib": "10.0.0"
+  }
+}
