@@ -17,7 +17,9 @@ async function boot() {
   eventId = q.get('e');
   if (!isEventId(eventId)) return fail('Missing event code.');
   key = f.get('k') || store.get(keyName(), sessionStorage) || store.get(keyName());
-  if (f.get('k')) { store.set(keyName(), key, sessionStorage); history.replaceState(null, '', location.pathname + location.search); }
+  const adminKey = store.get(`ps:ak:${studio}`, sessionStorage);
+  if (q.get('admin') === '1' && adminKey) key = 'admin:' + adminKey;
+  if (f.get('k') && !key.startsWith('admin:')) { store.set(keyName(), key, sessionStorage); history.replaceState(null, '', location.pathname + location.search); }
   if (!key) return fail('Open this page from the Keepsakes tab of the host dashboard.');
   if (!chainEnabled()) return fail('Koinos is not configured. Add the contract address to config.js (see docs/KOINOS.md).');
   try {

@@ -534,6 +534,18 @@ t('guestbook: text + voice, validated, moderated, respects reveal', () => {
   assert.equal(env.post({ a: 'guestbookList', e: ev.id }).notes.length, 0);
 });
 
+t('admins can open dashboards for events they manage with their own key', () => {
+  const env = boot();
+  const sarah = env.post({ a: 'adminAddAdmin', k: env.adminKey, name: 'Sarah' }).key;
+  const hers = env.post({ a: 'adminCreate', k: sarah, settings: { name: 'Hers' } });
+  const owners = makeEvent(env);
+  assert.equal(env.post({ a: 'hostGet', e: hers.id, k: 'admin:' + sarah }).ok, true);
+  assert.equal(env.post({ a: 'hostGet', e: owners.id, k: 'admin:' + sarah }).error, 'forbidden');
+  assert.equal(env.post({ a: 'hostGet', e: owners.id, k: 'admin:' + env.adminKey }).ok, true);
+  assert.equal(env.post({ a: 'hostGet', e: owners.id, k: 'admin:wrong' }).error, 'unauthorized');
+  assert.equal(env.post({ a: 'hostList', e: hers.id, k: 'admin:' + sarah }).ok, true);
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }
