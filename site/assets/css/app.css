@@ -299,3 +299,10 @@ body.tv.cursor { cursor: default; }
 /* spacing between stacked panels on tool pages */
 .panel + .panel, .panel + section, section + .panel { margin-top: 1rem; }
 @media (max-width: 720px) { table.list { display: block; overflow-x: auto; } }
+
+/* video on the TV wall sits above the poster and fades in once it is actually playing */
+.tv-stage video.tv-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.8s ease; background: transparent; }
+.tv-stage video.tv-video.on { opacity: 1; }
+.lightbox video { max-width: 100%; max-height: 100%; background: #000; }
+img.img-failed { min-height: 120px; background: var(--paper-2); }
+.event-code { font: 800 var(--step-3)/1 var(--display); letter-spacing: 0.06em; }

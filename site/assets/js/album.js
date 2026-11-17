@@ -1,5 +1,5 @@
 // Shared album: masonry grid, lightbox, download, report.
-import { $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown, thumbUrl, downloadUrl, previewUrl, link, frameGuard, registerSW } from './util.js';
+import { $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown, downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, serial, base64ToBytes } from './util.js';
 import { api } from './api.js';
 
 frameGuard();
@@ -79,12 +79,27 @@ function render(r) {
     body.push(h('div', { class: 'empty' }, h('p', null, 'No photos yet. Be the first!')));
   } else {
     body.push(h('div', { class: 'masonry' }, items.map((it, i) => {
-      const img = h('img', { src: thumbUrl(it.k === 'v' && it.t ? it.t : it.i, 600), alt: it.g ? `Photo by ${it.g}` : 'Guest photo', loading: 'lazy', decoding: 'async' });
+      const img = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo', loading: 'lazy', decoding: 'async' });
+      loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 600, { proxy: () => proxyThumb(it.i) });
       if (it.w && it.h) { img.width = 600; img.height = Math.round((600 * it.h) / it.w); }
       return h('button', { class: 'tile', onclick: () => openLb(i), 'aria-label': 'Open photo' }, img, it.k === 'v' ? h('span', { class: 'vid' }, 'Video') : null);
     })));
   }
   clear(root).append(head, ...body);
+}
+
+// Fallback when the viewer's browser can't load Google's image URLs: fetch through the backend.
+const proxyQueue = serial();
+const proxied = new Map();
+function proxyThumb(id) {
+  if (proxied.has(id)) return Promise.resolve(proxied.get(id));
+  return proxyQueue(async () => {
+    const r = await api(studio, 'thumb', { e: eventId, id, pin: pin || undefined }, { retries: 1 });
+    if (r.mime !== 'image/jpeg') return '';
+    const url = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+    proxied.set(id, url);
+    return url;
+  });
 }
 
 function openLb(i) {
@@ -118,9 +133,20 @@ function openLb(i) {
 function showLb() {
   const it = items[lbIndex];
   if (!it) return closeLb();
-  clear(lb.stage).append(it.k === 'v'
-    ? h('iframe', { src: previewUrl(it.i), title: 'Video', allow: 'autoplay; fullscreen', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin' })
-    : h('img', { src: thumbUrl(it.i, 2000), alt: it.g ? `Photo by ${it.g}` : 'Guest photo' }));
+  let media;
+  if (it.k === 'v') {
+    media = h('video', { controls: true, playsinline: true, preload: 'metadata', src: videoUrl(it.i) });
+    if (it.t) loadDriveImage(new Image(), it.t, 1280, { onReady: (im) => { media.poster = im.src; } });
+    // Some browsers can't stream straight from Drive; fall back to Google's own player.
+    media.addEventListener('error', () => {
+      if (!media.isConnected) return;
+      media.replaceWith(h('iframe', { src: previewUrl(it.i), title: 'Video', allow: 'autoplay; fullscreen', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin allow-popups' }));
+    });
+  } else {
+    media = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo' });
+    loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
+  }
+  clear(lb.stage).append(media);
   lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', ');
   lb.dl.setAttribute('href', downloadUrl(it.i));
   lb.report.hidden = !(auth && ev.allowReports);

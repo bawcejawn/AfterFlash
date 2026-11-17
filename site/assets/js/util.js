@@ -104,6 +104,51 @@ export function thumbUrl(id, w = 800) {
   if (!isDriveId(id)) return '';
   return `${config.driveBase}/thumbnail?id=${encodeURIComponent(id)}&sz=w${w | 0}`;
 }
+/** Google's image CDN form of a public Drive file — loads without a Google sign-in. */
+export function cdnUrl(id, w = 800) {
+  if (!isDriveId(id)) return '';
+  return `${config.imageBase || 'https://lh3.googleusercontent.com'}/d/${encodeURIComponent(id)}=w${w | 0}`;
+}
+
+/**
+ * Point an <img> at a Drive photo, trying the image CDN, then Drive's thumbnail URL, then an
+ * optional proxy (async () => blobUrl). Treats tiny placeholder icons as failures.
+ * Calls onReady() once a real image is showing.
+ */
+export function loadDriveImage(img, id, w, { proxy, onReady } = {}) {
+  const sources = [cdnUrl(id, w), thumbUrl(id, w)].filter(Boolean);
+  let i = 0;
+  let usedProxy = false;
+  const next = async () => {
+    if (i < sources.length) { img.src = sources[i++]; return; }
+    if (proxy && !usedProxy) {
+      usedProxy = true;
+      try { const url = await proxy(); if (url) { img.src = url; return; } } catch { /* fall through */ }
+    }
+    img.classList.add('img-failed');
+  };
+  img.onerror = () => next();
+  img.onload = () => {
+    // Google sometimes answers with a small generic icon instead of the photo.
+    if (img.naturalWidth > 0 && img.naturalWidth < 64 && Math.max(w, 64) > 64 && !img.src.startsWith('blob:')) { next(); return; }
+    img.classList.remove('img-failed');
+    if (onReady) onReady(img);
+  };
+  next();
+  return img;
+}
+
+/** Run async jobs one at a time (used for proxy fallbacks so a big album doesn't flood the backend). */
+export function serial() {
+  let chain = Promise.resolve();
+  return (fn) => { const p = chain.then(fn, fn); chain = p.catch(() => {}); return p; };
+}
+
+export function videoUrl(id) {
+  if (!isDriveId(id)) return '';
+  return `${config.driveBase}/uc?export=download&id=${encodeURIComponent(id)}`;
+}
+
 export function downloadUrl(id) {
   if (!isDriveId(id)) return '';
   return `${config.driveBase}/uc?export=download&id=${encodeURIComponent(id)}`;

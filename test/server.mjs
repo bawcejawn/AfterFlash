@@ -15,7 +15,7 @@ fs.writeFileSync('/tmp/photoshare-admin-key', adminKey);
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain' };
 
-const testConfig = `export default { appName: 'PhotoShare', backends: { main: '/mock-api', alt: '/mock-api' }, koinos: { rpc: 'https://api.koinos.io', contract: '1ESUaEUU6SEvsTfCSvfPZ7AHVfpFhdGubx', explorer: 'https://koinosblocks.com' }, driveBase: '/mock-drive' };\n`;
+const testConfig = `export default { appName: 'PhotoShare', backends: { main: '/mock-api', alt: '/mock-api' }, koinos: { rpc: 'https://api.koinos.io', contract: '1ESUaEUU6SEvsTfCSvfPZ7AHVfpFhdGubx', explorer: 'https://koinosblocks.com' }, driveBase: '/mock-drive', imageBase: '/mock-lh3' };\n`;
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -33,6 +33,13 @@ http.createServer((req, res) => {
   if (url.pathname === '/mock-api' && req.method === 'GET') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(gas.ctx.doGet().body);
+    return;
+  }
+  if (url.pathname.startsWith('/mock-lh3/')) {
+    // Google sometimes answers with a small generic icon instead of the photo: the site must fall back.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGNgGAWjYBSMglEwCkYBAAAB4AABsW4UNAAAAABJRU5ErkJggg==', 'base64');
+    res.writeHead(200, { 'content-type': 'image/png' });
+    res.end(png);
     return;
   }
   if (url.pathname.startsWith('/mock-drive/')) {

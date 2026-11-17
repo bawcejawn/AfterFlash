@@ -1,5 +1,5 @@
 // TV / projector photo wall. New photos jump the queue; otherwise the wall replays older ones.
-import { $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, thumbUrl, link, qrSvg } from './util.js';
+import { $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl, base64ToBytes } from './util.js';
 import { api } from './api.js';
 
 const root = $('#app');
@@ -29,7 +29,6 @@ async function boot() {
   build();
   await poll();
   setInterval(poll, POLL_MS);
-  setInterval(advance, SHOW_MS);
   setInterval(chrome, 15000);
 }
 
@@ -104,9 +103,28 @@ function showCenter(title, text) {
   current = null;
 }
 
+const proxyQueue = serial();
+const proxied = new Map();
+function proxyThumb(id) {
+  if (proxied.has(id)) return Promise.resolve(proxied.get(id));
+  return proxyQueue(async () => {
+    const r = await api(studio, 'thumb', { e: eventId, id, wk: wk || undefined }, { retries: 1 });
+    const url = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+    proxied.set(id, url);
+    return url;
+  });
+}
+const posterOf = (it) => (it.k === 'v' && it.t ? it.t : it.i);
+
+let nextT = null;
+function scheduleNext(ms) {
+  clearTimeout(nextT);
+  nextT = setTimeout(() => { advance(); }, ms);
+}
+
 function renderThumbs() {
   const recent = [...known.values()].sort((a, b) => b.c - a.c).slice(0, 9);
-  clear(els.thumbs).append(...recent.map((it) => h('img', { src: thumbUrl(it.k === 'v' && it.t ? it.t : it.i, 300), alt: '' })));
+  clear(els.thumbs).append(...recent.map((it) => loadDriveImage(h('img', { alt: '' }), posterOf(it), 300, { proxy: () => proxyThumb(it.i) })));
 }
 
 function advance() {
@@ -120,12 +138,32 @@ function advance() {
   const it = known.get(id);
   if (!it) return;
   current = id;
+  stopVideo();
   const img = imgs[which = 1 - which];
   const other = imgs[1 - which];
-  img.onload = () => { img.classList.add('on'); other.classList.remove('on'); };
-  img.src = thumbUrl(it.k === 'v' && it.t ? it.t : it.i, 1920);
+  loadDriveImage(img, posterOf(it), 1920, {
+    proxy: () => proxyThumb(it.i),
+    onReady: () => { img.classList.add('on'); other.classList.remove('on'); },
+  });
   els.who.textContent = it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || '';
   els.who.hidden = !els.who.textContent;
+  if (it.k === 'v') playVideo(it); else scheduleNext(SHOW_MS);
+}
+
+// Videos play muted on the wall (poster first, then the clip), then the wall moves on.
+let vid = null;
+function stopVideo() { if (vid) { vid.pause(); vid.remove(); vid = null; } }
+function playVideo(it) {
+  const v = h('video', { muted: true, playsinline: true, autoplay: true, preload: 'auto', class: 'tv-video', src: videoUrl(it.i) });
+  v.muted = true;
+  vid = v;
+  const done = () => { if (vid === v) scheduleNext(1500); };
+  v.addEventListener('playing', () => v.classList.add('on'));
+  v.addEventListener('ended', done);
+  v.addEventListener('error', () => { if (vid === v) { v.remove(); scheduleNext(SHOW_MS); } });
+  els.stage.insertBefore(v, els.who);
+  // safety net if the clip stalls or is long
+  scheduleNext(Math.min(75000, Math.max(SHOW_MS, ((Number(it.d) || 15) + 4) * 1000)));
 }
 
 function chrome() {

@@ -320,7 +320,8 @@ function pickMime() {
 }
 
 async function startRecording() {
-  if (shotsLeft() <= 0 || !stream) return;
+  if (shotsLeft() <= 0) return;
+  if (!stream || !els.video.videoWidth) { toast('Camera is still starting…'); return; }
   const mime = pickMime();
   if (!mime) { toast('Video recording isn’t supported in this browser.', 'error'); return; }
   const v = els.video;

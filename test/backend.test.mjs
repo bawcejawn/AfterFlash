@@ -344,6 +344,65 @@ t('oversized body rejected; malformed JSON rejected', () => {
   assert.equal(r2.error, 'bad_request');
 });
 
+t('only guests who have taken a photo can report', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const up = upload(env, ev.id, joinGuest(env, ev.id));
+  const lurker = joinGuest(env, ev.id);
+  assert.equal(env.post({ a: 'report', e: ev.id, g: lurker.g, t: lurker.t, id: up.id }).error, 'not_allowed');
+  assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 1);
+});
+
+t('per-event storage cap stops someone filling the Drive', () => {
+  const env = boot();
+  const ev = makeEvent(env, { maxStorageMB: 100 });
+  const g = joinGuest(env, ev.id);
+  assert.equal(upload(env, ev.id, g).ok, true);
+  // pretend 100 MB is already used
+  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'PhotoShare ' + ev.id).getSheetByName('media');
+  sh.rows[1][6] = 100 * 1024 * 1024;
+  assert.equal(upload(env, ev.id, g).error, 'full');
+});
+
+t('join spam is capped', () => {
+  const env = boot();
+  const ev = makeEvent(env, { maxGuests: 1 });
+  let last;
+  for (let i = 0; i < 60; i++) last = env.post({ a: 'join', e: ev.id });
+  assert.equal(last.error, 'full');
+});
+
+t('thumb proxy only serves visible, revealed photos', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = joinGuest(env, ev.id);
+  const up = upload(env, ev.id, g);
+  const ok = env.post({ a: 'thumb', e: ev.id, id: up.id });
+  assert.equal(ok.ok, true); assert.ok(ok.data.length > 10);
+  env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'hide', ids: [up.id] });
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id }).error, 'not_found');
+  env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'show', ids: [up.id] });
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { reveal: 'after', revealAt: '2999-01-01T00:00:00Z' } });
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id }).error, 'not_found');
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { reveal: 'live', guestGallery: false } });
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id }).error, 'not_found');
+  const wk = env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).event.wallKey;
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id, wk }).ok, true);
+  const other = makeEvent(env, { name: 'B' });
+  assert.equal(env.post({ a: 'thumb', e: other.id, id: up.id }).error, 'not_found');
+});
+
+t('settings updates ignore unknown keys and __proto__', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const body = '{"a":"hostUpdate","e":"' + ev.id + '","k":"' + ev.hostKey + '","settings":{"__proto__":{"paused":true},"evil":1,"name":"Ok"}}';
+  const r = JSON.parse(env.gas.ctx.doPost({ postData: { contents: body } }).body);
+  assert.equal(r.ok, true);
+  assert.equal(r.event.settings.paused, false);
+  assert.equal(r.event.settings.evil, undefined);
+  assert.equal(r.event.settings.name, 'Ok');
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }
