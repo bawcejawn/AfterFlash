@@ -11,7 +11,8 @@ export class ApiError extends Error {
 }
 
 export function backendUrl(studio) {
-  const url = (config.backends || {})[studio];
+  // Chrome inserts /u/<n>/ when several Google accounts are signed in; the clean URL is what works for guests.
+  const url = String((config.backends || {})[studio] || '').trim().replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
   if (!url || url.includes('REPLACE_WITH')) throw new ApiError('not_configured', 'This site is not connected to a backend yet. Add your Apps Script URL to config.js.');
   const devOk = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /^\/[a-z0-9/_-]+$/i.test(url);
   if (!PROD_URL.test(url) && !devOk) throw new ApiError('not_configured', 'Backend URL in config.js is not a valid Apps Script /exec URL.');
