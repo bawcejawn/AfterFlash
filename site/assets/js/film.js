@@ -96,3 +96,64 @@ export function drawScaled(source, sw, sh, maxEdge) {
 export function canvasToBlob(canvas, type = 'image/jpeg', quality = 0.88) {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), type, quality));
 }
+
+/**
+ * "Enhance": automatic, natural touch-up (non-destructive — applied to a copy).
+ * Per-channel levels stretch from robust percentiles (fixes dull/cast photos), a gentle
+ * S-curve and a small saturation lift. Pure pixel math, runs on the viewer's device.
+ */
+export function enhance(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width: w, height: h } = canvas;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  const step = Math.max(1, Math.floor((w * h) / 250000)) * 4;
+  let n = 0;
+  for (let i = 0; i < d.length; i += step) { hist[0][d[i]]++; hist[1][d[i + 1]]++; hist[2][d[i + 2]]++; n++; }
+  const pct = (hst, p) => { let acc = 0; const target = n * p; for (let v = 0; v < 256; v++) { acc += hst[v]; if (acc >= target) return v; } return 255; };
+  const luts = hist.map((hst) => {
+    let lo = pct(hst, 0.005), hi = pct(hst, 0.995);
+    if (hi - lo < 40) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 20); hi = Math.min(255, mid + 20); }
+    const scale = Math.min(1.6, 255 / Math.max(1, hi - lo));
+    const lut = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) {
+      let x = ((v - lo) * scale) / 255;
+      x = Math.min(1, Math.max(0, x));
+      x = x + 0.08 * Math.sin(2 * Math.PI * (x - 0.5)) * (x * (1 - x) * 4) * 0.5; // gentle S-curve
+      lut[v] = Math.round(x * 255);
+    }
+    return lut;
+  });
+  const sat = 1.1;
+  for (let i = 0; i < d.length; i += 4) {
+    let r = luts[0][d[i]], g = luts[1][d[i + 1]], b = luts[2][d[i + 2]];
+    const l = 0.299 * r + 0.587 * g + 0.114 * b;
+    d[i] = l + (r - l) * sat; d[i + 1] = l + (g - l) * sat; d[i + 2] = l + (b - l) * sat;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/**
+ * Sharpness score: variance of the Laplacian on a small greyscale copy.
+ * Low values mean a badly blurred photo. Measured before film looks/grain are applied.
+ */
+export function blurScore(source, sw, sh) {
+  const c = drawScaled(source, sw, sh, 512);
+  const { width: w, height: h } = c;
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const g = new Float32Array(w * h);
+  for (let i = 0, p = 0; p < g.length; i += 4, p++) g[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  let sum = 0, sum2 = 0, cnt = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const p = y * w + x;
+      const lap = g[p - w] + g[p + w] + g[p - 1] + g[p + 1] - 4 * g[p];
+      sum += lap; sum2 += lap * lap; cnt++;
+    }
+  }
+  if (!cnt) return 0;
+  const mean = sum / cnt;
+  return Math.round(sum2 / cnt - mean * mean);
+}

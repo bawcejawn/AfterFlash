@@ -106,6 +106,11 @@ with sync_playwright() as p:
     cam.click(".shutter")
     expect(cam.locator(".cam-msg")).to_contain_text("That’s a wrap", timeout=30000)
     cam.screenshot(path=f"{SHOTS}/06-cam-done.png")
+    # guestbook from the camera page
+    cam.click("text=Sign the guestbook")
+    cam.fill(".modal textarea", "Congratulations you two!")
+    cam.click(".modal button:has-text('Send')")
+    expect(cam.locator(".toast").last).to_contain_text("guestbook", timeout=15000)
 
     # reload keeps identity and shot count
     cam.reload()
@@ -120,10 +125,21 @@ with sync_playwright() as p:
     album.screenshot(path=f"{SHOTS}/07-album.png", full_page=True)
     album.locator(".tile").first.click()
     expect(album.locator(".lightbox img")).to_be_visible()
+    # enhance toggle: switches to a locally generated copy
+    album.click(".lightbox button:has-text('Enhance')")
+    expect(album.locator(".lightbox button:has-text('Enhance: on')")).to_be_visible()
+    wait_js(album, "(document.querySelector('.lightbox img')||{}).src?.startsWith('blob:')", 15000)
+    album.screenshot(path=f"{SHOTS}/08b-enhanced.png")
+    album.click(".lightbox button:has-text('Enhance: on')")
     album.screenshot(path=f"{SHOTS}/08-lightbox.png")
     album.once("dialog", lambda d: d.accept())
     album.click("text=Report")
     expect(album.locator(".tile")).to_have_count(3, timeout=15000)
+
+    album.goto(f"{BASE}/album.html?e={event_id}&view=mine")
+    expect(album.locator(".tile")).to_have_count(4, timeout=15000)
+    album.click("role=tab[name='Guestbook']")
+    expect(album.locator(".note")).to_contain_text("Congratulations", timeout=15000)
 
     # ---- host moderation sees the report and restores it
     host.click("role=tab[name=/Photos/]")
@@ -133,6 +149,16 @@ with sync_playwright() as p:
     host.locator(".mod-item button.pick").first.click()
     host.click("button:has-text('Show')")
     expect(host.locator(".toast")).to_contain_text("Shown")
+    # favorites
+    host.click("text=/^All \\(/")
+    host.locator(".mod-item .heart").first.click()
+    expect(host.locator(".toast").last).to_contain_text("Added to favorites")
+    expect(host.locator("text=/Download favorites \\(1\\)/")).to_be_visible()
+    album.goto(f"{BASE}/album.html?e={event_id}")
+    expect(album.locator(".fav-badge")).to_have_count(1, timeout=15000)
+    # guestbook tab for host
+    host.click("role=tab[name='Guestbook']")
+    expect(host.locator(".note")).to_contain_text("Congratulations")
 
     # ---- settings save (develop later) → album hides photos
     host.click("role=tab[name='Settings']")

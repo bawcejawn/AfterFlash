@@ -29,6 +29,7 @@ async function boot() {
   build();
   await poll();
   setInterval(poll, POLL_MS);
+  if (ev.guestbook) { loadNotes(); setInterval(loadNotes, 60000); }
   setInterval(chrome, 15000);
 }
 
@@ -127,13 +128,23 @@ function renderThumbs() {
   clear(els.thumbs).append(...recent.map((it) => loadDriveImage(h('img', { alt: '' }), posterOf(it), 300, { proxy: () => proxyThumb(it.i) })));
 }
 
+let slideCount = 0;
 function advance() {
   if (!known.size) return;
+  slideCount++;
+  // Every 6th slide, show a guestbook note if there are any.
+  if (!fresh.length && notes.length && slideCount % 6 === 0) { showNote(); return; }
+  hideNote();
   let id = fresh.shift();
   if (!id) {
-    const all = [...known.keys()];
-    id = all[Math.floor(Math.random() * all.length)];
-    if (all.length > 1 && id === current) id = all[(all.indexOf(id) + 1) % all.length];
+    // Hosts' favorites come round three times as often.
+    const pool = [];
+    for (const it of known.values()) { pool.push(it.i); if (it.f) pool.push(it.i, it.i); }
+    id = pool[Math.floor(Math.random() * pool.length)];
+    if (known.size > 1 && id === current) {
+      const keys = [...known.keys()];
+      id = keys[(keys.indexOf(id) + 1) % keys.length];
+    }
   }
   const it = known.get(id);
   if (!it) return;
@@ -149,6 +160,24 @@ function advance() {
   els.who.hidden = !els.who.textContent;
   if (it.k === 'v') playVideo(it); else scheduleNext(SHOW_MS);
 }
+
+// ---- guestbook notes on the wall (text only; voice notes stay in the album)
+let notes = [];
+async function loadNotes() {
+  try {
+    const r = await api(studio, 'guestbookList', { e: eventId, wk: wk || undefined }, { retries: 0 });
+    notes = (r.notes || []).filter((n) => n.text);
+  } catch { /* keep previous */ }
+}
+let noteEl = null;
+function showNote() {
+  const n = notes[Math.floor(Math.random() * notes.length)];
+  hideNote();
+  noteEl = h('div', { class: 'tv-note' }, h('blockquote', null, n.text), h('p', null, `${n.g}, in the guestbook`));
+  els.stage.append(noteEl);
+  scheduleNext(SHOW_MS);
+}
+function hideNote() { if (noteEl) { noteEl.remove(); noteEl = null; } }
 
 // Videos play muted on the wall (poster first, then the clip), then the wall moves on.
 let vid = null;

@@ -38,11 +38,17 @@ var LIMITS = {
   BAD_PIN_PER_EVENT_PER_10MIN: 40,
   BAD_ADMIN_PER_10MIN: 20,
   REPORTS_PER_GUEST: 15,
+  NOTES_PER_GUEST: 5,
+  NOTE_TEXT: 500,
+  AUDIO_BYTES: 3 * 1024 * 1024,
+  PHOTOS_PER_EVENT_PER_MIN: 120,
+  BLUR_THRESHOLD: 40,
   THUMBS_PER_EVENT_PER_MIN: 900
 };
 
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
-  'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags'];
+  'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav'];
+var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
 var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
 
@@ -85,6 +91,13 @@ var ACTIONS = {
   list: aList,
   report: aReport,
   thumb: aThumb,
+  photo: aPhoto,
+  mine: aMine,
+  guestbookAdd: aGuestbookAdd,
+  guestbookList: aGuestbookList,
+  hostFavorite: aHostFavorite,
+  hostGuestbook: aHostGuestbook,
+  hostGuestbookModerate: aHostGuestbookModerate,
   me: aMe,
   // host
   hostGet: aHostGet,
@@ -260,15 +273,18 @@ function aUpload(req) {
   try {
     // A sharing failure must not lose the photo: it is saved and still viewable through the
     // site's fallback; the problem is logged for the admin instead.
-    var flags = '';
-    if (status === 'visible' && !share_(file, thumb, true, ev.id)) flags = 'share-failed';
+    var flagList = [];
+    var blur = Number(req.blur);
+    if (kind === 'photo' && isFinite(blur) && blur >= 0 && blur < LIMITS.BLUR_THRESHOLD) flagList.push('blurry');
+    if (status === 'visible' && !share_(file, thumb, true, ev.id)) flagList.push('share-failed');
+    var flags = flagList.join(',');
     var sha = sha256Hex_(bytes);
     var w = int_(req.w, 0, 20000, 0), h = int_(req.h, 0, 20000, 0), dur = int_(req.dur, 0, 600, 0);
     withLock_(function () {
       var sh = mediaSheet_(ev);
       var seq = sh.getLastRow();
       sh.appendRow([seq, file.getId(), thumb ? thumb.getId() : '', g.row.guestId, kind, mime, bytes.length, sha,
-        w, h, dur, now, status, 0, clientId, '', '', flags]);
+        w, h, dur, now, status, 0, clientId, '', '', flags, false]);
     });
   } catch (x) {
     // Never leave orphan files in Drive: undo the upload so the phone's retry starts clean.
@@ -299,29 +315,192 @@ function aList(req) {
   }
   var labels = guestLabels_(ev);
   base.items = visible.map(function (m) {
-    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0 };
+    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0, f: m.fav === true ? 1 : 0 };
   });
   return base;
 }
 
 /**
- * Preview image bytes for a photo that is publicly visible in this album. Used only as a
- * fallback when a viewer's browser can't load Google's image URLs directly.
+ * Who may read a media item through the API (used when Google's own URLs can't be used):
+ * anyone, if it is visible and revealed in a browsable album (or the TV wall key is given);
+ * and the guest who took it, always (powers "My photos", even before the reveal).
  */
-function aThumb(req) {
-  var ev = loadEvent_(req.e);
+function mediaReadable_(ev, req, m) {
+  if (!m || m.row.status === 'deleted') return false;
   var s = ev.settings;
   var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
+  if (req.g && req.t) {
+    var g = findGuest_(ev, str_(req.g, 40));
+    if (g && safeEq_(g.row.tokenHash, sha256Hex_(String(req.t))) && String(m.row.guestId) === g.row.guestId) return true;
+  }
+  if (m.row.status !== 'visible' || !isRevealed_(s) || (!s.guestGallery && !isWall)) return false;
   if (!isWall) checkPin_(ev, req.pin);
-  if (!isRevealed_(s) || (!s.guestGallery && !isWall)) throw err_('not_found', 'Not found');
+  return true;
+}
+
+/** Preview image (~1024 px JPEG) for a photo or video the caller may see. */
+function aThumb(req) {
+  var ev = loadEvent_(req.e);
   if (!rateOk_('thumb:' + ev.id, LIMITS.THUMBS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
   var m = findMedia_(ev, str_(req.id, 100));
-  if (!m || m.row.status !== 'visible') throw err_('not_found', 'Not found');
+  if (!mediaReadable_(ev, req, m)) throw err_('not_found', 'Not found');
   var blob = DriveApp.getFileById(m.row.thumbId || m.row.id).getBlob();
   if (blob.getContentType() !== 'image/jpeg') throw err_('not_found', 'Not found');
   var bytes = blob.getBytes();
   if (bytes.length > LIMITS.THUMB_BYTES) throw err_('too_large', 'Preview too large');
   return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
+}
+
+/** Full-resolution photo (JPEG) for enhance/download, same access rules as aThumb. */
+function aPhoto(req) {
+  var ev = loadEvent_(req.e);
+  if (!rateOk_('photo:' + ev.id, LIMITS.PHOTOS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
+  var m = findMedia_(ev, str_(req.id, 100));
+  if (!mediaReadable_(ev, req, m) || m.row.kind !== 'photo') throw err_('not_found', 'Not found');
+  var blob = DriveApp.getFileById(m.row.id).getBlob();
+  var bytes = blob.getBytes();
+  if (bytes.length > LIMITS.PHOTO_BYTES || sniffMime_(bytes) !== 'image/jpeg') throw err_('not_found', 'Not found');
+  return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
+}
+
+/** A guest's own photos and videos, whatever the reveal setting. */
+function aMine(req) {
+  var ev = loadEvent_(req.e);
+  var g = authGuest_(ev, req);
+  var items = readMedia_(ev).filter(function (m) { return String(m.guestId) === g.row.guestId && m.status !== 'deleted'; })
+    .map(function (m) { return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', c: m.createdAt, w: m.w, h: m.h, s: m.status }; });
+  return { items: items, guest: guestView_(ev, g.row) };
+}
+
+// ---------------------------------------------------------------- guestbook
+
+function notesSheet_(ev) {
+  var ss = SpreadsheetApp.openById(ev.sheetId);
+  var sh = ss.getSheetByName('notes');
+  if (!sh) {
+    sh = ss.insertSheet('notes');
+    sh.getRange(1, 1, 1, NOTE_COLS.length).setValues([NOTE_COLS]);
+  }
+  return sh;
+}
+
+function aGuestbookAdd(req) {
+  var ev = loadEvent_(req.e);
+  var s = ev.settings;
+  if (!s.guestbook) throw err_('disabled', 'The guestbook is turned off.');
+  var g = authGuest_(ev, req);
+  if (g.row.blocked) throw err_('blocked', 'Posting is turned off for this guest.');
+  if (s.closesAt && Date.now() > Date.parse(s.closesAt)) throw err_('closed', 'This album is closed.');
+  var text = cleanText_(req.text, LIMITS.NOTE_TEXT);
+  var audio = null, mime = '';
+  if (req.audio) {
+    audio = decodeB64_(req.audio);
+    if (audio.length > LIMITS.AUDIO_BYTES) throw err_('too_large', 'That voice message is too long.');
+    var sniff = sniffMime_(audio);
+    if (sniff === 'video/webm') mime = 'audio/webm';
+    else if (sniff === 'video/mp4' || isM4a_(audio)) mime = 'audio/mp4';
+    else throw err_('bad_type', 'Unsupported audio format.');
+  }
+  if (!text && !audio) throw err_('bad_request', 'Write a note or record a message.');
+  if (!rateOk_('gb:' + ev.id + ':' + g.row.guestId, 3, 60)) throw err_('rate_limited', 'Slow down a little.');
+  var status = s.approval ? 'pending' : 'visible';
+  var id = randomId_(12);
+  var audioId = '';
+  withLock_(function () {
+    var sh = notesSheet_(ev);
+    var rows = sh.getDataRange().getValues();
+    var mineCount = 0;
+    for (var r = 1; r < rows.length; r++) if (String(rows[r][1]) === g.row.guestId && rows[r][6] !== 'deleted') mineCount++;
+    if (mineCount >= LIMITS.NOTES_PER_GUEST) throw err_('full', 'You’ve left the maximum number of messages.');
+    if (audio) {
+      var f = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + (mime === 'audio/webm' ? '.webm' : '.m4a')));
+      if (status === 'visible') share_(f, null, true, ev.id);
+      audioId = f.getId();
+    }
+    sh.appendRow([id, g.row.guestId, g.row.label, text, audioId, Date.now(), status]);
+  });
+  bumpVersion_(ev.id);
+  return { id: id, status: status };
+}
+
+function isM4a_(bytes) {
+  if (bytes.length < 12) return false;
+  var brand = String.fromCharCode(u8_(bytes[8]), u8_(bytes[9]), u8_(bytes[10]), u8_(bytes[11]));
+  return u8_(bytes[4]) === 0x66 && u8_(bytes[5]) === 0x74 && u8_(bytes[6]) === 0x79 && u8_(bytes[7]) === 0x70 && /^(M4A |M4B |mp41|mp42|isom|iso5|iso6)$/.test(brand);
+}
+
+function readNotes_(ev) {
+  return notesSheet_(ev).getDataRange().getValues().slice(1).map(function (r) {
+    return { id: String(r[0]), guestId: String(r[1]), label: r[2], text: r[3], audioId: r[4] || '', createdAt: r[5], status: r[6] };
+  });
+}
+
+function aGuestbookList(req) {
+  var ev = loadEvent_(req.e);
+  var s = ev.settings;
+  var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
+  if (!isWall) checkPin_(ev, req.pin);
+  if (!s.guestbook || !isRevealed_(s) || (!s.guestGallery && !isWall)) return { notes: [] };
+  return {
+    notes: readNotes_(ev).filter(function (n) { return n.status === 'visible'; }).map(function (n) {
+      return { id: n.id, g: n.label, text: n.text, a: n.audioId, c: n.createdAt };
+    })
+  };
+}
+
+function aHostGuestbook(req) {
+  var ev = authHost_(req);
+  return {
+    notes: readNotes_(ev).filter(function (n) { return n.status !== 'deleted'; }).map(function (n) {
+      return { id: n.id, g: n.label, gid: n.guestId, text: n.text, a: n.audioId, c: n.createdAt, s: n.status };
+    })
+  };
+}
+
+function aHostGuestbookModerate(req) {
+  var ev = authHost_(req);
+  var map = { show: 'visible', approve: 'visible', hide: 'hidden', delete: 'deleted' };
+  var status = map[req.action];
+  if (!status) throw err_('bad_request', 'Unknown action');
+  var wanted = Object.create(null);
+  (Array.isArray(req.ids) ? req.ids.slice(0, 200) : []).forEach(function (x) { wanted[str_(x, 40)] = true; });
+  var changed = 0;
+  withLock_(function () {
+    var sh = notesSheet_(ev);
+    var data = sh.getDataRange().getValues();
+    for (var r = 1; r < data.length; r++) {
+      if (!wanted[String(data[r][0])] || data[r][6] === 'deleted') continue;
+      if (data[r][4]) {
+        var f = DriveApp.getFileById(String(data[r][4]));
+        if (status === 'deleted') f.setTrashed(true); else share_(f, null, status === 'visible', ev.id);
+      }
+      sh.getRange(r + 1, 7).setValue(status);
+      changed++;
+    }
+  });
+  bumpVersion_(ev.id);
+  return { changed: changed };
+}
+
+// ---------------------------------------------------------------- favorites
+
+function aHostFavorite(req) {
+  var ev = authHost_(req);
+  var fav = req.fav === true;
+  var wanted = Object.create(null);
+  (Array.isArray(req.ids) ? req.ids.slice(0, 200) : []).forEach(function (x) { wanted[str_(x, 100)] = true; });
+  var changed = 0;
+  withLock_(function () {
+    var sh = mediaSheet_(ev);
+    var data = sh.getDataRange().getValues();
+    for (var r = 1; r < data.length; r++) {
+      if (!wanted[String(data[r][1])] || data[r][12] === 'deleted') continue;
+      sh.getRange(r + 1, 19).setValue(fav);
+      changed++;
+    }
+  });
+  bumpVersion_(ev.id);
+  return { changed: changed };
 }
 
 function aReport(req) {
@@ -385,7 +564,7 @@ function aHostList(req) {
   var items = readMedia_(ev).filter(function (m) { return m.status !== 'deleted'; }).map(function (m) {
     return { i: m.id, t: m.thumbId, k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', gid: m.guestId,
       c: m.createdAt, w: m.w, h: m.h, s: m.status, r: Number(m.reports) || 0, b: m.bytes, sha: m.sha256,
-      ai: m.archIndex === '' ? null : Number(m.archIndex), f: m.flags || '' };
+      ai: m.archIndex === '' ? null : Number(m.archIndex), f: m.flags || '', fv: m.fav === true };
   });
   return { items: items, v: getVersion_(ev.id), event: hostEvent_(ev) };
 }
@@ -738,6 +917,8 @@ function sanitizeSettings_(s) {
     approval: s.approval === true,
     guestGallery: s.guestGallery !== false,
     allowReports: s.allowReports !== false,
+    enhance: s.enhance !== false,
+    guestbook: s.guestbook !== false,
     paused: s.paused === true,
     look: looks.indexOf(s.look) >= 0 ? s.look : 'classic',
     guestLooks: s.guestLooks !== false,
@@ -759,7 +940,7 @@ function publicEvent_(ev) {
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, dateStamp: s.dateStamp,
-    accent: s.accent, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
+    accent: s.accent, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
   };
 }
 

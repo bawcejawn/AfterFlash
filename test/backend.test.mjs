@@ -465,6 +465,75 @@ t('a failure after saving the file leaves no orphan files and refunds the shot',
   assert.equal(again.guest.shotsLeft, 1);
 });
 
+const webmAudio = () => Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(200, 2)]);
+
+t('favorites: host marks, public list exposes, strangers cannot', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const up = upload(env, ev.id, joinGuest(env, ev.id));
+  assert.equal(env.post({ a: 'hostFavorite', e: ev.id, k: 'nope', ids: [up.id], fav: true }).error, 'unauthorized');
+  assert.equal(env.post({ a: 'hostFavorite', e: ev.id, k: ev.hostKey, ids: [up.id], fav: true }).changed, 1);
+  assert.equal(env.post({ a: 'list', e: ev.id }).items[0].f, 1);
+  assert.equal(env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items[0].fv, true);
+  env.post({ a: 'hostFavorite', e: ev.id, k: ev.hostKey, ids: [up.id], fav: false });
+  assert.equal(env.post({ a: 'list', e: ev.id }).items[0].f, 0);
+});
+
+t('blurry photos are flagged for the host (score sent by the phone)', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = joinGuest(env, ev.id);
+  upload(env, ev.id, g, { blur: 12 });
+  upload(env, ev.id, g, { blur: 300 });
+  const items = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items;
+  assert.equal(items.filter((x) => /blurry/.test(x.f)).length, 1);
+});
+
+t('my photos: guest sees own items before reveal; others cannot read them', () => {
+  const env = boot();
+  const ev = makeEvent(env, { reveal: 'after', revealAt: '2999-01-01T00:00:00Z' });
+  const a = joinGuest(env, ev.id);
+  const b = joinGuest(env, ev.id);
+  const up = upload(env, ev.id, a);
+  const mine = env.post({ a: 'mine', e: ev.id, g: a.g, t: a.t });
+  assert.equal(mine.items.length, 1);
+  assert.equal(env.post({ a: 'mine', e: ev.id, g: b.g, t: b.t }).items.length, 0);
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id, g: a.g, t: a.t }).ok, true);
+  assert.equal(env.post({ a: 'photo', e: ev.id, id: up.id, g: a.g, t: a.t }).ok, true);
+  assert.equal(env.post({ a: 'photo', e: ev.id, id: up.id, g: b.g, t: b.t }).error, 'not_found');
+  assert.equal(env.post({ a: 'photo', e: ev.id, id: up.id }).error, 'not_found');
+  assert.equal(env.post({ a: 'photo', e: ev.id, id: up.id, g: a.g, t: b.t }).error, 'not_found');
+});
+
+t('guestbook: text + voice, validated, moderated, respects reveal', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = joinGuest(env, ev.id, { label: 'Nana' });
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: '' }).error, 'bad_request');
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: 'hi', audio: b64(html()) }).error, 'bad_type');
+  const n1 = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: '=cheers <b>love</b>' });
+  assert.equal(n1.ok, true, JSON.stringify(n1));
+  const n2 = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: '', audio: b64(webmAudio()) });
+  assert.equal(n2.ok, true, JSON.stringify(n2));
+  let list = env.post({ a: 'guestbookList', e: ev.id }).notes;
+  assert.equal(list.length, 2);
+  assert.ok(!list[0].text.startsWith('=') && !list[0].text.includes('<'));
+  assert.equal(list[0].g, 'Nana');
+  const audioFile = env.gas.files.get(list.find((x) => x.a).a);
+  assert.equal(audioFile.blob.mime, 'audio/webm'); assert.equal(audioFile.sharing, 'ANYONE_WITH_LINK');
+  env.post({ a: 'hostGuestbookModerate', e: ev.id, k: ev.hostKey, action: 'hide', ids: [n2.id] });
+  assert.equal(audioFile.sharing, 'PRIVATE');
+  assert.equal(env.post({ a: 'guestbookList', e: ev.id }).notes.length, 1);
+  assert.equal(env.post({ a: 'hostGuestbook', e: ev.id, k: ev.hostKey }).notes.length, 2);
+  // limits + turning it off
+  const g2 = joinGuest(env, ev.id);
+  for (let i = 0; i < 3; i++) env.post({ a: 'guestbookAdd', e: ev.id, g: g2.g, t: g2.t, text: 'x' + i });
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g2.g, t: g2.t, text: 'again' }).error, 'rate_limited');
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { guestbook: false } });
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: 'x' }).error, 'disabled');
+  assert.equal(env.post({ a: 'guestbookList', e: ev.id }).notes.length, 0);
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }

@@ -1,7 +1,7 @@
 // Host dashboard: share, moderate, guests, settings.
 import {
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtBytes,
-  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial,
+  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial, videoUrl,
 } from './util.js';
 import { api } from './api.js';
 import { LOOKS } from './film.js';
@@ -70,8 +70,13 @@ function render() {
 }
 
 function counts() {
-  const c = { all: items.length, pending: 0, reported: 0, hidden: 0, video: 0 };
-  for (const it of items) { if (c[it.s] != null) c[it.s]++; if (it.k === 'v') c.video++; }
+  const c = { all: items.length, pending: 0, reported: 0, hidden: 0, video: 0, fav: 0, blurry: 0 };
+  for (const it of items) {
+    if (c[it.s] != null) c[it.s]++;
+    if (it.k === 'v') c.video++;
+    if (it.fv) c.fav++;
+    if (/blurry/.test(it.f || '')) c.blurry++;
+  }
   return c;
 }
 
@@ -86,7 +91,7 @@ function renderHeader() {
       h('div', { class: 'stat' }, h('b', null, fmtBytes(bytes)), 'in Drive'))));
 }
 
-const TABS = [['share', 'Share'], ['photos', 'Photos'], ['guests', 'Guests'], ['settings', 'Settings'], ['keepsakes', 'Keepsakes'], ['security', 'Access']];
+const TABS = [['share', 'Share'], ['photos', 'Photos'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['keepsakes', 'Keepsakes'], ['security', 'Access']];
 function renderTabs() {
   const c = counts();
   clear(tabsEl).append(...TABS.map(([id, label]) => {
@@ -97,7 +102,7 @@ function renderTabs() {
 }
 
 function renderTab() {
-  const map = { share: shareTab, photos: photosTab, guests: guestsTab, settings: settingsTab, keepsakes: keepsakesTab, security: securityTab };
+  const map = { share: shareTab, photos: photosTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, keepsakes: keepsakesTab, security: securityTab };
   clear(bodyEl);
   map[tab]();
 }
@@ -147,10 +152,12 @@ function printSign() {
 }
 
 // ------------------------------------------------------------------ photos
-const FILTERS = [['all', 'All'], ['pending', 'Waiting for approval'], ['reported', 'Reported'], ['hidden', 'Hidden'], ['video', 'Videos']];
+const FILTERS = [['all', 'All'], ['fav', '♥ Favorites'], ['pending', 'Waiting for approval'], ['reported', 'Reported'], ['blurry', 'Blurry'], ['hidden', 'Hidden'], ['video', 'Videos']];
 function visibleItems() {
   if (filter === 'all') return items;
   if (filter === 'video') return items.filter((x) => x.k === 'v');
+  if (filter === 'fav') return items.filter((x) => x.fv);
+  if (filter === 'blurry') return items.filter((x) => /blurry/.test(x.f || ''));
   return items.filter((x) => x.s === filter);
 }
 
@@ -164,7 +171,10 @@ function photosTab() {
     h('button', { class: 'btn small', onclick: () => { selected.clear(); renderTab(); } }, 'Clear'),
     h('button', { class: 'btn small primary', disabled: !selected.size, onclick: () => moderate('show') }, 'Show'),
     h('button', { class: 'btn small', disabled: !selected.size, onclick: () => moderate('hide') }, 'Hide'),
-    h('button', { class: 'btn small danger', disabled: !selected.size, onclick: () => moderate('delete') }, 'Delete'));
+    h('button', { class: 'btn small danger', disabled: !selected.size, onclick: () => moderate('delete') }, 'Delete'),
+    h('button', { class: 'btn small', disabled: !selected.size, onclick: () => setFav([...selected], true) }, '♥ Favorite'),
+    h('button', { class: 'btn small', disabled: !selected.size, onclick: () => setFav([...selected], false) }, 'Unfavorite'),
+    c.fav ? h('button', { class: 'btn small', onclick: downloadFavorites }, `Download favorites (${c.fav})`) : null);
   bodyEl.append(h('div', { class: 'mod-toolbar stack' }, h('div', { class: 'row' }, ...chips), actions));
   if (!list.length) { bodyEl.append(h('p', { class: 'empty' }, filter === 'all' ? 'No photos yet. Share the QR code to get started.' : 'Nothing here.')); return; }
   bodyEl.append(h('div', { class: 'mod-grid' }, list.map((it) => {
@@ -173,7 +183,9 @@ function photosTab() {
     return h('div', { class: 'mod-item' + (sel ? ' selected' : '') },
       h('button', { class: 'pick', 'aria-pressed': String(sel), 'aria-label': 'Select photo', onclick: () => { sel ? selected.delete(it.i) : selected.add(it.i); renderTab(); } },
         hostThumb(it)),
-      h('div', { class: 'meta' }, h('span', { class: 'state ' + it.s }, label), h('span', { class: 'muted' }, it.k === 'v' ? 'Video' : it.g)),
+      h('div', { class: 'meta' }, h('span', { class: 'state ' + it.s }, label, /blurry/.test(it.f || '') ? ', blurry' : ''),
+        h('button', { class: 'heart' + (it.fv ? ' on' : ''), 'aria-pressed': String(!!it.fv), 'aria-label': it.fv ? 'Remove from favorites' : 'Add to favorites', onclick: () => setFav([it.i], !it.fv) }, it.fv ? '♥' : '♡')),
+      h('div', { class: 'meta' }, h('span', { class: 'muted' }, it.k === 'v' ? 'Video' : it.g)),
       h('div', { class: 'meta' }, h('a', { href: `https://drive.google.com/file/d/${encodeURIComponent(it.i)}/view`, target: '_blank', rel: 'noopener' }, 'View'), h('span', { class: 'muted' }, fmtWhen(it.c))));
   })));
 }
@@ -199,6 +211,34 @@ function hostThumb(it) {
   return img;
 }
 
+async function setFav(ids, fav) {
+  try {
+    await api(studio, 'hostFavorite', { e: eventId, k: key, ids: ids.slice(0, 200), fav });
+    for (const it of items) if (ids.includes(it.i)) it.fv = fav;
+    toast(fav ? 'Added to favorites' : 'Removed from favorites', 'ok');
+    renderTab();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/** Zip the favorite originals in the browser (photos and videos up to 150 items). */
+async function downloadFavorites() {
+  const favs = items.filter((x) => x.fv).slice(0, 150);
+  if (!favs.length) return;
+  const { makeZip } = await import('./zip.js');
+  const files = [];
+  for (let i = 0; i < favs.length; i++) {
+    toast(`Preparing favorites ${i + 1} of ${favs.length}…`);
+    try {
+      const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: favs[i].i, which: 'orig' }, { retries: 2, timeout: 120000 });
+      const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[m.mime] || 'bin';
+      files.push({ name: `${eventId}-favorite-${String(i + 1).padStart(3, '0')}.${ext}`, bytes: base64ToBytes(m.data) });
+    } catch (e) { toast(`Skipped one: ${e.message}`, 'error'); }
+  }
+  const a = h('a', { href: URL.createObjectURL(makeZip(files)), download: `${eventId}-favorites.zip` });
+  a.click();
+  toast(`Downloaded ${files.length} favorites`, 'ok');
+}
+
 async function moderate(action) {
   const ids = [...selected];
   if (action === 'delete' && !confirm(`Delete ${ids.length} item(s)? They go to your Drive trash and leave the album.`)) return;
@@ -211,6 +251,29 @@ async function moderate(action) {
     await loadItems();
     renderHeader(); renderTabs(); renderTab();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+// ------------------------------------------------------------------ guestbook
+async function guestbookTab() {
+  bodyEl.append(h('p', { class: 'muted' }, 'Loading messages…'));
+  let notes;
+  try { notes = (await api(studio, 'hostGuestbook', { e: eventId, k: key })).notes; } catch (e) { clear(bodyEl).append(h('p', null, e.message)); return; }
+  notes.sort((a, b) => b.c - a.c);
+  const stateLabel = { visible: 'Showing', pending: 'Needs approval', hidden: 'Hidden' };
+  clear(bodyEl).append(
+    h('p', { class: 'muted' }, ev.settings.guestbook ? `${notes.length} messages. Guests sign it from the camera page.` : 'The guestbook is turned off in Settings.'),
+    notes.length ? h('div', { class: 'notes' }, notes.map((n) => h('article', { class: 'note' },
+      n.text ? h('p', null, n.text) : null,
+      n.a && isDriveId(n.a) ? h('audio', { controls: true, preload: 'none', src: videoUrl(n.a) }) : null,
+      h('p', { class: 'small muted' }, `${n.g}, ${fmtWhen(n.c)} `, h('span', { class: 'state ' + n.s }, stateLabel[n.s] || n.s)),
+      h('div', { class: 'row' },
+        n.s !== 'visible' ? h('button', { class: 'btn small primary', onclick: () => modNote(n.id, 'show') }, 'Show') : h('button', { class: 'btn small', onclick: () => modNote(n.id, 'hide') }, 'Hide'),
+        h('button', { class: 'btn small danger', onclick: () => modNote(n.id, 'delete') }, 'Delete'))))) : null);
+}
+
+async function modNote(id, action) {
+  if (action === 'delete' && !confirm('Delete this message? A voice recording goes to your Drive trash.')) return;
+  try { await api(studio, 'hostGuestbookModerate', { e: eventId, k: key, action, ids: [id] }); renderTab(); } catch (e) { toast(e.message, 'error'); }
 }
 
 // ------------------------------------------------------------------ guests
@@ -265,6 +328,8 @@ function settingsTab() {
       check('approval', 'Approve photos before anyone sees them'),
       check('guestGallery', 'Let guests browse the album'),
       check('allowReports', 'Let guests report photos', 'A reported photo is hidden until you decide.'),
+      check('enhance', 'Offer an Enhance button in the album', 'Guests can view and download a touched-up copy. Originals never change.'),
+      check('guestbook', 'Guestbook', 'Guests can leave a note or a short voice message.'),
       h('div', { class: 'grid-form' }, h('label', { class: 'field' }, h('span', null, 'Event code'),
         inp('pin', { type: 'text', inputmode: 'numeric', maxlength: 8, placeholder: ev.needsPin ? 'Code is set (type to change)' : 'No code', autocomplete: 'off' }),
         h('small', null, '4–8 digits guests must enter. Not included in the QR code, so print it separately.'))),
@@ -279,7 +344,7 @@ function settingsTab() {
       look: fd.get('look'), reveal: fd.get('reveal'),
       revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')),
     };
-    for (const k of ['allowVideo', 'guestLooks', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports']) settings[k] = fd.get(k) === 'on';
+    for (const k of ['allowVideo', 'guestLooks', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports', 'enhance', 'guestbook']) settings[k] = fd.get(k) === 'on';
     const payload = { e: eventId, k: key, settings };
     const pin = String(fd.get('pin') || '').trim();
     if (fd.get('clearPin') === 'on') payload.pin = '';
