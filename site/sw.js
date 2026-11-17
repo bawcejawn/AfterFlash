@@ -1,11 +1,11 @@
 // Service worker: lets the guest camera open with no signal. Only caches this site's own
 // files; never touches API calls or Google Drive requests.
-const VERSION = 'ps-v1';
+const VERSION = 'ps-v2';
 const SHELL = [
   './', 'index.html', 'cam.html', 'album.html', 'tv.html', 'config.js', 'manifest.webmanifest',
   'assets/css/app.css', 'assets/img/icon.svg',
   'assets/js/util.js', 'assets/js/api.js', 'assets/js/cam.js', 'assets/js/film.js', 'assets/js/queue.js',
-  'assets/js/album.js', 'assets/js/tv.js', 'assets/js/home.js', 'assets/vendor/qrcode.mjs',
+  'assets/js/album.js', 'assets/js/tv.js', 'assets/js/home.js', 'assets/js/guestbook.js', 'assets/vendor/qrcode.mjs',
   'assets/vendor/fonts/bricolage-grotesque-latin-700-normal.woff2', 'assets/vendor/fonts/bricolage-grotesque-latin-800-normal.woff2',
   'assets/vendor/fonts/atkinson-hyperlegible-latin-400-normal.woff2', 'assets/vendor/fonts/atkinson-hyperlegible-latin-700-normal.woff2',
 ];

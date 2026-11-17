@@ -25,9 +25,9 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 | Page | Who uses it | What it does |
 |---|---|---|
 | **Camera** (`cam.html`) | Guests | Opens when they scan the QR code. A limited roll of shots, film looks, short videos. Works on weak signal: photos upload when there's a connection. |
-| **Album** (`album.html`) | Guests | Browse, download and report photos. |
+| **Album** (`album.html`) | Guests | Browse, download and report photos. **Enhance** toggle (an automatic touch-up; originals never change), **Hosts’ picks**, **My photos** (each guest’s own shots, even before the reveal), and the **Guestbook**. |
 | **TV wall** (`tv.html`) | A TV or projector | New photos appear in seconds, with the QR code beside them. |
-| **Host dashboard** (`host.html`) | The host | QR sign, moderation, guests, settings. |
+| **Host dashboard** (`host.html`) | The host | QR sign, moderation, **♥ favorites** (shown more often on the TV, one-click download), **blurry-photo flags**, guestbook moderation, guests, settings. |
 | **Studio admin** (`admin.html`) | You | Create and delete events, add admins. |
 
 Photos are stored in your Google Drive (15 GB free). Location data is removed from every photo.
@@ -95,6 +95,7 @@ Open the studio sign-in page. Under the **Sign in** button it should say **"Back
 4. Click **Open dashboard**.
 
 ### Before the event (dashboard)
+- **Settings tab:** the Enhance button and the Guestbook are on by default; turn either off under **Safety and privacy**.
 - **Settings tab:** set **Album closes** to after the party ends. Choose **Live** or **Develop later**. For a public screen, turn on **Approve photos before anyone sees them**.
 - **Share tab:** click **Print sign** for the tables. The **event code** is shown there too; guests can type it on the home page instead of scanning.
 - **Test it yourself:** scan the QR code with your phone and take a photo.

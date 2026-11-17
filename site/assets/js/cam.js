@@ -1,7 +1,8 @@
 // Guest camera: join → shoot → photos saved locally → uploaded by the offline queue.
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, setTitle, fmtDate, fmtWhen, randomId, link, registerSW, frameGuard, config } from './util.js';
 import { api, ApiError } from './api.js';
-import { LOOKS, applyLook, stampDate, drawScaled, canvasToBlob } from './film.js';
+import { LOOKS, applyLook, stampDate, drawScaled, canvasToBlob, blurScore } from './film.js';
+import { openComposer } from './guestbook.js';
 import { queue, createUploader } from './queue.js';
 
 frameGuard();
@@ -183,7 +184,11 @@ async function startCamera() {
     h('footer', { class: 'cam-bottom' },
       h('div', { class: 'chips' }, ...modeChips, els.flashChip, libChip, ...lookChips),
       h('div', { class: 'controls' }, els.albumBtn, els.shutter, flip),
-      els.queue, libInput, fallbackInput)));
+      els.queue,
+      h('div', { class: 'cam-links' },
+        h('a', { href: link('album.html', { e: eventId, s: studio, extra: { view: 'mine' } }) }, 'My photos'),
+        ev.guestbook ? h('button', { class: 'linkbtn', onclick: () => openComposer({ studio, eventId, auth, dark: true }) }, 'Sign the guestbook') : null),
+      libInput, fallbackInput)));
   renderCounter();
 
   uploader = createUploader({
@@ -295,6 +300,8 @@ async function onShutter() {
     if (flashOn && facing === 'environment' && els.torch) { await torch(true); await new Promise((r) => setTimeout(r, 300)); }
     if (flashOn && facing === 'user') { els.flashFx.style.opacity = '1'; await new Promise((r) => setTimeout(r, 250)); }
     const canvas = drawScaled(v, v.videoWidth, v.videoHeight, 2560);
+    let blur = -1;
+    try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
     if (flashOn) { torch(false); els.flashFx.style.opacity = ''; }
     els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
     if (navigator.vibrate) navigator.vibrate(15);
@@ -303,7 +310,8 @@ async function onShutter() {
     if (ev.dateStamp) stampDate(canvas);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88);
     const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
-    await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
+    await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
+    if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
   } catch (e) {
     toast('Couldn’t take that photo. Try again.', 'error');
   } finally {
@@ -311,8 +319,8 @@ async function onShutter() {
   }
 }
 
-async function enqueue({ kind, blob, thumb, w, h: hh, dur = 0 }) {
-  const item = { clientId: randomId(20), ev: `${studio}:${eventId}`, kind, blob, thumb, w, h: hh, dur, createdAt: Date.now(), attempts: 0 };
+async function enqueue({ kind, blob, thumb, w, h: hh, dur = 0, blur = -1 }) {
+  const item = { clientId: randomId(20), ev: `${studio}:${eventId}`, kind, blob, thumb, w, h: hh, dur, blur, createdAt: Date.now(), attempts: 0 };
   await queue.add(item);
   pending++;
   renderCounter(true);

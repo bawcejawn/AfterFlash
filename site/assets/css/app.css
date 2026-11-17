@@ -306,3 +306,24 @@ body.tv.cursor { cursor: default; }
 .lightbox video { max-width: 100%; max-height: 100%; background: #000; }
 img.img-failed { min-height: 120px; background: var(--paper-2); }
 .event-code { font: 800 var(--step-3)/1 var(--display); letter-spacing: 0.06em; }
+
+/* ---------- favorites, guestbook, modal */
+.heart { background: none; border: 0; font-size: 1.15rem; line-height: 1; cursor: pointer; color: var(--muted); padding: 0 0.15rem; }
+.heart.on { color: #c2255c; }
+.fav-badge { position: absolute; right: 8px; top: 8px; background: rgba(255, 255, 255, 0.92); color: #c2255c; border-radius: 999px; width: 26px; height: 26px; display: grid; place-items: center; font-size: 14px; }
+.tile-note { position: absolute; left: 8px; bottom: 8px; background: rgba(12, 15, 22, 0.78); color: #fff; font-size: 12px; padding: 0.15rem 0.5rem; border-radius: 999px; }
+.album-filter { margin-bottom: 0.75rem; }
+.notes { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.note { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 1rem 1.1rem; }
+.note p:first-child { font-size: var(--step-1); line-height: 1.45; }
+.note audio { width: 100%; margin: 0.5rem 0; }
+.modal { position: fixed; inset: 0; z-index: 60; background: rgba(8, 10, 15, 0.7); display: grid; place-items: center; padding: 1rem; }
+.modal .panel { width: min(480px, 100%); }
+.modal .dark-panel { background: #161b26; border-color: #2a3242; color: #eef1f4; }
+.modal .dark-panel textarea { background: #0c0f16; color: #eef1f4; border-color: #3a4356; }
+.modal .dark-panel .btn:not(.flash) { border-color: #eef1f4; color: #eef1f4; background: transparent; }
+.cam-links { display: flex; justify-content: center; gap: 1.5rem; font-size: var(--step--1); }
+.cam-links a, .cam-links .linkbtn { color: #b9c2cf; }
+.tv-note { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 6vw; background: #11151f; z-index: 2; }
+.tv-note blockquote { margin: 0 0 1.5vw; font: 700 3vw/1.3 var(--display); color: #eef1f4; }
+.tv-note p { font-size: 1.4vw; color: var(--flash); max-width: none; }
