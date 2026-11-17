@@ -1,0 +1,8 @@
+node_modules/
+build/test/
+build/release/*.map
+build/release/*.wat
+assembly/index.ts
+assembly/*.boilerplate.ts
+assembly/proto/*.ts
+abi/photoshare.abi

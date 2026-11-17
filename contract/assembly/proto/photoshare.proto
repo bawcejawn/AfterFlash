@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package photoshare;
+
+import "koinos/options.proto";
+
+// ---------- stored records ----------
+
+message event_record {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  // small JSON blob: {"name":"..","date":"YYYY-MM-DD","studio":".."}
+  string meta = 3;
+  uint64 created_at = 4 [jstype = JS_STRING];
+  // merkle root (sha256) over the ordered list of photo sha256 hashes
+  bytes album_root = 5 [(koinos.btype) = HEX];
+  // sha256 of the canonical manifest JSON (list of hashes + metadata)
+  bytes manifest_hash = 6 [(koinos.btype) = HEX];
+  uint64 photo_count = 7 [jstype = JS_STRING];
+  uint64 anchored_at = 8 [jstype = JS_STRING];
+  uint32 anchor_version = 9;
+  uint32 keepsake_count = 10;
+  bool exists = 11;
+}
+
+message keepsake_record {
+  string mime = 1;
+  bytes data = 2;
+  string caption = 3;
+  // sha256 of the full-resolution original (links keepsake to manifest)
+  bytes original_sha256 = 4 [(koinos.btype) = HEX];
+  uint64 added_at = 5 [jstype = JS_STRING];
+  bool exists = 6;
+  bool removed = 7;
+}
+
+message owner_count {
+  uint32 value = 1;
+}
+
+message event_ref {
+  string event_id = 1;
+}
+
+// ---------- entry points ----------
+
+// @description Register a new event owned by `owner`
+// @read-only false
+message register_event_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  string meta = 3;
+}
+
+message register_event_result {
+}
+
+// @description Update an event's public metadata (owner only)
+// @read-only false
+message update_meta_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  string meta = 3;
+}
+
+message update_meta_result {
+}
+
+// @description Anchor the album fingerprint (owner only). Can be re-anchored; version increments.
+// @read-only false
+message anchor_album_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  bytes album_root = 3 [(koinos.btype) = HEX];
+  bytes manifest_hash = 4 [(koinos.btype) = HEX];
+  uint64 photo_count = 5 [jstype = JS_STRING];
+}
+
+message anchor_album_result {
+  uint32 anchor_version = 1;
+}
+
+// @description Store a small keepsake image on-chain (owner only)
+// @read-only false
+message add_keepsake_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  string mime = 3;
+  bytes data = 4;
+  string caption = 5;
+  bytes original_sha256 = 6 [(koinos.btype) = HEX];
+}
+
+message add_keepsake_result {
+  uint32 index = 1;
+}
+
+// @description Remove a keepsake's image data (owner only). Index stays reserved.
+// @read-only false
+message remove_keepsake_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  uint32 index = 3;
+}
+
+message remove_keepsake_result {
+}
+
+// @description Get an event record
+// @read-only true
+message get_event_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+}
+
+message get_event_result {
+  event_record value = 1;
+}
+
+// @description Get a keepsake
+// @read-only true
+message get_keepsake_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  uint32 index = 3;
+}
+
+message get_keepsake_result {
+  keepsake_record value = 1;
+}
+
+// @description List event ids registered by an owner
+// @read-only true
+message list_events_arguments {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  uint32 start = 2;
+  uint32 limit = 3;
+}
+
+message list_events_result {
+  repeated string event_ids = 1;
+  uint32 total = 2;
+}
+
+// ---------- events ----------
+
+message event_registered_event {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+}
+
+message album_anchored_event {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  bytes album_root = 3 [(koinos.btype) = HEX];
+  uint32 anchor_version = 4;
+}
+
+message keepsake_added_event {
+  bytes owner = 1 [(koinos.btype) = ADDRESS];
+  string event_id = 2;
+  uint32 index = 3;
+}
