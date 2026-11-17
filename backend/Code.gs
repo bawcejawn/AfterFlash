@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.7.0';
+var APP_VERSION = '1.8.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -116,6 +116,7 @@ var ACTIONS = {
   // admin
   adminCheck: aAdminCheck,
   adminProblems: aAdminProblems,
+  adminExportKeys: aAdminExportKeys,
   adminClearProblems: aAdminClearProblems,
   adminListAdmins: aAdminListAdmins,
   adminAddAdmin: aAdminAddAdmin,
@@ -180,7 +181,7 @@ function aJoin(req) {
   if (req.g && req.t) {
     var existing = findGuest_(ev, str_(req.g, 40));
     if (existing && safeEq_(existing.row.tokenHash, sha256Hex_(String(req.t)))) {
-      return { guest: guestView_(ev, existing.row), event: publicEvent_(ev) };
+      return { guest: guestView_(ev, existing.row), event: publicEvent_(ev), key: eventKey_(ev) || undefined };
     }
   }
   var label = cleanText_(req.label, LIMITS.LABEL);
@@ -194,13 +195,13 @@ function aJoin(req) {
     sh.appendRow([guestId, sha256Hex_(token), label, 0, 0, Date.now(), 0, false]);
   });
   var row = { guestId: guestId, label: label, shots: 0, uploads: 0, blocked: false };
-  return { guest: guestView_(ev, row), token: token, event: publicEvent_(ev), shotsPerGuest: s.shotsPerGuest };
+  return { guest: guestView_(ev, row), token: token, event: publicEvent_(ev), shotsPerGuest: s.shotsPerGuest, key: eventKey_(ev) || undefined };
 }
 
 function aMe(req) {
   var ev = loadEvent_(req.e);
   var g = authGuest_(ev, req);
-  return { guest: guestView_(ev, g.row) };
+  return { guest: guestView_(ev, g.row), key: eventKey_(ev) || undefined };
 }
 
 function aUpload(req) {
@@ -225,20 +226,37 @@ function aUpload(req) {
   var stats = mediaStats_(ev, g.row.guestId, clientId);
   if (stats.dup) return { id: stats.dup.id, duplicate: true, guest: guestView_(ev, g.row) };
 
+  var enc = s.encrypted === true;
   var bytes = decodeB64_(req.data);
-  var max = kind === 'video' ? LIMITS.VIDEO_BYTES : LIMITS.PHOTO_BYTES;
+  var max = (kind === 'video' ? LIMITS.VIDEO_BYTES : LIMITS.PHOTO_BYTES) + (enc ? ENC_OVERHEAD : 0);
   if (!bytes.length || bytes.length > max) throw err_('too_large', 'File is too large.');
   if (stats.bytes + bytes.length > s.maxStorageMB * 1024 * 1024) throw err_('full', 'This album has reached its storage limit.');
-  var mime = sniffMime_(bytes);
-  if (kind === 'photo' && mime !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
-  if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err_('bad_type', 'Unsupported video format.');
-  if (mime === 'image/jpeg') bytes = stripJpegMeta_(bytes);
+  var mime, plainSha = '';
+  if (enc) {
+    // Private storage: the phone encrypted the file (and already stripped location data when it
+    // re-encoded the photo). The server can't look inside, so it checks the envelope and the
+    // declared type; the app re-checks the real type after decrypting before showing anything.
+    if (!isEnc_(bytes)) throw err_('bad_type', 'This event needs the latest version of the camera page. Please reload.');
+    mime = String(req.mime || '');
+    if (kind === 'photo' && mime !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
+    if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err_('bad_type', 'Unsupported video format.');
+    plainSha = /^[0-9a-f]{64}$/.test(String(req.sha)) ? String(req.sha) : '';
+  } else {
+    mime = sniffMime_(bytes);
+    if (kind === 'photo' && mime !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
+    if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err_('bad_type', 'Unsupported video format.');
+    if (mime === 'image/jpeg') bytes = stripJpegMeta_(bytes);
+  }
 
   var thumbBytes = null;
   if (req.thumb) {
     thumbBytes = decodeB64_(req.thumb);
-    if (thumbBytes.length > LIMITS.THUMB_BYTES || sniffMime_(thumbBytes) !== 'image/jpeg') throw err_('bad_type', 'Invalid preview image.');
-    thumbBytes = stripJpegMeta_(thumbBytes);
+    if (enc) {
+      if (thumbBytes.length > LIMITS.THUMB_BYTES + ENC_OVERHEAD || !isEnc_(thumbBytes)) throw err_('bad_type', 'Invalid preview image.');
+    } else {
+      if (thumbBytes.length > LIMITS.THUMB_BYTES || sniffMime_(thumbBytes) !== 'image/jpeg') throw err_('bad_type', 'Invalid preview image.');
+      thumbBytes = stripJpegMeta_(thumbBytes);
+    }
   }
   if (kind === 'video' && !thumbBytes) throw err_('bad_request', 'Video preview required.');
 
@@ -264,8 +282,10 @@ function aUpload(req) {
   var base = Utilities.formatDate(new Date(now), 'UTC', "yyyyMMdd'T'HHmmss") + '_' + g.row.guestId.slice(0, 6) + '_' + clientId.slice(0, 8);
   var file, thumb = null;
   try {
-    file = folder.createFile(Utilities.newBlob(bytes, mime, base + '.' + ext));
-    if (thumbBytes) thumb = subFolder_(ev, 'Previews (used by the app)').createFile(Utilities.newBlob(thumbBytes, 'image/jpeg', base + '_preview.jpg'));
+    var fileMime = enc ? 'application/octet-stream' : mime;
+    var sfx = enc ? '.enc' : '';
+    file = folder.createFile(Utilities.newBlob(bytes, fileMime, base + '.' + ext + sfx));
+    if (thumbBytes) thumb = subFolder_(ev, 'Previews (used by the app)').createFile(Utilities.newBlob(thumbBytes, enc ? 'application/octet-stream' : 'image/jpeg', base + '_preview.jpg' + sfx));
   } catch (x) {
     refundShot_(ev, g.row.guestId);
     CacheService.getScriptCache().remove(inflightKey);
@@ -278,9 +298,10 @@ function aUpload(req) {
     var flagList = [];
     var blur = Number(req.blur);
     if (kind === 'photo' && isFinite(blur) && blur >= 0 && blur < LIMITS.BLUR_THRESHOLD) flagList.push('blurry');
-    if (status === 'visible' && !share_(file, thumb, true, ev.id)) flagList.push('share-failed');
+    if (!enc && status === 'visible' && !share_(file, thumb, true, ev.id)) flagList.push('share-failed');
+    if (enc) flagList.push('encrypted');
     var flags = flagList.join(',');
-    var sha = sha256Hex_(bytes);
+    var sha = enc ? plainSha : sha256Hex_(bytes);
     var w = int_(req.w, 0, 20000, 0), h = int_(req.h, 0, 20000, 0), dur = int_(req.dur, 0, 600, 0);
     withLock_(function () {
       var sh = mediaSheet_(ev);
@@ -312,6 +333,7 @@ function aList(req) {
   var visible = all.filter(function (m) { return m.status === 'visible'; });
   base.count = visible.length;
   base.pending = all.filter(function (m) { return m.status === 'pending'; }).length;
+  if (s.encrypted && revealed && (s.guestGallery || isWall)) base.key = eventKey_(ev);
   if (!revealed || (!s.guestGallery && !isWall)) {
     base.items = [];
     return base;
@@ -348,8 +370,12 @@ function aThumb(req) {
   var m = findMedia_(ev, str_(req.id, 100));
   if (!mediaReadable_(ev, req, m)) throw err_('not_found', 'Not found');
   var blob = DriveApp.getFileById(m.row.thumbId || m.row.id).getBlob();
-  if (blob.getContentType() !== 'image/jpeg') throw err_('not_found', 'Not found');
   var bytes = blob.getBytes();
+  if (isEnc_(bytes)) {
+    if (bytes.length > LIMITS.THUMB_BYTES + ENC_OVERHEAD) throw err_('too_large', 'Preview too large');
+    return { mime: 'image/jpeg', enc: true, data: Utilities.base64Encode(bytes) };
+  }
+  if (blob.getContentType() !== 'image/jpeg') throw err_('not_found', 'Not found');
   if (bytes.length > LIMITS.THUMB_BYTES) throw err_('too_large', 'Preview too large');
   return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
@@ -359,9 +385,14 @@ function aPhoto(req) {
   var ev = loadEvent_(req.e);
   if (!rateOk_('photo:' + ev.id, LIMITS.PHOTOS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
   var m = findMedia_(ev, str_(req.id, 100));
-  if (!mediaReadable_(ev, req, m) || m.row.kind !== 'photo') throw err_('not_found', 'Not found');
-  var blob = DriveApp.getFileById(m.row.id).getBlob();
-  var bytes = blob.getBytes();
+  if (!mediaReadable_(ev, req, m)) throw err_('not_found', 'Not found');
+  var bytes = DriveApp.getFileById(m.row.id).getBlob().getBytes();
+  // Private-storage events: photos and videos are only viewable through the app.
+  if (isEnc_(bytes)) {
+    if (bytes.length > LIMITS.VIDEO_BYTES + ENC_OVERHEAD) throw err_('too_large', 'Too large');
+    return { mime: String(m.row.mime), enc: true, data: Utilities.base64Encode(bytes) };
+  }
+  if (m.row.kind !== 'photo') throw err_('not_found', 'Not found');
   if (bytes.length > LIMITS.PHOTO_BYTES || sniffMime_(bytes) !== 'image/jpeg') throw err_('not_found', 'Not found');
   return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
@@ -404,8 +435,13 @@ function aGuestbookAdd(req) {
   var audio = null, mime = '';
   if (req.audio) {
     audio = decodeB64_(req.audio);
-    if (audio.length > LIMITS.AUDIO_BYTES) throw err_('too_large', 'That voice message is too long.');
-    mime = sniffAudio_(audio);
+    if (audio.length > LIMITS.AUDIO_BYTES + ENC_OVERHEAD) throw err_('too_large', 'That voice message is too long.');
+    if (s.encrypted) {
+      if (!isEnc_(audio)) throw err_('bad_type', 'This event needs the latest version of the page. Please reload.');
+      mime = /^audio\/(webm|mp4|ogg)$/.test(String(req.audioMime)) ? String(req.audioMime) : '';
+    } else {
+      mime = sniffAudio_(audio);
+    }
     if (!mime) throw err_('bad_type', 'This phone recorded in a format we can’t save. Try typing a message instead.');
   }
   if (!text && !audio) throw err_('bad_request', 'Write a note or record a message.');
@@ -419,8 +455,8 @@ function aGuestbookAdd(req) {
   // Save the recording before taking the lock, so the lock is held only for the sheet write.
   if (audio) {
     var ext = { 'audio/webm': '.webm', 'audio/mp4': '.m4a', 'audio/ogg': '.ogg' }[mime];
-    var f = subFolder_(ev, 'Guestbook voice messages').createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + ext));
-    if (status === 'visible') share_(f, null, true, ev.id);
+    var f = subFolder_(ev, 'Guestbook voice messages').createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + ext + (s.encrypted ? '.enc' : '')));
+    if (status === 'visible' && !s.encrypted) share_(f, null, true, ev.id);
     audioId = f.getId();
   }
   try {
@@ -482,6 +518,7 @@ function aNoteAudio(req) {
   if (!note) throw err_('not_found', 'Not found');
   var blob = DriveApp.getFileById(id).getBlob();
   var bytes = blob.getBytes();
+  if (isEnc_(bytes)) return { mime: blob.getContentType(), enc: true, data: Utilities.base64Encode(bytes) };
   if (bytes.length > LIMITS.AUDIO_BYTES || !sniffAudio_(bytes)) throw err_('not_found', 'Not found');
   return { mime: sniffAudio_(bytes), data: Utilities.base64Encode(bytes) };
 }
@@ -616,7 +653,7 @@ function aReport(req) {
 
 function aHostGet(req) {
   var ev = authHost_(req);
-  return { event: hostEvent_(ev) };
+  return { event: hostEvent_(ev), key: eventKey_(ev) || undefined };
 }
 
 function aHostUpdate(req) {
@@ -626,6 +663,7 @@ function aHostUpdate(req) {
   Object.keys(ev.settings).forEach(function (k) {
     merged[k] = Object.prototype.hasOwnProperty.call(incoming, k) ? incoming[k] : ev.settings[k];
   });
+  merged.encrypted = ev.settings.encrypted; // private storage is chosen when the event is created
   var next = sanitizeSettings_(merged);
   var pinHash = ev.pinHash;
   if (req.pin === '') pinHash = '';
@@ -731,13 +769,15 @@ function aHostMedia(req) {
     var note = readNotes_(ev).filter(function (n) { return n.audioId === id && n.status !== 'deleted'; })[0];
     if (!note) throw err_('not_found', 'Not found');
     var ab = DriveApp.getFileById(id).getBlob();
-    return { mime: ab.getContentType(), data: Utilities.base64Encode(ab.getBytes()) };
+    var abytes = ab.getBytes();
+    return { mime: ab.getContentType(), enc: isEnc_(abytes) || undefined, data: Utilities.base64Encode(abytes) };
   }
   if (!m || m.row.status === 'deleted') throw err_('not_found', 'Not found');
   var which = req.which === 'orig' ? m.row.id : (m.row.thumbId || m.row.id);
   var blob = DriveApp.getFileById(which).getBlob();
   var bytes = blob.getBytes();
-  if (bytes.length > LIMITS.VIDEO_BYTES) throw err_('too_large', 'File too large to fetch');
+  if (bytes.length > LIMITS.VIDEO_BYTES + ENC_OVERHEAD) throw err_('too_large', 'File too large to fetch');
+  if (isEnc_(bytes)) return { mime: which === m.row.id ? String(m.row.mime) : 'image/jpeg', enc: true, data: Utilities.base64Encode(bytes), sha256: m.row.sha256 };
   return { mime: blob.getContentType(), data: Utilities.base64Encode(bytes), sha256: m.row.sha256 };
 }
 
@@ -860,6 +900,10 @@ function aAdminCreate(req) {
   media.getRange(1, 1, 1, MEDIA_COLS.length).setValues([MEDIA_COLS]);
   var guests = ss.insertSheet('guests');
   guests.getRange(1, 1, 1, GUEST_COLS.length).setValues([GUEST_COLS]);
+  if (settings.encrypted) {
+    // The event key lives in Script Properties (only visible to the script owner), never in Drive.
+    PropertiesService.getScriptProperties().setProperty('EK:' + id, randomKey_(32));
+  }
   withLock_(function () {
     indexSheet_().appendRow([id, settings.name, Date.now(), folder.getId(), ss.getId(), sha256Hex_(hostKey), JSON.stringify(settings), '', false, me.id]);
   });
@@ -1019,6 +1063,7 @@ function sanitizeSettings_(s) {
     guestGallery: s.guestGallery !== false,
     allowReports: s.allowReports !== false,
     enhance: s.enhance !== false,
+    encrypted: s.encrypted === true,
     guestbook: s.guestbook !== false,
     paused: s.paused === true,
     look: looks.indexOf(s.look) >= 0 ? s.look : 'classic',
@@ -1041,7 +1086,7 @@ function publicEvent_(ev) {
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, dateStamp: s.dateStamp,
-    accent: s.accent, approval: s.approval, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
+    accent: s.accent, approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
   };
 }
 
@@ -1172,6 +1217,8 @@ function subFolder_(ev, name) {
 
 /** Set link sharing. Returns false (and logs for the admin) instead of throwing. */
 function share_(file, thumb, isPublic, eventId) {
+  // Private-storage files are never link-shared; the app serves them.
+  if (isPublic && /\.enc$/.test(file.getName())) return true;
   var access = isPublic ? DriveApp.Access.ANYONE_WITH_LINK : DriveApp.Access.PRIVATE;
   var perm = isPublic ? DriveApp.Permission.VIEW : DriveApp.Permission.NONE;
   try {
@@ -1183,6 +1230,31 @@ function share_(file, thumb, isPublic, eventId) {
       '). Photos still upload; ask a Workspace admin to allow "Anyone with the link" sharing.');
     return false;
   }
+}
+
+// ---------------------------------------------------------------- private storage
+
+var ENC_OVERHEAD = 32; // "PSE1" + 12-byte IV + 16-byte GCM tag
+
+/** Files encrypted by the app start with the ASCII magic "PSE1". */
+function isEnc_(b) {
+  return b.length > ENC_OVERHEAD && u8_(b[0]) === 0x50 && u8_(b[1]) === 0x53 && u8_(b[2]) === 0x45 && u8_(b[3]) === 0x31;
+}
+
+function eventKey_(ev) {
+  if (!ev.settings.encrypted) return '';
+  var k = PropertiesService.getScriptProperties().getProperty('EK:' + ev.id);
+  if (!k) throw err_('server_error', 'This private event’s key is missing. Restore it from your key backup.');
+  return k;
+}
+
+/** Owner-only backup of every private event's key (keep it somewhere safe and offline). */
+function aAdminExportKeys(req) {
+  requireOwner_(authAdmin_(req));
+  var all = PropertiesService.getScriptProperties().getProperties();
+  var keys = {};
+  Object.keys(all).forEach(function (k) { if (k.indexOf('EK:') === 0) keys[k.slice(3)] = all[k]; });
+  return { keys: keys };
 }
 
 // ---------------------------------------------------------------- problem log (shown on admin page)

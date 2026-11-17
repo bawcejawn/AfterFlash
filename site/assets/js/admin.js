@@ -70,7 +70,8 @@ async function dashboard(created) {
           ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
           ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
     problemsPanel(),
-    me.role === 'owner' ? adminsPanel() : null);
+    me.role === 'owner' ? adminsPanel() : null,
+    me.role === 'owner' ? keyBackupPanel() : null);
 }
 
 function createdPanel({ id, hostKey, name }) {
@@ -94,13 +95,15 @@ function createForm() {
       h('label', { class: 'field' }, h('span', null, 'Shots per guest'), h('input', { name: 'shotsPerGuest', type: 'number', min: 1, max: 500, value: 25 })),
       h('label', { class: 'field' }, h('span', null, 'Photo reveal'), h('select', { name: 'reveal' }, h('option', { value: 'live' }, 'Live'), h('option', { value: 'after' }, 'Develop later'))),
       h('label', { class: 'field' }, h('span', null, 'Album closes'), h('input', { name: 'closesAt', type: 'datetime-local' }))),
+    h('label', { class: 'check' }, h('input', { name: 'encrypted', type: 'checkbox' }),
+      h('span', null, h('strong', null, 'Private storage'), ' (locks the files in Google Drive so only this app can open them, even for people who can see the Drive folder. Can’t be changed later. Leave off for normal events.)')),
     h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'submit' }, 'Create event'), h('span', { class: 'small muted' }, 'You can change everything later from the host dashboard.')));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = 'Creating…';
-    const settings = { name: fd.get('name'), date: fd.get('date'), maxGuests: Number(fd.get('maxGuests')), shotsPerGuest: Number(fd.get('shotsPerGuest')), reveal: fd.get('reveal'), closesAt: localInputToIso(fd.get('closesAt')) };
+    const settings = { name: fd.get('name'), date: fd.get('date'), maxGuests: Number(fd.get('maxGuests')), shotsPerGuest: Number(fd.get('shotsPerGuest')), reveal: fd.get('reveal'), closesAt: localInputToIso(fd.get('closesAt')), encrypted: fd.get('encrypted') === 'on' };
     try {
       const r = await api(studio, 'adminCreate', { k: adminKey, settings }, { retries: 0, timeout: 90000 });
       dashboard({ id: r.id, hostKey: r.hostKey, name: settings.name });
@@ -147,6 +150,19 @@ function problemsPanel() {
 }
 
 // ---------------------------------------------------------------- admins (owner only)
+function keyBackupPanel() {
+  return h('section', { class: 'panel stack section' }, h('h2', null, 'Private event keys'),
+    h('p', null, 'Private events are locked with a key kept by your backend. Download a backup after creating a private event and store it somewhere safe and offline (for example a USB stick). Without it, the locked files in Drive can’t be opened if the backend is ever deleted.'),
+    h('div', { class: 'row' }, h('button', { class: 'btn', onclick: async () => {
+      try {
+        const r = await api(studio, 'adminExportKeys', { k: adminKey });
+        const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' });
+        h('a', { href: URL.createObjectURL(blob), download: `photoshare-private-keys-${new Date().toISOString().slice(0, 10)}.json` }).click();
+        toast('Key backup downloaded. Keep it private.', 'ok');
+      } catch (e) { toast(e.message, 'error'); }
+    } }, 'Download key backup')));
+}
+
 function adminsPanel() {
   const panel = h('section', { class: 'panel stack section' }, h('h2', null, 'Studio admins'),
     h('p', null, 'Give each person their own admin key so you can remove one without affecting anyone else. Admins can create events and manage the ones they created. Only you can add or remove admins.'));

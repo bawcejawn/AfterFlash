@@ -181,6 +181,58 @@ t('voice notes: Safari m4a and Firefox ogg accepted, retries are idempotent, dur
   assert.equal(env.post({ a: 'noteAudio', e: ev.id, id: notes[0].a }).error, 'not_found', 'hidden notes not served');
 });
 
+const envelope = (n) => Buffer.concat([Buffer.from('PSE1'), nodeCrypto.randomBytes(n)]);
+
+t('private storage: key kept out of Drive, files stay encrypted and private', () => {
+  const env = boot();
+  const ev = makeEvent(env, { encrypted: true });
+  const plain = makeEvent(env, { name: 'Plain' });
+  const key = env.gas.props.get('EK:' + ev.id);
+  assert.ok(key && key.length >= 40);
+  const indexSheet = [...env.gas.sheets.values()].find((x) => x.name === 'PhotoShare index');
+  assert.ok(!JSON.stringify(indexSheet.sheets[0].rows).includes(key), 'key is not in the Drive spreadsheet');
+  const g = joinGuest(env, ev.id);
+  assert.equal(g.r.key, key);
+  assert.equal(joinGuest(env, plain.id).r.key, undefined);
+  assert.equal(env.post({ a: 'me', e: ev.id, g: g.g, t: g.t }).key, key);
+  // plaintext uploads are refused for private events
+  assert.equal(upload(env, ev.id, g).error, 'bad_type');
+  const sha = 'a'.repeat(64);
+  const up = upload(env, ev.id, g, { data: b64(envelope(5000)), thumb: b64(envelope(800)), mime: 'image/jpeg', sha });
+  assert.equal(up.ok, true, JSON.stringify(up));
+  const f = env.gas.files.get(up.id);
+  assert.ok(f.blob.name.endsWith('.jpg.enc')); assert.equal(f.sharing, 'PRIVATE');
+  const hl = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items[0];
+  assert.equal(hl.sha, sha); assert.ok(/encrypted/.test(hl.f));
+  const thumbFile = env.gas.files.get(hl.t);
+  assert.equal(thumbFile.sharing, 'PRIVATE');
+  // album gets the key and encrypted bytes; the app decrypts
+  const l = env.post({ a: 'list', e: ev.id });
+  assert.equal(l.key, key);
+  assert.equal(env.post({ a: 'thumb', e: ev.id, id: up.id }).enc, true);
+  const ph = env.post({ a: 'photo', e: ev.id, id: up.id });
+  assert.equal(ph.enc, true); assert.equal(ph.mime, 'image/jpeg');
+  assert.equal(env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).key, key);
+  // showing a photo never link-shares an encrypted file
+  env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'hide', ids: [up.id] });
+  env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'show', ids: [up.id] });
+  assert.equal(f.sharing, 'PRIVATE');
+  // develop-later: no key handed out with the (empty) album
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { reveal: 'after', revealAt: '2999-01-01T00:00:00Z', encrypted: false } });
+  assert.equal(env.post({ a: 'list', e: ev.id }).key, undefined);
+  assert.equal(env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).event.settings.encrypted, true, 'cannot be switched off');
+  // voice notes
+  const n = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(envelope(300)), audioMime: 'audio/webm', clientId: 'encnote00001' });
+  assert.equal(n.ok, true, JSON.stringify(n));
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(webmAudio()), audioMime: 'audio/webm', clientId: 'encnote00002' }).error, 'bad_type');
+  // key backup: owner only
+  const sarah = env.post({ a: 'adminAddAdmin', k: env.adminKey, name: 'S' }).key;
+  assert.equal(env.post({ a: 'adminExportKeys', k: sarah }).error, 'forbidden');
+  assert.equal(env.post({ a: 'adminExportKeys', k: env.adminKey }).keys[ev.id], key);
+  // recover ignores encrypted files (they're already recorded)
+  assert.equal(env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey, dryRun: true }).found, 0);
+});
+
 t('rejects non-JPEG photos, html, png and spoofed types', () => {
   const env = boot();
   const ev = makeEvent(env);

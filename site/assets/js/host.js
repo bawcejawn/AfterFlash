@@ -1,16 +1,17 @@
 // Host dashboard: share, moderate, guests, settings.
 import {
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtBytes,
-  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial,
+  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial, pool, whenVisible,
 } from './util.js';
 import { api } from './api.js';
 import { LOOKS } from './film.js';
 import { voicePlayer } from './guestbook.js';
+import { mediaBlob } from './crypto.js';
 
 frameGuard();
 const root = $('#app');
 const { q, f } = params();
-let studio, eventId, key, ev, items = [], version = '', filter = 'all', selected = new Set(), tab = 'share', pollT;
+let studio, eventId, key, eventKey = '', ev, items = [], version = '', filter = 'all', selected = new Set(), tab = 'share', pollT;
 
 const keyName = () => `ps:hk:${studio}:${eventId}`;
 
@@ -32,7 +33,7 @@ async function boot() {
   }
   if (!key) return fail('This link is missing its host key. Use the full host link you were given.');
   try {
-    ev = (await api(studio, 'hostGet', { e: eventId, k: key })).event;
+    { const hg = await api(studio, 'hostGet', { e: eventId, k: key }); ev = hg.event; eventKey = hg.key || ''; }
   } catch (e) {
     if (e.code === 'unauthorized' && !key.startsWith('admin:')) { store.del(keyName(), sessionStorage); store.del(keyName()); }
     if (e.code === 'forbidden') return fail('Only the studio owner or the admin who created this event can open its dashboard.');
@@ -135,6 +136,8 @@ function shareTab() {
       linkRow('Guest link', guestUrl(), 'This is what the QR code opens. Share it in texts or on the invitation.'),
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
+      ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them. ',
+        h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : null,
       h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs PhotoShare can open it.)'),
       h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
 }
@@ -192,28 +195,28 @@ function photosTab() {
       h('div', { class: 'meta' }, h('span', { class: 'state ' + it.s }, label, /blurry/.test(it.f || '') ? ', blurry' : ''),
         h('button', { class: 'heart' + (it.fv ? ' on' : ''), 'aria-pressed': String(!!it.fv), 'aria-label': it.fv ? 'Remove from favorites' : 'Add to favorites', onclick: () => setFav([it.i], !it.fv) }, it.fv ? '♥' : '♡')),
       h('div', { class: 'meta' }, h('span', { class: 'muted' }, it.k === 'v' ? 'Video' : it.g)),
-      h('div', { class: 'meta' }, h('a', { href: `https://drive.google.com/file/d/${encodeURIComponent(it.i)}/view`, target: '_blank', rel: 'noopener' }, 'View'), h('span', { class: 'muted' }, fmtWhen(it.c))));
+      h('div', { class: 'meta' }, ev.encrypted ? h('button', { class: 'linkbtn', onclick: () => downloadOne(it) }, 'Download') : h('a', { href: `https://drive.google.com/file/d/${encodeURIComponent(it.i)}/view`, target: '_blank', rel: 'noopener' }, 'View'), h('span', { class: 'muted' }, fmtWhen(it.c))));
   })));
 }
 
 // Visible photos load from Google's image URLs; anything private (pending, hidden, reported),
 // or anything those URLs refuse, is fetched through the authenticated API instead.
 const privateThumbs = new Map();
-const thumbQueue = serial();
+const thumbQueue = pool(3);
 function privateThumb(it) {
   if (privateThumbs.has(it.i)) return Promise.resolve(privateThumbs.get(it.i));
   return thumbQueue(async () => {
     const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'thumb' }, { retries: 1 });
-    if (!/^image\/(jpeg|png|webp)$/.test(m.mime)) return '';
-    const url = URL.createObjectURL(new Blob([base64ToBytes(m.data)], { type: m.mime }));
+    if (!/^image\/jpeg$/.test(m.mime)) return '';
+    const url = URL.createObjectURL(await mediaBlob(m, eventKey));
     privateThumbs.set(it.i, url);
     return url;
   });
 }
 function hostThumb(it) {
   const img = h('img', { alt: '', loading: 'lazy' });
-  if (it.s === 'visible') return loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 400, { proxy: () => privateThumb(it) });
-  privateThumb(it).then((url) => { if (url) img.src = url; }).catch(() => {});
+  if (it.s === 'visible' && !ev.encrypted) return loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 400, { proxy: () => privateThumb(it) });
+  whenVisible(img, () => privateThumb(it).then((url) => { if (url) img.src = url; }).catch(() => {}));
   return img;
 }
 
@@ -240,6 +243,43 @@ async function setFav(ids, fav) {
 }
 
 /** Zip the favorite originals in the browser (photos and videos up to 150 items). */
+async function downloadOne(it) {
+  try {
+    const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'orig' }, { retries: 2, timeout: 120000 });
+    const blob = await mediaBlob(m, eventKey);
+    const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'bin';
+    h('a', { href: URL.createObjectURL(blob), download: `${eventId}-${it.i.slice(0, 8)}.${ext}` }).click();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/** Private storage: Drive only holds locked files, so download everything through the app in zip parts. */
+async function downloadAll() {
+  const list = items.filter((x) => x.s !== 'deleted');
+  if (!list.length) return;
+  const { makeZip } = await import('./zip.js');
+  const PART = 250 * 1024 * 1024;
+  let files = [], size = 0, part = 1, done = 0;
+  const flush = () => {
+    if (!files.length) return;
+    h('a', { href: URL.createObjectURL(makeZip(files)), download: `${eventId}-album-part${part}.zip` }).click();
+    part++; files = []; size = 0;
+  };
+  for (const it of list) {
+    toast(`Unlocking ${++done} of ${list.length}…`);
+    try {
+      const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'orig' }, { retries: 2, timeout: 120000 });
+      const blob = await mediaBlob(m, eventKey);
+      const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'bin';
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (size + bytes.length > PART) flush();
+      files.push({ name: `${eventId}-${String(done).padStart(4, '0')}${it.g ? '-' + it.g.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20) : ''}.${ext}`, bytes });
+      size += bytes.length;
+    } catch (e) { toast(`Skipped one: ${e.message}`, 'error'); }
+  }
+  flush();
+  toast(`Album downloaded (${done} items)`, 'ok');
+}
+
 async function downloadFavorites() {
   const favs = items.filter((x) => x.fv).slice(0, 150);
   if (!favs.length) return;
@@ -249,8 +289,9 @@ async function downloadFavorites() {
     toast(`Preparing favorites ${i + 1} of ${favs.length}…`);
     try {
       const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: favs[i].i, which: 'orig' }, { retries: 2, timeout: 120000 });
-      const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[m.mime] || 'bin';
-      files.push({ name: `${eventId}-favorite-${String(i + 1).padStart(3, '0')}.${ext}`, bytes: base64ToBytes(m.data) });
+      const blob = await mediaBlob(m, eventKey);
+      const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'bin';
+      files.push({ name: `${eventId}-favorite-${String(i + 1).padStart(3, '0')}.${ext}`, bytes: new Uint8Array(await blob.arrayBuffer()) });
     } catch (e) { toast(`Skipped one: ${e.message}`, 'error'); }
   }
   const a = h('a', { href: URL.createObjectURL(makeZip(files)), download: `${eventId}-favorites.zip` });
@@ -283,7 +324,7 @@ async function guestbookTab() {
     h('p', { class: 'muted' }, ev.settings.guestbook ? `${notes.length} messages. Guests sign it from the camera page.` : 'The guestbook is turned off in Settings.'),
     notes.length ? h('div', { class: 'notes' }, notes.map((n) => h('article', { class: 'note' },
       n.text ? h('p', null, n.text) : null,
-      n.a && isDriveId(n.a) ? voicePlayer(n, (id) => api(studio, 'hostMedia', { e: eventId, k: key, id, which: 'note' }, { timeout: 60000 })) : null,
+      n.a && isDriveId(n.a) ? voicePlayer(n, (id) => api(studio, 'hostMedia', { e: eventId, k: key, id, which: 'note' }, { timeout: 60000 }), eventKey) : null,
       h('p', { class: 'small muted' }, `${n.g}, ${fmtWhen(n.c)} `, h('span', { class: 'state ' + n.s }, stateLabel[n.s] || n.s)),
       h('div', { class: 'row' },
         n.s !== 'visible' ? h('button', { class: 'btn small primary', onclick: () => modNote(n.id, 'show') }, 'Show') : h('button', { class: 'btn small', onclick: () => modNote(n.id, 'hide') }, 'Hide'),
@@ -344,6 +385,7 @@ function settingsTab() {
       h('label', { class: 'field' }, h('span', null, 'Album closes'), inp('closesAt', { type: 'datetime-local', value: isoToLocalInput(s.closesAt) }), h('small', null, 'The TV wall shows a last call 45 minutes before.'))),
       check('paused', 'Pause uploads now', 'Photos guests take are kept on their phones and upload when you resume.')),
     h('fieldset', null, h('legend', null, 'Safety and privacy'),
+      h('p', { class: 'small' }, ev.encrypted ? 'Private storage: on. Files are locked in Drive; only this app can open them.' : 'Private storage: off. Photos are normal files in your Drive folder. (Private storage is chosen when an event is created.)'),
       check('approval', 'Approve photos before anyone sees them'),
       check('guestGallery', 'Let guests browse the album'),
       check('allowReports', 'Let guests report photos', 'A reported photo is hidden until you decide.'),
@@ -412,7 +454,7 @@ async function rotate() {
     key = r.hostKey;
     store.set(keyName(), key, sessionStorage);
     if (store.get(keyName())) store.set(keyName(), key);
-    ev = (await api(studio, 'hostGet', { e: eventId, k: key })).event;
+    { const hg = await api(studio, 'hostGet', { e: eventId, k: key }); ev = hg.event; eventKey = hg.key || ''; }
     const url = link('host.html', { e: eventId, s: studio, frag: { k: key } });
     clear(bodyEl).append(h('div', { class: 'stack narrow' }, h('h2', null, 'New host link'), h('p', null, 'Save this somewhere safe. It won’t be shown again.'),
       h('div', { class: 'keybox' }, url), h('button', { class: 'btn', onclick: () => copy(url) }, 'Copy host link')));

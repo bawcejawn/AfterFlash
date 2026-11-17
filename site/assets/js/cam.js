@@ -63,6 +63,7 @@ async function boot() {
     try {
       const me = await api(studio, 'me', { e: eventId, g: auth.g, t: auth.t }, { retries: 1 });
       shotsLeftServer = me.guest.shotsLeft;
+      if (me.key) { auth.key = me.key; store.set(authKey(), auth); }
     } catch (e) {
       if (e instanceof ApiError && e.code === 'unauthorized') { store.del(authKey()); auth = null; }
       else shotsLeftServer = auth.shotsLeft ?? ev.shotsPerGuest; // offline: trust last known
@@ -106,7 +107,7 @@ function welcome(errMsg) {
     go.textContent = 'Joining…';
     try {
       const r = await api(studio, 'join', { e: eventId, label: name.value.trim(), pin: pin ? pin.value.trim() : undefined });
-      auth = { g: r.guest.id, t: r.token, label: r.guest.label, pin: pin ? pin.value.trim() : '', shotsLeft: r.guest.shotsLeft, name: ev.name, lastUsed: Date.now() };
+      auth = { g: r.guest.id, t: r.token, label: r.guest.label, pin: pin ? pin.value.trim() : '', shotsLeft: r.guest.shotsLeft, name: ev.name, lastUsed: Date.now(), key: r.key || undefined };
       store.set(authKey(), auth);
       shotsLeftServer = r.guest.shotsLeft;
       startCamera();
