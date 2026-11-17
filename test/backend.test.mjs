@@ -119,6 +119,37 @@ t('previews go to a subfolder; originals stay alone in the event folder', () => 
   assert.equal(subfolders.length, 1, 'one previews folder, reused');
 });
 
+t('recover: missing photos in the event folder are added once; duplicates and other folders ignored', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const other = makeEvent(env, { name: 'Other' });
+  const up = upload(env, ev.id, joinGuest(env, ev.id));
+  const U = env.gas.ctx.Utilities;
+  const folder = env.gas.files.get(up.id).parent;
+  const orphanBytes = [...jpegWithExif()].map((b) => (b > 127 ? b - 256 : b)).concat([1, 2, 3]);
+  folder.createFile(U.newBlob(orphanBytes, 'image/jpeg', 'orphan1.jpg'));
+  folder.createFile(U.newBlob(orphanBytes, 'image/jpeg', 'orphan1-retry.jpg')); // duplicate of the orphan
+  folder.createFile(U.newBlob(env.gas.files.get(up.id).blob.bytes, 'image/jpeg', 'copy-of-known.jpg')); // duplicate of an album photo
+  folder.createFile(U.newBlob('<html>', 'image/jpeg', 'fake.jpg')); // wrong content
+  const dry = env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey, dryRun: true });
+  assert.equal(dry.found, 1); assert.equal(dry.duplicates, 2); assert.equal(dry.added, 0);
+  assert.equal(env.post({ a: 'hostRecover', e: other.id, k: other.hostKey }).found, 0, 'other event never sees these');
+  assert.equal(env.post({ a: 'hostRecover', e: ev.id, k: 'nope' }).error, 'unauthorized');
+  const r = env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey });
+  assert.equal(r.added, 1);
+  const items = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items;
+  assert.equal(items.length, 2);
+  assert.ok(items.some((x) => x.g === 'Recovered from Drive'));
+  assert.equal(env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey }).added, 0, 'idempotent');
+  assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 2);
+});
+
+t('date stamp is off by default for new events', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  assert.equal(env.post({ a: 'event', e: ev.id }).event.dateStamp, false);
+});
+
 t('rejects non-JPEG photos, html, png and spoofed types', () => {
   const env = boot();
   const ev = makeEvent(env);

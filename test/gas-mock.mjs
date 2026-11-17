@@ -21,10 +21,11 @@ export function createGas() {
     constructor(bytes, mime, name) { this.bytes = bytes; this.mime = mime; this.name = name; }
     getBytes() { return this.bytes.slice(); }
     getContentType() { return this.mime; }
+    setName(n) { this.name = n; return this; }
   }
   class File {
     constructor(blob, parent) {
-      this.id = newId('f'); this.blob = blob; this.parent = parent; this.sharing = 'PRIVATE'; this.trashed = false;
+      this.id = newId('f'); this.blob = blob; this.parent = parent; this.sharing = 'PRIVATE'; this.trashed = false; this.created = new Date();
       files.set(this.id, this);
     }
     getId() { return this.id; }
@@ -32,6 +33,11 @@ export function createGas() {
     setSharing(access) { if (faults.sharing) throw new Error('Sharing is restricted by your organization'); this.sharing = access; }
     setTrashed(t) { this.trashed = t; }
     moveTo(folder) { this.parent = folder; }
+    isTrashed() { return this.trashed; }
+    getMimeType() { return this.blob.mime; }
+    getName() { return this.blob.name || 'file'; }
+    getDateCreated() { return this.created; }
+    getThumbnail() { return new Blob(this.blob.bytes.slice(0, 2000), 'image/jpeg', 'thumb'); }
   }
   class Folder {
     constructor(name, parent) { this.id = newId('d'); this.name = name; this.parent = parent; this.trashed = false; files.set(this.id, this); }
@@ -43,6 +49,11 @@ export function createGas() {
       return { hasNext: () => i < list.length, next: () => list[i++] };
     }
     createFile(blob) { return new File(blob, this); }
+    getFiles() {
+      const list = [...files.values()].filter((f) => f instanceof File && f.parent === this);
+      let i = 0;
+      return { hasNext: () => i < list.length, next: () => list[i++] };
+    }
     setTrashed(t) { this.trashed = t; }
   }
   class Range {

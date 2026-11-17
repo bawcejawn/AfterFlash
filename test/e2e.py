@@ -162,6 +162,9 @@ with sync_playwright() as p:
     album.goto(f"{BASE}/album.html?e={event_id}")
     expect(album.locator(".fav-badge")).to_have_count(1, timeout=15000)
     # guestbook tab for host
+    host.click("role=tab[name=/Photos/]")
+    host.click("text=Find missing photos")
+    expect(host.locator(".toast").last).to_contain_text("Nothing missing", timeout=20000)
     host.click("role=tab[name='Guestbook']")
     expect(host.locator(".note")).to_contain_text("Congratulations")
 

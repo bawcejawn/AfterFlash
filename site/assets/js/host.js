@@ -178,7 +178,8 @@ function photosTab() {
     h('button', { class: 'btn small danger', disabled: !selected.size, onclick: () => moderate('delete') }, 'Delete'),
     h('button', { class: 'btn small', disabled: !selected.size, onclick: () => setFav([...selected], true) }, '♥ Favorite'),
     h('button', { class: 'btn small', disabled: !selected.size, onclick: () => setFav([...selected], false) }, 'Unfavorite'),
-    c.fav ? h('button', { class: 'btn small', onclick: downloadFavorites }, `Download favorites (${c.fav})`) : null);
+    c.fav ? h('button', { class: 'btn small', onclick: downloadFavorites }, `Download favorites (${c.fav})`) : null,
+    h('button', { class: 'btn small', onclick: recoverMissing, title: 'Adds photos that are in the Drive folder but missing from the album' }, 'Find missing photos'));
   bodyEl.append(h('div', { class: 'mod-toolbar stack' }, h('div', { class: 'row' }, ...chips), actions));
   if (!list.length) { bodyEl.append(h('p', { class: 'empty' }, filter === 'all' ? 'No photos yet. Share the QR code to get started.' : 'Nothing here.')); return; }
   bodyEl.append(h('div', { class: 'mod-grid' }, list.map((it) => {
@@ -213,6 +214,19 @@ function hostThumb(it) {
   if (it.s === 'visible') return loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 400, { proxy: () => privateThumb(it) });
   privateThumb(it).then((url) => { if (url) img.src = url; }).catch(() => {});
   return img;
+}
+
+async function recoverMissing() {
+  try {
+    toast('Checking the Drive folder…');
+    const dry = await api(studio, 'hostRecover', { e: eventId, k: key, dryRun: true }, { timeout: 120000 });
+    if (!dry.found) { toast(`Nothing missing. Every photo in the folder is in the album${dry.duplicates ? ` (${dry.duplicates} duplicate copies ignored)` : ''}.`, 'ok'); return; }
+    if (!confirm(`Found ${dry.found} photo${dry.found > 1 ? 's' : ''} in the Drive folder that ${dry.found > 1 ? 'aren’t' : 'isn’t'} in the album${dry.duplicates ? ` (plus ${dry.duplicates} duplicate copies, which will be skipped)` : ''}. Add ${dry.found > 1 ? 'them' : 'it'}?`)) return;
+    const r = await api(studio, 'hostRecover', { e: eventId, k: key }, { timeout: 300000, retries: 0 });
+    toast(`Added ${r.added} photo${r.added === 1 ? '' : 's'} to the album`, 'ok');
+    await loadItems();
+    renderHeader(); renderTabs(); renderTab();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function setFav(ids, fav) {
