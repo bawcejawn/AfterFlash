@@ -94,6 +94,16 @@ Open the studio sign-in page. Under the **Sign in** button it should say **"Back
 3. **Copy the host link** and save it. It's the key to that event's dashboard.
 4. Click **Open dashboard**.
 
+### Private events (optional)
+Tick **Private storage** when you create an event if the photos must stay private even from people who can open your Google Drive (a co-admin, a shared Drive, a synced computer, a hacked Google account).
+
+- Every photo, video and voice message is **locked (encrypted) on the guest's phone** before it uploads. Drive only ever holds `.enc` files that look like random noise.
+- The app (album, TV wall, host dashboard) unlocks them for people who have the event link. Nothing changes for guests.
+- It can't be switched on or off later. Normal events are unchanged.
+- **After the event:** on the host dashboard **Share tab**, click **Download all (unlocked)**. (Downloading the Drive folder gives you locked `.enc` files.)
+- **Back up the keys:** on **admin.html**, under **Private event keys**, click **Download key backup** after you create a private event. Save the file somewhere offline (a USB stick). Treat it like a password: anyone with it and the Drive files can open the photos.
+- **If the backend is ever gone:** download the Drive folder, then run `node scripts/unlock-folder.mjs key-backup.json EVENTCODE path/to/folder` to unlock every file on your computer.
+
 ### Before the event (dashboard)
 - **Settings tab:** the Enhance button and the Guestbook are on by default; turn either off under **Safety and privacy**.
 - **Settings tab:** set **Album closes** to after the party ends. Choose **Live** or **Develop later**. For a public screen, turn on **Approve photos before anyone sees them**.
@@ -106,7 +116,7 @@ Open the studio sign-in page. Under the **Sign in** button it should say **"Back
 3. **Moderate** from the **Photos** tab: show, hide or delete. Reported photos hide automatically until you decide.
 
 ### After the event
-Open the **Google Drive folder** (link on the Share tab) and download it. Google zips every original at full resolution.
+Open the **Google Drive folder** (link on the Share tab) and download it. Google zips every original at full resolution. For a **private** event, use **Download all (unlocked)** on the Share tab instead.
 
 ### Which link goes to whom
 

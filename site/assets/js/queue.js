@@ -2,6 +2,7 @@
 // uploaded when there is signal, so nothing is lost on weak venue Wi-Fi.
 import { api, ApiError } from './api.js';
 import { blobToBase64 } from './util.js';
+import { encryptBlob, sha256HexOf } from './crypto.js';
 
 const DB = 'photoshare';
 let dbp;
@@ -63,11 +64,17 @@ export function createUploader({ studio, ev, getAuth, onEvent }) {
         const auth = getAuth();
         if (!auth) { onEvent({ type: 'auth' }); break; }
         try {
+          // Private-storage events: encrypt on the phone; the server only ever sees ciphertext.
+          const key = auth.key;
+          const mainBlob = key ? await encryptBlob(key, item.blob) : item.blob;
+          const thumbBlob = item.thumb ? (key ? await encryptBlob(key, item.thumb) : item.thumb) : null;
           const payload = {
             e: ev.split(':')[1], g: auth.g, t: auth.t, kind: item.kind, clientId: item.clientId,
             w: item.w, h: item.h, dur: item.dur, blur: item.blur,
-            data: await blobToBase64(item.blob),
-            thumb: item.thumb ? await blobToBase64(item.thumb) : undefined,
+            data: await blobToBase64(mainBlob),
+            thumb: thumbBlob ? await blobToBase64(thumbBlob) : undefined,
+            mime: key ? String(item.blob.type || '').split(';')[0] : undefined,
+            sha: key ? await sha256HexOf(item.blob) : undefined,
           };
           const result = await api(studio, 'upload', payload, { retries: 1, timeout: 120000 });
           await queue.remove(item.clientId);

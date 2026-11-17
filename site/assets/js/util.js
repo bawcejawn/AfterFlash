@@ -273,3 +273,25 @@ export function setTitle(t) { document.title = t ? `${t} – ${config.appName}` 
 
 // Brand name from config on every page.
 for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = config.appName;
+
+/** Run async jobs with at most n at a time. */
+export function pool(n) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= n || !waiting.length) return;
+    const { fn, resolve, reject } = waiting.shift();
+    active++;
+    Promise.resolve().then(fn).then(resolve, reject).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((resolve, reject) => { waiting.push({ fn, resolve, reject }); next(); });
+}
+
+/** Call fn when the element scrolls near the viewport (once). */
+export function whenVisible(el, fn) {
+  if (!('IntersectionObserver' in window)) { fn(); return; }
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) { io.disconnect(); fn(); }
+  }, { rootMargin: '400px' });
+  io.observe(el);
+}

@@ -11,6 +11,7 @@ PhotoShare is built for a hostile internet: anyone can find a guest link, and th
 | Host key | Hosts (e.g. the couple, a planner) | One event: settings, moderation, guests, originals | SHA-256 in the index sheet |
 | Wall key | TV screens | View one event's wall even when guest browsing is off | Derived from the host key hash; rotating the host key rotates it |
 | Guest token | One phone | Upload and report in one event | SHA-256 in the event sheet |
+| Private event key | Backend (Script Properties `EK:<event>`), owner's offline backup | Unlock one private event's files | AES-256 key; given to joined guests (to lock uploads), the host dashboard and the TV wall |
 | Koinos keys | You, on your computer or in Kondor | Contract upgrade (contract key), event writes and mana (owner/payer) | **Never** in the site, backend or repo |
 
 - All keys are 192–256-bit random values. Comparisons are constant-time.
@@ -56,9 +57,16 @@ PhotoShare is built for a hostile internet: anyone can find a guest link, and th
 - Turn on 2-step verification for the Google account that owns the backend.
 - When updating the backend, read the diff to `backend/Code.gs` before pasting it into Apps Script.
 
+## Private storage (per event, optional)
+
+- Files are encrypted on the guest's device with AES-256-GCM (format `PSE1` + 12-byte IV + ciphertext + tag) before upload. Drive only stores `.enc` blobs, never link-shared. EXIF can't be stripped server-side, so the camera never adds it (canvas re-encode).
+- The backend checks the envelope, size and a declared type; after decrypting, the browser checks the real file signature (JPEG/MP4/WebM/Ogg) before showing anything, and a tampered file fails the GCM tag.
+- The key is held by the backend, so this protects against anyone with **Drive access only**. It does not protect against someone who controls the Apps Script project or the owner's Google account itself (they can read Script Properties). Keep the key backup offline.
+- Joined guests receive the key so their phone can lock uploads, which means a guest who also had Drive access could unlock files. The album, TV wall and media endpoints still apply the normal checks (host key, guest browsing on and photos revealed, wall key) before serving any file.
+
 ## Known limitations
 
-- Photos visible in the album are "anyone with the link" files in Drive. The IDs are long and unguessable, but anyone a guest forwards a photo link to can see that photo, as with any shared album.
+- In normal (non-private) events, photos visible in the album are "anyone with the link" files in Drive. The IDs are long and unguessable, but anyone a guest forwards a photo link to can see that photo, as with any shared album.
 - A determined guest can clear their browser and rejoin to get a fresh roll. The guest cap and the event-wide total cap bound the impact.
 - Guest reports hide a photo immediately (by design, as on PartyCam), so a malicious guest could hide good photos, up to the report limit. Hosts can restore them in one click and turn reporting off.
 - GitHub Actions in workflows are pinned to major version tags of GitHub's own `actions/*`. Pin to commit SHAs if your threat model requires it.

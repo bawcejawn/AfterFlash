@@ -1,6 +1,7 @@
 // TV / projector photo wall. New photos jump the queue; otherwise the wall replays older ones.
-import { $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl, base64ToBytes } from './util.js';
+import { $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
 import { api } from './api.js';
+import { mediaBlob } from './crypto.js';
 
 const root = $('#app');
 const { q, f } = params();
@@ -77,6 +78,7 @@ async function poll() {
   }
   ev = r.event;
   version = r.v;
+  if (r.key) wallKeyForMedia = r.key;
   chrome();
   if (r.unchanged) return;
   els.count.textContent = `${r.count || 0} photos`;
@@ -110,12 +112,22 @@ function proxyThumb(id) {
   if (proxied.has(id)) return Promise.resolve(proxied.get(id));
   return proxyQueue(async () => {
     const r = await api(studio, 'thumb', { e: eventId, id, wk: wk || undefined }, { retries: 1 });
-    const url = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+    const url = URL.createObjectURL(await mediaBlob(r, wallKeyForMedia));
     proxied.set(id, url);
     return url;
   });
 }
 const posterOf = (it) => (it.k === 'v' && it.t ? it.t : it.i);
+let wallKeyForMedia = '';
+
+/** Image for the wall: Google's URLs normally; private-storage events go through the app. */
+function wallImage(img, it, w, onReady) {
+  if (ev.encrypted) {
+    proxyThumb(it.i).then((u) => { if (!u) return; img.onload = () => onReady && onReady(img); img.src = u; }).catch(() => {});
+    return img;
+  }
+  return loadDriveImage(img, posterOf(it), w, { proxy: () => proxyThumb(it.i), onReady });
+}
 
 let nextT = null;
 function scheduleNext(ms) {
@@ -125,7 +137,7 @@ function scheduleNext(ms) {
 
 function renderThumbs() {
   const recent = [...known.values()].sort((a, b) => b.c - a.c).slice(0, 9);
-  clear(els.thumbs).append(...recent.map((it) => loadDriveImage(h('img', { alt: '' }), posterOf(it), 300, { proxy: () => proxyThumb(it.i) })));
+  clear(els.thumbs).append(...recent.map((it) => wallImage(h('img', { alt: '' }), it, 300)));
 }
 
 let slideCount = 0;
@@ -152,10 +164,7 @@ function advance() {
   stopVideo();
   const img = imgs[which = 1 - which];
   const other = imgs[1 - which];
-  loadDriveImage(img, posterOf(it), 1920, {
-    proxy: () => proxyThumb(it.i),
-    onReady: () => { img.classList.add('on'); other.classList.remove('on'); },
-  });
+  wallImage(img, it, 1920, () => { img.classList.add('on'); other.classList.remove('on'); });
   els.who.textContent = it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || '';
   els.who.hidden = !els.who.textContent;
   if (it.k === 'v') playVideo(it); else scheduleNext(SHOW_MS);
@@ -183,9 +192,17 @@ function hideNote() { if (noteEl) { noteEl.remove(); noteEl = null; } }
 let vid = null;
 function stopVideo() { if (vid) { vid.pause(); vid.remove(); vid = null; } }
 function playVideo(it) {
-  const v = h('video', { muted: true, playsinline: true, autoplay: true, preload: 'auto', class: 'tv-video', src: videoUrl(it.i) });
+  const v = h('video', { muted: true, playsinline: true, autoplay: true, preload: 'auto', class: 'tv-video' });
   v.muted = true;
   vid = v;
+  if (ev.encrypted) {
+    api(studio, 'photo', { e: eventId, id: it.i, wk: wk || undefined }, { retries: 0, timeout: 60000 })
+      .then((r) => mediaBlob(r, wallKeyForMedia))
+      .then((b) => { if (vid === v) v.src = URL.createObjectURL(b); })
+      .catch(() => { if (vid === v) { v.remove(); scheduleNext(SHOW_MS); } });
+  } else {
+    v.src = videoUrl(it.i);
+  }
   const done = () => { if (vid === v) scheduleNext(1500); };
   v.addEventListener('playing', () => v.classList.add('on'));
   v.addEventListener('ended', done);

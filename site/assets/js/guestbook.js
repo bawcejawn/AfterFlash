@@ -1,5 +1,6 @@
 // Guestbook: write a note and/or record a short voice message; list notes.
 import { h, clear, toast, blobToBase64, fmtWhen, isDriveId, randomId } from './util.js';
+import { encryptBlob, mediaBlob } from './crypto.js';
 import { api } from './api.js';
 
 const MAX_SEC = 60;
@@ -73,7 +74,9 @@ export function openComposer({ studio, eventId, auth, dark = false, onDone }) {
     try {
       const r = await api(studio, 'guestbookAdd', {
         e: eventId, g: auth.g, t: auth.t, text: text.value.trim(), clientId,
-        audio: audioBlob ? await blobToBase64(audioBlob) : undefined, dur: audioBlob ? recSeconds : 0,
+        audio: audioBlob ? await blobToBase64(auth.key ? await encryptBlob(auth.key, audioBlob) : audioBlob) : undefined,
+        audioMime: audioBlob && auth.key ? audioBlob.type.split(';')[0] : undefined,
+        dur: audioBlob ? recSeconds : 0,
       }, { retries: 3, timeout: 90000 });
       toast(r.status === 'pending' ? 'Thanks! The hosts will see your message.' : 'Thanks! Your message is in the guestbook.', 'ok');
       close();
@@ -92,7 +95,7 @@ const fmtDur = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, 
  * Voice message player. Audio is fetched through the app (Google Drive won't stream audio
  * into other websites reliably), then played from memory. fetchAudio(id) → {mime, data}.
  */
-export function voicePlayer(n, fetchAudio) {
+export function voicePlayer(n, fetchAudio, key) {
   const label = h('span', { class: 'small muted' }, n.d ? `Voice message, ${fmtDur(n.d)}` : 'Voice message');
   const btn = h('button', { class: 'btn small', type: 'button' }, '▶ Play');
   const box = h('div', { class: 'voice' }, label, btn);
@@ -100,9 +103,9 @@ export function voicePlayer(n, fetchAudio) {
     btn.disabled = true; btn.textContent = 'Loading…';
     try {
       const m = await fetchAudio(n.a);
-      if (!/^audio\/(webm|mp4|ogg)$/.test(m.mime)) throw new Error('Unexpected file type');
-      const bytes = Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
-      const audio = h('audio', { controls: true, src: URL.createObjectURL(new Blob([bytes], { type: m.mime })) });
+      if (!/^audio\/(webm|mp4|ogg)/.test(m.mime)) throw new Error('Unexpected file type');
+      const blob = await mediaBlob(m, key);
+      const audio = h('audio', { controls: true, src: URL.createObjectURL(blob) });
       btn.replaceWith(audio);
       audio.play().catch(() => {});
     } catch (e) {
@@ -114,12 +117,13 @@ export function voicePlayer(n, fetchAudio) {
 }
 
 /** Render notes as cards. Audio plays straight from Drive. */
-export function renderNotes(notes, fetchAudio) {
+export function renderNotes(notes, fetchAudio, key) {
   if (!notes.length) return h('p', { class: 'empty' }, 'No messages yet.');
   return h('div', { class: 'notes' }, notes.slice().sort((a, b) => b.c - a.c).map((n) => h('article', { class: 'note' },
     n.text ? h('p', null, n.text) : null,
-    n.a && isDriveId(n.a) && fetchAudio ? voicePlayer(n, fetchAudio) : null,
+    n.a && isDriveId(n.a) && fetchAudio ? voicePlayer(n, fetchAudio, key) : null,
     h('p', { class: 'small muted' }, [n.g, fmtWhen(n.c)].filter(Boolean).join(', ')))));
 }
 
 export { clear };
+

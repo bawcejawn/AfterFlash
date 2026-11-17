@@ -1,12 +1,14 @@
 // Host tool: register the event on Koinos, archive screen-quality keepsakes, anchor the fingerprint.
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setTitle, fmtDate, link, frameGuard, base64ToBytes } from './util.js';
 import { api } from './api.js';
+import { mediaBlob } from './crypto.js';
 import { buildManifest, fingerprint, chainMeta, keepsakeMimeOk, estimateMana, KEEPSAKE_TARGET, KEEPSAKE_MAX } from './proof.js';
 import { chainEnabled, kondorAccounts, kondorSigner, getEvent, manaOf, resourceLimits, sendBatch, explorerTx } from './koinos.js';
 
 frameGuard();
 const root = $('#app');
 const { q, f } = params();
+let eventKey = '';
 let studio, eventId, key, ev, manifestItems = [], owner = '', chainEv = null, limits = null, stop = false;
 const keyName = () => `ps:hk:${studio}:${eventId}`;
 
@@ -23,7 +25,7 @@ async function boot() {
   if (!key) return fail('Open this page from the Keepsakes tab of the host dashboard.');
   if (!chainEnabled()) return fail('Koinos is not configured. Add the contract address to config.js (see docs/KOINOS.md).');
   try {
-    ev = (await api(studio, 'hostGet', { e: eventId, k: key })).event;
+    { const hg = await api(studio, 'hostGet', { e: eventId, k: key }); ev = hg.event; eventKey = hg.key || ''; }
     await loadManifest();
     limits = await resourceLimits().catch(() => null);
   } catch (e) { return fail(e.message); }
@@ -111,7 +113,7 @@ function chainError(e) {
 /** Make a ≤45 KB keepsake from the stored preview image. */
 async function makeKeepsake(item) {
   const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: item.id, which: 'thumb' }, { retries: 2, timeout: 60000 });
-  const blob = new Blob([base64ToBytes(m.data)], { type: m.mime });
+  const blob = await mediaBlob(m, eventKey);
   const bmp = await createImageBitmap(blob);
   for (const edge of [1024, 900, 800, 700, 600, 480, 360]) {
     const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));

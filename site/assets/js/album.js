@@ -2,8 +2,9 @@
 // "My photos" (works before the reveal) and the guestbook.
 import {
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown,
-  downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, serial, base64ToBytes,
+  downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
+import { mediaBlob } from './crypto.js';
 import { api } from './api.js';
 import { enhance, canvasToBlob } from './film.js';
 import { openComposer, renderNotes } from './guestbook.js';
@@ -19,6 +20,7 @@ let view = ['mine', 'guestbook'].includes(q.get('view')) ? q.get('view') : 'albu
 let picksOnly = false;
 let mineItems = [];
 let enhanceOn = store.get('ps:enhance') === true;
+let albumKey = '';
 
 function fail(msg) {
   clear(root).append(h('main', { class: 'narrow section' }, h('h1', null, 'Hmm.'), h('p', null, msg), h('a', { class: 'btn', href: 'index.html' }, 'Go to the home page')));
@@ -47,6 +49,7 @@ async function refresh(first) {
   }
   ev = r.event;
   version = r.v;
+  albumKey = r.key || (auth && auth.key) || albumKey;
   if (first) { setAccent(ev.accent); setTitle(ev.name); }
   if (!r.unchanged) {
     items = (r.items || []).filter((x) => isDriveId(x.i)).sort((a, b) => b.c - a.c);
@@ -94,18 +97,26 @@ function render() {
   renderAlbum(body, r);
 }
 
-const proxyQueue = serial();
+const proxyQueue = pool(3);
 const proxied = new Map();
-/** Fetch a preview through the backend (fallback for Google URLs, and for private "My photos"). */
+/**
+ * Fetch a preview through the backend: the fallback for Google URLs, the way "My photos"
+ * works, and the only way for private-storage events (decrypted here, on the device).
+ */
 function proxyThumb(id) {
   if (proxied.has(id)) return Promise.resolve(proxied.get(id));
   return proxyQueue(async () => {
     const r = await api(studio, 'thumb', { e: eventId, id, pin: pin || undefined, ...guestAuth() }, { retries: 1 });
-    if (r.mime !== 'image/jpeg') return '';
-    const url = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+    const url = URL.createObjectURL(await mediaBlob(r, albumKey));
     proxied.set(id, url);
     return url;
   });
+}
+
+/** Full photo or video, decrypted if needed. */
+async function fullMedia(it) {
+  const r = await api(studio, 'photo', { e: eventId, id: it.i, pin: pin || undefined, ...guestAuth() }, { retries: 1, timeout: 120000 });
+  return mediaBlob(r, albumKey);
 }
 
 function renderAlbum(body, r) {
@@ -134,9 +145,11 @@ function renderAlbum(body, r) {
   body.append(h('div', { class: 'masonry' }, shown.map((it, idx) => {
     const img = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo', loading: 'lazy', decoding: 'async' });
     if (it.w && it.h) { img.width = 600; img.height = Math.round((600 * it.h) / it.w); }
-    loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 600, { proxy: () => proxyThumb(it.i) });
-    return h('button', { class: 'tile', onclick: () => openLb(shown, idx), 'aria-label': 'Open photo' }, img,
+    if (ev.encrypted) whenVisible(img, () => proxyThumb(it.i).then((u) => { if (u) img.src = u; }).catch(() => img.classList.add('img-failed')));
+    else loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 600, { proxy: () => proxyThumb(it.i) });
+    const tile = h('button', { class: 'tile', onclick: () => openLb(shown, idx), 'aria-label': 'Open photo' }, img,
       it.k === 'v' ? h('span', { class: 'vid' }, 'Video') : null, it.f ? h('span', { class: 'fav-badge', 'aria-label': 'Hosts’ pick' }, '♥') : null);
+    return tile;
   })));
 }
 
@@ -150,7 +163,7 @@ async function renderMine(body) {
     h('p', { class: 'muted' }, mineItems.length ? `You’ve taken ${mineItems.length}. Only you can see this page.` : 'Photos you take on this phone will appear here.'),
     h('div', { class: 'masonry' }, mineItems.map((it, i) => {
       const img = h('img', { alt: 'Your photo', loading: 'lazy' });
-      proxyThumb(it.i).then((u) => { if (u) img.src = u; }).catch(() => {});
+      whenVisible(img, () => proxyThumb(it.i).then((u) => { if (u) img.src = u; }).catch(() => img.classList.add('img-failed')));
       return h('button', { class: 'tile', onclick: () => openLb(mineItems, i, true) }, img,
         it.k === 'v' ? h('span', { class: 'vid' }, 'Video') : null,
         label[it.s] ? h('span', { class: 'tile-note' }, label[it.s]) : null);
@@ -164,7 +177,7 @@ async function renderGuestbook(body) {
   body.append(list);
   try {
     const { notes } = await api(studio, 'guestbookList', { e: eventId, pin: pin || undefined });
-    clear(list).append(lastList && !lastList.revealed ? h('p', { class: 'empty' }, 'Messages appear here when the album opens.') : renderNotes(notes, (id) => api(studio, 'noteAudio', { e: eventId, id, pin: pin || undefined }, { timeout: 60000 })));
+    clear(list).append(lastList && !lastList.revealed ? h('p', { class: 'empty' }, 'Messages appear here when the album opens.') : renderNotes(notes, (id) => api(studio, 'noteAudio', { e: eventId, id, pin: pin || undefined }, { timeout: 60000 }), albumKey));
   } catch (e) { clear(list).append(h('p', null, e.message)); }
 }
 
@@ -207,7 +220,14 @@ function showLb() {
   if (!it) return closeLb();
   const token = ++showToken;
   let media;
-  if (it.k === 'v') {
+  if (it.k === 'v' && ev.encrypted) {
+    // Private storage (or your own not-yet-public video): fetched and decrypted on this device.
+    media = h('video', { controls: true, playsinline: true });
+    proxyThumb(it.i).then((u) => { if (u && token === showToken) media.poster = u; }).catch(() => {});
+    lb.who.textContent = 'Loading video…';
+    fullMedia(it).then((b) => { if (token === showToken) { media.src = URL.createObjectURL(b); lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', '); } })
+      .catch((e) => { if (token === showToken) toast(e.message, 'error'); });
+  } else if (it.k === 'v') {
     media = h('video', { controls: true, playsinline: true, preload: 'metadata', src: videoUrl(it.i) });
     if (it.t) loadDriveImage(new Image(), it.t, 1280, { onReady: (im) => { media.poster = im.src; } });
     media.addEventListener('error', () => {
@@ -216,8 +236,12 @@ function showLb() {
     });
   } else {
     media = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo' });
-    if (lbMine) proxyThumb(it.i).then((u) => { if (u && token === showToken && !media.dataset.enhanced) media.src = u; });
-    else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
+    if (lbMine || ev.encrypted) {
+      proxyThumb(it.i).then((u) => { if (u && token === showToken && !media.dataset.full) media.src = u; }).catch(() => {});
+      if (ev.encrypted && !(enhanceOn && ev.enhance)) {
+        fullMedia(it).then((b) => { if (token === showToken && !media.dataset.enhanced) { media.dataset.full = '1'; media.src = URL.createObjectURL(b); } }).catch(() => {});
+      }
+    } else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
     if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
   }
   clear(lb.stage).append(media);
@@ -237,9 +261,9 @@ async function applyEnhanced(img, it, token) {
     let url = enhancedCache.get(it.i);
     if (!url) {
       lb.who.textContent = 'Enhancing…';
-      const r = await api(studio, 'photo', { e: eventId, id: it.i, pin: pin || undefined, ...guestAuth() }, { retries: 1, timeout: 90000 });
+      const full = await fullMedia(it);
       if (token !== showToken) return;
-      const raw = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+      const raw = URL.createObjectURL(full);
       const c = await canvasFromUrl(raw);
       URL.revokeObjectURL(raw);
       await new Promise((res) => setTimeout(res, 0));
@@ -278,15 +302,15 @@ function toggleEnhance() {
 async function download() {
   const it = cur();
   if (!it) return;
-  if (it.k === 'v') { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
-  const wantEnhanced = enhanceOn && ev.enhance;
-  if (!wantEnhanced && !lbMine) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
+  const viaApp = ev.encrypted || (lbMine && it.k !== 'v');
+  if (it.k === 'v' && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
+  const wantEnhanced = enhanceOn && ev.enhance && it.k !== 'v';
+  if (!wantEnhanced && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
   const label = lb.dl.textContent;
   lb.dl.disabled = true;
   lb.dl.textContent = 'Preparing…';
   try {
-    const r = await api(studio, 'photo', { e: eventId, id: it.i, pin: pin || undefined, ...guestAuth() }, { retries: 1, timeout: 90000 });
-    let blob = new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' });
+    let blob = await fullMedia(it);
     if (wantEnhanced && enhancedCache.has(it.i)) {
       blob = await (await fetch(enhancedCache.get(it.i))).blob();
     } else if (wantEnhanced) {
@@ -295,7 +319,8 @@ async function download() {
       URL.revokeObjectURL(url);
       blob = await canvasToBlob(enhance(c), 'image/jpeg', 0.92);
     }
-    h('a', { href: URL.createObjectURL(blob), download: `${eventId}-${it.i.slice(0, 8)}${wantEnhanced ? '-enhanced' : ''}.jpg` }).click();
+    const ext = { 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'jpg';
+    h('a', { href: URL.createObjectURL(blob), download: `${eventId}-${it.i.slice(0, 8)}${wantEnhanced ? '-enhanced' : ''}.${ext}` }).click();
   } catch (e) { toast(e.message || 'Download failed', 'error'); }
   lb.dl.disabled = false;
   lb.dl.textContent = label;

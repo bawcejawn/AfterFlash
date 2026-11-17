@@ -1,7 +1,7 @@
 """End-to-end browser test against test/server.mjs (real backend code, mocked Google services).
 Uses Chrome's fake camera. Run: node test/server.mjs 8787 & python3 test/e2e.py
 """
-import os, re, sys, time
+import os, re, sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright, expect
 
 BASE = os.environ.get("BASE", "http://localhost:8787")
@@ -215,6 +215,57 @@ with sync_playwright() as p:
     bad = phone.new_page(); watch(bad, "bad")
     bad.goto(f"{BASE}/cam.html?e={event_id}&s=evil")
     expect(bad.locator("h1")).to_have_text("Hmm.")
+
+    # ---- private storage event: files are locked at rest, app still shows them
+    page = desk.new_page(); watch(page, "admin2")
+    page.goto(BASE + "/admin.html")
+    page.fill("#ak", ADMIN_KEY); page.click("text=Sign in")
+    expect(page.locator("h1")).to_have_text("Events", timeout=15000)
+    page.fill("input[name=name]", "Private party")
+    page.check("input[name=encrypted]")
+    page.click("text=Create event")
+    expect(page.locator(".keybox").first).to_contain_text("host.html")
+    p_host_url = page.locator(".keybox").first.inner_text().strip()
+    p_id = re.search(r"e=([A-Za-z0-9]+)", p_host_url).group(1)
+    pc = phone.new_page(); watch(pc, "pcam")
+    pc.goto(f"{BASE}/cam.html?e={p_id}")
+    pc.fill("#gname", "Lee"); pc.click("text=Open the camera")
+    wait_js(pc, "document.querySelector('video') && document.querySelector('video').videoWidth > 0", 15000)
+    pc.click(".shutter")
+    expect(pc.locator(".queue-pill")).to_contain_text("All photos uploaded", timeout=30000)
+    pc.click("text=Sign the guestbook")
+    pc.click(".modal button:has-text('Record a voice message')")
+    pc.wait_for_timeout(2000)
+    pc.click(".modal button:has-text('Stop recording')")
+    expect(pc.locator(".modal")).to_contain_text("Voice message ready", timeout=10000)
+    pc.click(".modal button:has-text('Send')")
+    expect(pc.locator(".toast").last).to_contain_text("guestbook", timeout=20000)
+    # what Drive holds is ciphertext only
+    stored = json.loads(urllib.request.urlopen(BASE + "/mock-files").read())
+    enc = [f for f in stored if f["name"].endswith(".enc")]
+    assert len(enc) >= 3, stored
+    assert all(f["head"] == "PSE1" and not f["shared"] for f in enc), enc
+    pa = phone.new_page(); watch(pa, "palbum")
+    pa.goto(f"{BASE}/album.html?e={p_id}")
+    expect(pa.locator(".tile")).to_have_count(1, timeout=15000)
+    wait_js(pa, "[...document.querySelectorAll('.tile img')].every(i => i.src.startsWith('blob:') && i.complete && i.naturalWidth > 0)", 20000)
+    pa.locator(".tile").first.click()
+    wait_js(pa, "(document.querySelector('.lightbox img')||{}).src?.startsWith('blob:') && document.querySelector('.lightbox img').naturalWidth > 0", 20000)
+    pa.screenshot(path=f"{SHOTS}/14-private-album.png")
+    pa.keyboard.press("Escape")
+    pa.click("role=tab[name='Guestbook']")
+    pa.click(".voice button:has-text('Play')")
+    wait_js(pa, "(() => { const a = document.querySelector('.voice audio'); return a && a.src.startsWith('blob:') && a.readyState >= 1; })()", 15000)
+    ph = desk.new_page(); watch(ph, "phost")
+    ph.goto(p_host_url)
+    ph.click("role=tab[name=/Photos/]")
+    wait_js(ph, "[...document.querySelectorAll('.mod-item img')].some(i => i.src.startsWith('blob:') && i.naturalWidth > 0)", 20000)
+    expect(ph.locator(".mod-item a:has-text('View')")).to_have_count(0)
+    page.goto(BASE + "/admin.html")
+    with page.expect_download() as dl:
+        page.click("text=Download key backup")
+    backup = json.loads(open(dl.value.path()).read())
+    assert p_id in json.dumps(backup), backup
 
     # ---- Koinos pages load under their CSP (koilib needs eval there) without script errors
     host.click("role=tab[name='Keepsakes']")

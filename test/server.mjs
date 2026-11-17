@@ -42,6 +42,10 @@ http.createServer((req, res) => {
     res.end(png);
     return;
   }
+  if (url.pathname === '/mock-files') { // test-only: what Drive holds (name, first bytes, sharing)
+    const out = [...gas.files.values()].filter((f) => f.blob && f.blob.bytes && !f.trashed).map((f) => ({ name: f.getName(), head: String.fromCharCode(...gas.unsigned(f.blob.bytes.slice(0, 4))), shared: f.sharing !== 'PRIVATE' }));
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); return;
+  }
   if (url.pathname.startsWith('/mock-drive/')) {
     const id = url.searchParams.get('id') || url.pathname.split('/')[4];
     const f = gas.files.get(id);
