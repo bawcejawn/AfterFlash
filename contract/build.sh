@@ -13,12 +13,12 @@ PROTO=assembly/proto/photoshare.proto
 retry() { local n=0; until "$@"; do n=$((n+1)); [[ $n -ge 4 ]] && return 1; echo "  retrying ($n)…"; sleep 2; done; }
 
 echo "• ABI"
-retry $BIN/protoc --plugin=protoc-gen-abi=$BIN/koinos-abi-proto-gen --abi_out=abi/ $PROTO
+retry $BIN/protoc --plugin=protoc-gen-abi=./tools/koinos-abi-proto-gen --abi_out=abi/ $PROTO
 node make-abi.cjs
 
 echo "• AssemblyScript protobuf bindings"
-retry $BIN/protoc --plugin=protoc-gen-as=$BIN/as-proto-gen --as_out=. $PROTO
-retry $BIN/protoc --plugin=protoc-gen-as=$BIN/koinos-as-gen --as_out=assembly/ $PROTO
+retry $BIN/protoc --plugin=protoc-gen-as=./tools/as-proto-gen --as_out=. $PROTO
+retry $BIN/protoc --plugin=protoc-gen-as=./tools/koinos-as-gen --as_out=assembly/ $PROTO
 
 # Keepsake arguments/results are up to 48 KiB; the SDK's default system-call buffer is 1 KiB.
 grep -q "setSystemBufferSize" assembly/index.ts || \

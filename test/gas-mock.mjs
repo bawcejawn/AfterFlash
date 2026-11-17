@@ -37,6 +37,11 @@ export function createGas() {
     constructor(name, parent) { this.id = newId('d'); this.name = name; this.parent = parent; this.trashed = false; files.set(this.id, this); }
     getId() { return this.id; }
     createFolder(name) { return new Folder(name, this); }
+    getFoldersByName(name) {
+      const list = [...files.values()].filter((f) => f instanceof Folder && f.parent === this && f.name === name);
+      let i = 0;
+      return { hasNext: () => i < list.length, next: () => list[i++] };
+    }
     createFile(blob) { return new File(blob, this); }
     setTrashed(t) { this.trashed = t; }
   }

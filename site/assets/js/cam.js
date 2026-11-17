@@ -310,7 +310,7 @@ async function onShutter() {
     applyLook(canvas, look);
     if (ev.dateStamp) stampDate(canvas);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88);
-    const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
+    const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
     await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
     if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
   } catch (e) {
@@ -385,7 +385,7 @@ async function fromFiles(files) {
       const canvas = drawScaled(src.img, src.w, src.h, 2560);
       src.done();
       const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88); // re-encode: strips location data
-      const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
+      const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
     } catch {
       toast('That file couldn’t be read as a photo.', 'error');

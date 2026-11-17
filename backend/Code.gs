@@ -263,7 +263,7 @@ function aUpload(req) {
   var file, thumb = null;
   try {
     file = folder.createFile(Utilities.newBlob(bytes, mime, base + '.' + ext));
-    if (thumbBytes) thumb = folder.createFile(Utilities.newBlob(thumbBytes, 'image/jpeg', base + '_preview.jpg'));
+    if (thumbBytes) thumb = subFolder_(ev, 'Previews (used by the app)').createFile(Utilities.newBlob(thumbBytes, 'image/jpeg', base + '_preview.jpg'));
   } catch (x) {
     refundShot_(ev, g.row.guestId);
     CacheService.getScriptCache().remove(inflightKey);
@@ -414,7 +414,7 @@ function aGuestbookAdd(req) {
     for (var r = 1; r < rows.length; r++) if (String(rows[r][1]) === g.row.guestId && rows[r][6] !== 'deleted') mineCount++;
     if (mineCount >= LIMITS.NOTES_PER_GUEST) throw err_('full', 'You’ve left the maximum number of messages.');
     if (audio) {
-      var f = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + (mime === 'audio/webm' ? '.webm' : '.m4a')));
+      var f = subFolder_(ev, 'Guestbook voice messages').createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + (mime === 'audio/webm' ? '.webm' : '.m4a')));
       if (status === 'visible') share_(f, null, true, ev.id);
       audioId = f.getId();
     }
@@ -1063,6 +1063,19 @@ function guestView_(ev, row) {
 }
 
 // ---------------------------------------------------------------- drive helpers
+
+/** Child folder of the event folder (created on first use), so originals stay uncluttered. */
+function subFolder_(ev, name) {
+  var cache = CacheService.getScriptCache();
+  var key = 'sf:' + ev.id + ':' + name;
+  var id = cache.get(key);
+  if (id) { try { return DriveApp.getFolderById(id); } catch (x) { /* recreate below */ } }
+  var parent = DriveApp.getFolderById(ev.folderId);
+  var it = parent.getFoldersByName(name);
+  var folder = it.hasNext() ? it.next() : parent.createFolder(name);
+  cache.put(key, folder.getId(), 21600);
+  return folder;
+}
 
 /** Set link sharing. Returns false (and logs for the admin) instead of throwing. */
 function share_(file, thumb, isPublic, eventId) {
