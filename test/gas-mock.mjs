@@ -15,6 +15,7 @@ export function createGas() {
   const files = new Map(); // id -> file
   const sheets = new Map(); // id -> spreadsheet
   const logs = [];
+  const faults = {};
 
   class Blob {
     constructor(bytes, mime, name) { this.bytes = bytes; this.mime = mime; this.name = name; }
@@ -28,7 +29,7 @@ export function createGas() {
     }
     getId() { return this.id; }
     getBlob() { return this.blob; }
-    setSharing(access) { this.sharing = access; }
+    setSharing(access) { if (faults.sharing) throw new Error('Sharing is restricted by your organization'); this.sharing = access; }
     setTrashed(t) { this.trashed = t; }
     moveTo(folder) { this.parent = folder; }
   }
@@ -65,7 +66,7 @@ export function createGas() {
     constructor(name) { this.name = name; this.rows = []; }
     setName(n) { this.name = n; return this; }
     getRange(r, c, nr, nc) { return new Range(this, r, c, nr, nc); }
-    appendRow(row) { this.rows.push(row.slice()); return this; }
+    appendRow(row) { if (faults.append) throw new Error('Service Spreadsheets failed'); this.rows.push(row.slice()); return this; }
     getLastRow() { return this.rows.length; }
     getDataRange() {
       const nc = Math.max(1, ...this.rows.map((r) => r.length));
@@ -83,7 +84,7 @@ export function createGas() {
 
   const g = {
     console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push('ERR ' + a.join(' ')) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null, setProperty: (k, v) => props.set(k, String(v)) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null, setProperty: (k, v) => props.set(k, String(v)), deleteProperty: (k) => props.delete(k) }) },
     CacheService: {
       getScriptCache: () => ({
         get: (k) => cache.get(k) ?? null,
@@ -127,5 +128,5 @@ export function createGas() {
     const res = ctx.doPost({ postData: { contents: JSON.stringify(body) } });
     return JSON.parse(res.body);
   }
-  return { ctx, post, logs, files, props, cache, sheets, unsigned };
+  return { ctx, post, logs, files, props, cache, sheets, unsigned, faults };
 }

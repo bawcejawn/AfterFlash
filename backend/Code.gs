@@ -67,8 +67,10 @@ function doPost(e) {
   } catch (x) {
     if (x && x.code) {
       out = { ok: false, error: x.code, message: x.message };
+      if (x.code === 'busy') logProblem_(req && req.a || '?', req && req.e, 'Server was busy (too many uploads at once); phones retried automatically.');
     } else {
       console.error(x && x.stack ? x.stack : x);
+      logProblem_(req && req.a || '?', req && req.e, 'Unexpected error: ' + (x && x.message ? x.message : String(x)));
       out = { ok: false, error: 'server_error', message: 'Something went wrong. Please try again.' };
     }
   }
@@ -98,6 +100,8 @@ var ACTIONS = {
   hostMarkArchived: aHostMarkArchived,
   // admin
   adminCheck: aAdminCheck,
+  adminProblems: aAdminProblems,
+  adminClearProblems: aAdminClearProblems,
   adminListAdmins: aAdminListAdmins,
   adminAddAdmin: aAdminAddAdmin,
   adminRemoveAdmin: aAdminRemoveAdmin,
@@ -253,16 +257,26 @@ function aUpload(req) {
     throw x;
   }
   var status = s.approval ? 'pending' : 'visible';
-  if (status === 'visible') share_(file, thumb, true);
-  var sha = sha256Hex_(bytes);
-  var w = int_(req.w, 0, 20000, 0), h = int_(req.h, 0, 20000, 0), dur = int_(req.dur, 0, 600, 0);
-  var flags = '';
-  withLock_(function () {
-    var sh = mediaSheet_(ev);
-    var seq = sh.getLastRow();
-    sh.appendRow([seq, file.getId(), thumb ? thumb.getId() : '', g.row.guestId, kind, mime, bytes.length, sha,
-      w, h, dur, now, status, 0, clientId, '', '', flags]);
-  });
+  try {
+    // A sharing failure must not lose the photo: it is saved and still viewable through the
+    // site's fallback; the problem is logged for the admin instead.
+    var flags = '';
+    if (status === 'visible' && !share_(file, thumb, true, ev.id)) flags = 'share-failed';
+    var sha = sha256Hex_(bytes);
+    var w = int_(req.w, 0, 20000, 0), h = int_(req.h, 0, 20000, 0), dur = int_(req.dur, 0, 600, 0);
+    withLock_(function () {
+      var sh = mediaSheet_(ev);
+      var seq = sh.getLastRow();
+      sh.appendRow([seq, file.getId(), thumb ? thumb.getId() : '', g.row.guestId, kind, mime, bytes.length, sha,
+        w, h, dur, now, status, 0, clientId, '', '', flags]);
+    });
+  } catch (x) {
+    // Never leave orphan files in Drive: undo the upload so the phone's retry starts clean.
+    try { file.setTrashed(true); if (thumb) thumb.setTrashed(true); } catch (y) { /* ignore */ }
+    refundShot_(ev, g.row.guestId);
+    CacheService.getScriptCache().remove(inflightKey);
+    throw x;
+  }
   bumpVersion_(ev.id);
   return { id: file.getId(), status: status, guest: guestView_(ev, g.row) };
 }
@@ -323,7 +337,7 @@ function aReport(req) {
     if (!m) throw err_('not_found', 'Photo not found.');
     if (m.row.status === 'visible') {
       m.sheet.getRange(m.rowIndex, 13, 1, 2).setValues([['reported', (Number(m.row.reports) || 0) + 1]]);
-      share_(DriveApp.getFileById(m.row.id), m.row.thumbId ? DriveApp.getFileById(m.row.thumbId) : null, false);
+      share_(DriveApp.getFileById(m.row.id), m.row.thumbId ? DriveApp.getFileById(m.row.thumbId) : null, false, ev.id);
     }
     var fresh = findGuest_(ev, g.row.guestId);
     fresh.sheet.getRange(fresh.rowIndex, 7).setValue((Number(fresh.row.reports) || 0) + 1);
@@ -398,7 +412,7 @@ function aHostModerate(req) {
         file.setTrashed(true);
         if (thumb) thumb.setTrashed(true);
       } else {
-        share_(file, thumb, status === 'visible');
+        share_(file, thumb, status === 'visible', ev.id);
       }
       sh.getRange(r + 1, 13, 1, 2).setValues([[status, status === 'visible' ? 0 : data[r][13]]]);
       changed++;
@@ -861,16 +875,44 @@ function guestView_(ev, row) {
 
 // ---------------------------------------------------------------- drive helpers
 
-function share_(file, thumb, isPublic) {
+/** Set link sharing. Returns false (and logs for the admin) instead of throwing. */
+function share_(file, thumb, isPublic, eventId) {
   var access = isPublic ? DriveApp.Access.ANYONE_WITH_LINK : DriveApp.Access.PRIVATE;
   var perm = isPublic ? DriveApp.Permission.VIEW : DriveApp.Permission.NONE;
   try {
     file.setSharing(access, perm);
     if (thumb) thumb.setSharing(access, perm);
+    return true;
   } catch (x) {
-    // Workspace domains can forbid link sharing; surface a clear message for hosts.
-    throw err_('sharing_blocked', 'Google Drive refused link sharing. A Workspace admin must allow "Anyone with the link" sharing.');
+    logProblem_('sharing', eventId || '', 'Google Drive refused to change link sharing (' + (x && x.message ? x.message : x) +
+      '). Photos still upload; ask a Workspace admin to allow "Anyone with the link" sharing.');
+    return false;
   }
+}
+
+// ---------------------------------------------------------------- problem log (shown on admin page)
+
+function logProblem_(where, eventId, message) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var list = parseJson_(props.getProperty('PROBLEMS') || '[]');
+    if (!Array.isArray(list)) list = [];
+    list.push({ t: Date.now(), w: String(where).slice(0, 30), e: String(eventId || '').slice(0, 20), m: String(message).slice(0, 300) });
+    while (JSON.stringify(list).length > 8000) list.shift();
+    props.setProperty('PROBLEMS', JSON.stringify(list));
+  } catch (x) { /* never let logging break a request */ }
+}
+
+function aAdminProblems(req) {
+  authAdmin_(req);
+  var list = parseJson_(PropertiesService.getScriptProperties().getProperty('PROBLEMS') || '[]');
+  return { problems: Array.isArray(list) ? list.slice().reverse() : [] };
+}
+
+function aAdminClearProblems(req) {
+  requireOwner_(authAdmin_(req));
+  PropertiesService.getScriptProperties().deleteProperty('PROBLEMS');
+  return {};
 }
 
 // ---------------------------------------------------------------- versioning / caching
