@@ -1,5 +1,8 @@
 # PhotoShare
 
+- **Live site:** https://bawcejawn.github.io/PhotoShare/
+- **Studio sign-in (create events):** https://bawcejawn.github.io/PhotoShare/admin.html
+
 A shared disposable camera for weddings, parties and any event. Guests scan a QR code, shoot a limited roll from their phone's browser, and every photo lands in one album that **you own**. No app, no guest accounts, no fees.
 
 - **$0 to run.** A static site on GitHub Pages plus a Google Apps Script backend that stores photos in your own Google Drive (15 GB free, more with Google Workspace).

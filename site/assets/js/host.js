@@ -1,7 +1,7 @@
 // Host dashboard: share, moderate, guests, settings.
 import {
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtBytes,
-  thumbUrl, link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes,
+  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial,
 } from './util.js';
 import { api } from './api.js';
 import { LOOKS } from './film.js';
@@ -120,10 +120,13 @@ function shareTab() {
         h('button', { class: 'btn small', onclick: () => window.print() }, 'Print sign'),
         h('button', { class: 'btn small', onclick: downloadQr }, 'Download QR'))),
     h('div', { class: 'stack grow' },
+      h('div', null, h('span', { class: 'small muted' }, 'Event code'), h('div', { class: 'row' }, h('span', { class: 'event-code' }, eventId), h('button', { class: 'btn small', onclick: () => copy(eventId) }, 'Copy')),
+        h('small', { class: 'muted' }, `Guests can also type this at ${link('index.html').replace(/index\.html$/, '')}`)),
       linkRow('Guest link', guestUrl(), 'This is what the QR code opens. Share it in texts or on the invitation.'),
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
-      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution.'))));
+      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution.'),
+      h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
 }
 
 function downloadQr() {
@@ -175,23 +178,24 @@ function photosTab() {
   })));
 }
 
-// Photos that aren't public (pending, hidden, reported) can't load from Drive's public
-// thumbnail URL, so fetch their preview through the authenticated API instead.
+// Visible photos load from Google's image URLs; anything private (pending, hidden, reported),
+// or anything those URLs refuse, is fetched through the authenticated API instead.
 const privateThumbs = new Map();
-let thumbQueue = Promise.resolve();
+const thumbQueue = serial();
+function privateThumb(it) {
+  if (privateThumbs.has(it.i)) return Promise.resolve(privateThumbs.get(it.i));
+  return thumbQueue(async () => {
+    const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'thumb' }, { retries: 1 });
+    if (!/^image\/(jpeg|png|webp)$/.test(m.mime)) return '';
+    const url = URL.createObjectURL(new Blob([base64ToBytes(m.data)], { type: m.mime }));
+    privateThumbs.set(it.i, url);
+    return url;
+  });
+}
 function hostThumb(it) {
   const img = h('img', { alt: '', loading: 'lazy' });
-  if (it.s === 'visible') { img.src = thumbUrl(it.k === 'v' && it.t ? it.t : it.i, 400); return img; }
-  if (privateThumbs.has(it.i)) { img.src = privateThumbs.get(it.i); return img; }
-  thumbQueue = thumbQueue.then(async () => {
-    try {
-      const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'thumb' }, { retries: 1 });
-      if (!/^image\/(jpeg|png|webp)$/.test(m.mime)) return;
-      const url = URL.createObjectURL(new Blob([base64ToBytes(m.data)], { type: m.mime }));
-      privateThumbs.set(it.i, url);
-      img.src = url;
-    } catch { /* leave placeholder */ }
-  });
+  if (it.s === 'visible') return loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 400, { proxy: () => privateThumb(it) });
+  privateThumb(it).then((url) => { if (url) img.src = url; }).catch(() => {});
   return img;
 }
 

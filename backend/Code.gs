@@ -37,7 +37,8 @@ var LIMITS = {
   JOINS_PER_EVENT_PER_MIN: 120,
   BAD_PIN_PER_EVENT_PER_10MIN: 40,
   BAD_ADMIN_PER_10MIN: 20,
-  REPORTS_PER_GUEST: 15
+  REPORTS_PER_GUEST: 15,
+  THUMBS_PER_EVENT_PER_MIN: 900
 };
 
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
@@ -81,6 +82,7 @@ var ACTIONS = {
   upload: aUpload,
   list: aList,
   report: aReport,
+  thumb: aThumb,
   me: aMe,
   // host
   hostGet: aHostGet,
@@ -165,6 +167,8 @@ function aJoin(req) {
   if (!label) label = 'Guest ' + guestId.slice(0, 4).toUpperCase();
   withLock_(function () {
     var sh = eventSheet_(ev, 'guests');
+    // Joins are cheap, so cap them too (people re-joining on new phones/browsers is expected).
+    if (sh.getLastRow() - 1 >= s.maxGuests * 4 + 50) throw err_('full', 'This event has reached its guest limit.');
     sh.appendRow([guestId, sha256Hex_(token), label, 0, 0, Date.now(), 0, false]);
   });
   var row = { guestId: guestId, label: label, shots: 0, uploads: 0, blocked: false };
@@ -195,13 +199,14 @@ function aUpload(req) {
   if (!rateOk_('upg:' + ev.id + ':' + g.row.guestId, LIMITS.UPLOADS_PER_GUEST_PER_MIN, 60)) throw err_('rate_limited', 'Slow down a little.');
   if (!rateOk_('upe:' + ev.id, LIMITS.UPLOADS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Lots of uploads right now. Retrying soon.');
 
-  // Idempotency: offline queue retries must not double-count.
-  var dup = findMediaByClient_(ev, g.row.guestId, clientId);
-  if (dup) return { id: dup.id, duplicate: true, guest: guestView_(ev, g.row) };
+  // Idempotency: offline queue retries must not double-count. Same pass totals storage used.
+  var stats = mediaStats_(ev, g.row.guestId, clientId);
+  if (stats.dup) return { id: stats.dup.id, duplicate: true, guest: guestView_(ev, g.row) };
 
   var bytes = decodeB64_(req.data);
   var max = kind === 'video' ? LIMITS.VIDEO_BYTES : LIMITS.PHOTO_BYTES;
   if (!bytes.length || bytes.length > max) throw err_('too_large', 'File is too large.');
+  if (stats.bytes + bytes.length > s.maxStorageMB * 1024 * 1024) throw err_('full', 'This album has reached its storage limit.');
   var mime = sniffMime_(bytes);
   if (kind === 'photo' && mime !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
   if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err_('bad_type', 'Unsupported video format.');
@@ -277,15 +282,37 @@ function aList(req) {
   }
   var labels = guestLabels_(ev);
   base.items = visible.map(function (m) {
-    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', c: m.createdAt, w: m.w, h: m.h };
+    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0 };
   });
   return base;
+}
+
+/**
+ * Preview image bytes for a photo that is publicly visible in this album. Used only as a
+ * fallback when a viewer's browser can't load Google's image URLs directly.
+ */
+function aThumb(req) {
+  var ev = loadEvent_(req.e);
+  var s = ev.settings;
+  var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
+  if (!isWall) checkPin_(ev, req.pin);
+  if (!isRevealed_(s) || (!s.guestGallery && !isWall)) throw err_('not_found', 'Not found');
+  if (!rateOk_('thumb:' + ev.id, LIMITS.THUMBS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
+  var m = findMedia_(ev, str_(req.id, 100));
+  if (!m || m.row.status !== 'visible') throw err_('not_found', 'Not found');
+  var blob = DriveApp.getFileById(m.row.thumbId || m.row.id).getBlob();
+  if (blob.getContentType() !== 'image/jpeg') throw err_('not_found', 'Not found');
+  var bytes = blob.getBytes();
+  if (bytes.length > LIMITS.THUMB_BYTES) throw err_('too_large', 'Preview too large');
+  return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
 
 function aReport(req) {
   var ev = loadEvent_(req.e);
   if (!ev.settings.allowReports) throw err_('disabled', 'Reporting is turned off.');
   var g = authGuest_(ev, req);
+  // Only guests who have actually taken a photo can report: stops drive-by accounts hiding the album.
+  if (g.row.uploads < 1) throw err_('not_allowed', 'Take a photo first, then you can report photos.');
   if (g.row.reports >= LIMITS.REPORTS_PER_GUEST) throw err_('rate_limited', 'Report limit reached. Please tell the host.');
   var id = str_(req.id, 100);
   withLock_(function () {
@@ -311,7 +338,12 @@ function aHostGet(req) {
 
 function aHostUpdate(req) {
   var ev = authHost_(req);
-  var next = sanitizeSettings_(Object.assign({}, ev.settings, req.settings || {}));
+  var incoming = req.settings && typeof req.settings === 'object' ? req.settings : {};
+  var merged = {};
+  Object.keys(ev.settings).forEach(function (k) {
+    merged[k] = Object.prototype.hasOwnProperty.call(incoming, k) ? incoming[k] : ev.settings[k];
+  });
+  var next = sanitizeSettings_(merged);
   var pinHash = ev.pinHash;
   if (req.pin === '') pinHash = '';
   else if (req.pin != null) {
@@ -619,6 +651,7 @@ function sanitizeSettings_(s) {
     maxGuests: int_(s.maxGuests, 1, LIMITS.MAX_GUESTS, 150),
     allowVideo: s.allowVideo !== false,
     maxVideoSec: int_(s.maxVideoSec, 3, 60, 15),
+    maxStorageMB: int_(s.maxStorageMB, 100, 200000, 5000),
     allowLibrary: s.allowLibrary === true,
     approval: s.approval === true,
     guestGallery: s.guestGallery !== false,
@@ -692,6 +725,17 @@ function findMedia_(ev, id) {
     if (String(data[r][1]) === id) return { sheet: sh, rowIndex: r + 1, row: rowObj_(MEDIA_COLS, data[r]) };
   }
   return null;
+}
+
+/** One pass over the media sheet: duplicate lookup + total bytes stored (excluding deleted). */
+function mediaStats_(ev, guestId, clientId) {
+  var data = mediaSheet_(ev).getDataRange().getValues();
+  var out = { dup: null, bytes: 0 };
+  for (var r = 1; r < data.length; r++) {
+    if (data[r][12] !== 'deleted') out.bytes += Number(data[r][6]) || 0;
+    if (!out.dup && String(data[r][14]) === clientId && String(data[r][3]) === guestId) out.dup = rowObj_(MEDIA_COLS, data[r]);
+  }
+  return out;
 }
 
 function findMediaByClient_(ev, guestId, clientId) {
