@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.4.0';
+var APP_VERSION = '1.5.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -96,6 +96,7 @@ var ACTIONS = {
   guestbookAdd: aGuestbookAdd,
   guestbookList: aGuestbookList,
   hostFavorite: aHostFavorite,
+  hostRecover: aHostRecover,
   hostGuestbook: aHostGuestbook,
   hostGuestbookModerate: aHostGuestbookModerate,
   me: aMe,
@@ -316,7 +317,7 @@ function aList(req) {
   }
   var labels = guestLabels_(ev);
   base.items = visible.map(function (m) {
-    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0, f: m.fav === true ? 1 : 0 };
+    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || (m.guestId === 'recovered' ? 'Recovered from Drive' : ''), c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0, f: m.fav === true ? 1 : 0 };
   });
   return base;
 }
@@ -485,6 +486,55 @@ function aHostGuestbookModerate(req) {
 
 // ---------------------------------------------------------------- favorites
 
+/**
+ * Finds photos/videos sitting in the event's Drive folder that the album doesn't know about
+ * (e.g. uploads interrupted by an error before v1.2, or files the owner added by hand) and
+ * adds them to the album. Duplicates of the same photo (by SHA-256) are added only once.
+ * Only the event's own folder is scanned.
+ */
+function aHostRecover(req) {
+  var ev = authHost_(req);
+  var dryRun = req.dryRun === true;
+  var known = Object.create(null);
+  readMedia_(ev).forEach(function (m) { known[String(m.id)] = true; known['sha:' + m.sha256] = true; });
+  var found = [], dupes = 0;
+  var it = DriveApp.getFolderById(ev.folderId).getFiles();
+  var scanned = 0;
+  while (it.hasNext() && scanned < 2000) {
+    var f = it.next();
+    scanned++;
+    if (known[f.getId()] || f.isTrashed()) continue;
+    var mime = f.getMimeType();
+    if (mime !== 'image/jpeg' && mime !== 'video/mp4' && mime !== 'video/webm') continue;
+    if (/_preview\.jpg$/.test(f.getName())) continue;
+    var bytes = f.getBlob().getBytes();
+    var sniff = sniffMime_(bytes);
+    if (sniff !== mime) continue;
+    var sha = sha256Hex_(bytes);
+    if (known['sha:' + sha]) { dupes++; continue; }
+    known['sha:' + sha] = true;
+    found.push({ file: f, mime: mime, bytes: bytes.length, sha: sha, created: f.getDateCreated().getTime() });
+  }
+  if (dryRun || !found.length) return { found: found.length, duplicates: dupes, added: 0 };
+  var status = ev.settings.approval ? 'pending' : 'visible';
+  var rows = found.map(function (x) {
+    var thumbId = '';
+    try {
+      var t = x.file.getThumbnail();
+      if (t) thumbId = subFolder_(ev, 'Previews (used by the app)').createFile(t.setName(x.file.getName().replace(/\.[^.]+$/, '') + '_preview.jpg')).getId();
+    } catch (e) { /* video thumbnails may not be ready yet */ }
+    if (status === 'visible') share_(x.file, thumbId ? DriveApp.getFileById(thumbId) : null, true, ev.id);
+    return [0, x.file.getId(), thumbId, 'recovered', x.mime.indexOf('video') === 0 ? 'video' : 'photo', x.mime, x.bytes, x.sha,
+      0, 0, 0, x.created, status, 0, 'recovered-' + x.file.getId().slice(0, 40), '', '', 'recovered', false];
+  });
+  withLock_(function () {
+    var sh = mediaSheet_(ev);
+    rows.forEach(function (r) { r[0] = sh.getLastRow(); sh.appendRow(r); });
+  });
+  bumpVersion_(ev.id);
+  return { found: found.length, duplicates: dupes, added: rows.length };
+}
+
 function aHostFavorite(req) {
   var ev = authHost_(req);
   var fav = req.fav === true;
@@ -563,7 +613,7 @@ function aHostList(req) {
   var ev = authHost_(req);
   var labels = guestLabels_(ev);
   var items = readMedia_(ev).filter(function (m) { return m.status !== 'deleted'; }).map(function (m) {
-    return { i: m.id, t: m.thumbId, k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || '', gid: m.guestId,
+    return { i: m.id, t: m.thumbId, k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || (m.guestId === 'recovered' ? 'Recovered from Drive' : ''), gid: m.guestId,
       c: m.createdAt, w: m.w, h: m.h, s: m.status, r: Number(m.reports) || 0, b: m.bytes, sha: m.sha256,
       ai: m.archIndex === '' ? null : Number(m.archIndex), f: m.flags || '', fv: m.fav === true };
   });
@@ -930,7 +980,7 @@ function sanitizeSettings_(s) {
     paused: s.paused === true,
     look: looks.indexOf(s.look) >= 0 ? s.look : 'classic',
     guestLooks: s.guestLooks !== false,
-    dateStamp: s.dateStamp !== false,
+    dateStamp: s.dateStamp === true,
     accent: color
   };
 }

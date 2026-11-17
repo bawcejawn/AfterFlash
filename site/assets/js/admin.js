@@ -61,9 +61,7 @@ async function dashboard(created) {
     events.length ? h('table', { class: 'list' },
       h('thead', null, h('tr', null, h('th', null, 'Event'), h('th', null, 'Date'), h('th', null, 'Created'), h('th', null, ''))),
       h('tbody', null, events.map((ev) => h('tr', null,
-        h('td', null, ev.canManage !== false
-          ? h('a', { href: link('host.html', { e: ev.id, s: studio, extra: { admin: '1' } }) }, h('b', null, ev.name))
-          : h('b', null, ev.name), h('div', { class: 'small muted' }, ev.id)),
+        h('td', null, h('b', null, ev.name), h('div', { class: 'small muted' }, ev.id)),
         h('td', null, fmtDate(ev.date)),
         h('td', null, fmtWhen(ev.createdAt), h('div', { class: 'small muted' }, ev.createdBy ? `by ${ev.createdBy}` : '')),
         h('td', null, h('div', { class: 'row' },

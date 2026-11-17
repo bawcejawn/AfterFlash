@@ -155,6 +155,8 @@ The web address stays the same, so there's nothing to change in `config.js`.
 | Code changes don't take effect | You must publish a **New version** (see [Update the backend](#update-the-backend)). |
 | Uploads fail with a sharing error (Workspace) | A Google Workspace admin must allow "Anyone with the link" sharing. |
 | Site looks out of date after a change | Wait for the green check in **Actions**, then reload the page twice. |
+| Photos are in the Drive folder but not in the album | Dashboard → **Photos** → **Find missing photos**. It adds them once and skips duplicate copies. |
+| Photos won't open in Google Drive (but download fine) | You're signed into several Google accounts. Open Drive in a private window, or a Chrome profile with only the PhotoShare account. |
 | A guest's photos aren't uploading | They're saved on the phone and upload automatically when there's signal. Ask them to keep the page open for a moment. |
 
 ---
