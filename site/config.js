@@ -7,7 +7,7 @@ export default {
   // appear in links as ?s=<key>. The FIRST entry is the default. Only URLs listed here
   // are ever contacted — links cannot point the app at any other server.
   backends: {
-    main: 'https://script.google.com/macros/s/REPLACE_WITH_YOUR_DEPLOYMENT_ID/exec',
+    main: 'https://script.google.com/macros/u/2/s/AKfycbzuMjd4EGHezYGCs6Lc1v84fMs7xc-qm8Tg_2LPycnGZOCbUc88qZNzEyOlgPhbeQk_/exec',
   },
 
   // Koinos blockchain settings (optional). Leave contract empty to hide chain features.
