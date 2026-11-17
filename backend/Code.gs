@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.6.0';
+var APP_VERSION = '1.7.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -95,6 +95,7 @@ var ACTIONS = {
   mine: aMine,
   guestbookAdd: aGuestbookAdd,
   guestbookList: aGuestbookList,
+  noteAudio: aNoteAudio,
   hostFavorite: aHostFavorite,
   hostRecover: aHostRecover,
   hostGuestbook: aHostGuestbook,
@@ -466,6 +467,23 @@ function aGuestbookList(req) {
       return { id: n.id, g: n.label, text: n.text, a: n.audioId, c: n.createdAt, d: n.dur };
     })
   };
+}
+
+/** Voice message bytes for a visible guestbook note (played through the app, not Drive's player). */
+function aNoteAudio(req) {
+  var ev = loadEvent_(req.e);
+  var s = ev.settings;
+  var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
+  if (!isWall) checkPin_(ev, req.pin);
+  if (!s.guestbook || !isRevealed_(s) || (!s.guestGallery && !isWall)) throw err_('not_found', 'Not found');
+  if (!rateOk_('audio:' + ev.id, LIMITS.PHOTOS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
+  var id = str_(req.id, 100);
+  var note = readNotes_(ev).filter(function (n) { return n.audioId === id && n.status === 'visible'; })[0];
+  if (!note) throw err_('not_found', 'Not found');
+  var blob = DriveApp.getFileById(id).getBlob();
+  var bytes = blob.getBytes();
+  if (bytes.length > LIMITS.AUDIO_BYTES || !sniffAudio_(bytes)) throw err_('not_found', 'Not found');
+  return { mime: sniffAudio_(bytes), data: Utilities.base64Encode(bytes) };
 }
 
 function aHostGuestbook(req) {

@@ -164,7 +164,7 @@ async function renderGuestbook(body) {
   body.append(list);
   try {
     const { notes } = await api(studio, 'guestbookList', { e: eventId, pin: pin || undefined });
-    clear(list).append(lastList && !lastList.revealed ? h('p', { class: 'empty' }, 'Messages appear here when the album opens.') : renderNotes(notes));
+    clear(list).append(lastList && !lastList.revealed ? h('p', { class: 'empty' }, 'Messages appear here when the album opens.') : renderNotes(notes, (id) => api(studio, 'noteAudio', { e: eventId, id, pin: pin || undefined }, { timeout: 60000 })));
   } catch (e) { clear(list).append(h('p', null, e.message)); }
 }
 

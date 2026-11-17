@@ -3,8 +3,8 @@
 
 export const LOOKS = {
   none: { label: 'Natural' },
-  classic: { label: 'Classic film', curve: [12, 0.92, 1.12], tint: [1.04, 1.0, 0.94], sat: 0.92, grain: 10, vignette: 0.28 },
-  warm: { label: 'Golden hour', curve: [8, 0.95, 1.08], tint: [1.1, 1.02, 0.86], sat: 1.05, grain: 8, vignette: 0.22 },
+  classic: { label: 'Classic film', curve: [14, 0.92, 1.14], tint: [1.07, 1.01, 0.9], sat: 0.9, grain: 12, vignette: 0.32 },
+  warm: { label: 'Golden hour', curve: [10, 0.93, 1.08], tint: [1.14, 1.03, 0.8], sat: 1.1, grain: 8, vignette: 0.26 },
   mono: { label: 'Black & white', curve: [6, 0.9, 1.22], tint: [1, 1, 1], sat: 0, grain: 14, vignette: 0.32 },
   vivid: { label: 'Vivid', curve: [0, 1.0, 1.15], tint: [1.02, 1.0, 1.0], sat: 1.3, grain: 5, vignette: 0.15 },
   fade: { label: 'Faded', curve: [34, 0.86, 0.92], tint: [0.98, 1.0, 1.04], sat: 0.78, grain: 9, vignette: 0.18 },
