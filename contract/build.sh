@@ -8,13 +8,17 @@ BIN=./node_modules/.bin
 export PATH="$PWD/node_modules/.bin:$PATH"
 PROTO=assembly/proto/photoshare.proto
 
+# The protoc plugins read stdin with Node; on some CI runners that read can fail
+# transiently with EAGAIN. Retry a few times before giving up.
+retry() { local n=0; until "$@"; do n=$((n+1)); [[ $n -ge 4 ]] && return 1; echo "  retrying ($n)…"; sleep 2; done; }
+
 echo "• ABI"
-$BIN/protoc --plugin=protoc-gen-abi=$BIN/koinos-abi-proto-gen --abi_out=abi/ $PROTO
+retry $BIN/protoc --plugin=protoc-gen-abi=$BIN/koinos-abi-proto-gen --abi_out=abi/ $PROTO
 node make-abi.cjs
 
 echo "• AssemblyScript protobuf bindings"
-$BIN/protoc --plugin=protoc-gen-as=$BIN/as-proto-gen --as_out=. $PROTO
-$BIN/protoc --plugin=protoc-gen-as=$BIN/koinos-as-gen --as_out=assembly/ $PROTO
+retry $BIN/protoc --plugin=protoc-gen-as=$BIN/as-proto-gen --as_out=. $PROTO
+retry $BIN/protoc --plugin=protoc-gen-as=$BIN/koinos-as-gen --as_out=assembly/ $PROTO
 
 # Keepsake arguments/results are up to 48 KiB; the SDK's default system-call buffer is 1 KiB.
 grep -q "setSystemBufferSize" assembly/index.ts || \
