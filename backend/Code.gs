@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.5.0';
+var APP_VERSION = '1.6.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -48,7 +48,7 @@ var LIMITS = {
 
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
   'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav'];
-var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status'];
+var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status', 'clientId', 'dur'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
 var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
 
@@ -393,36 +393,54 @@ function aGuestbookAdd(req) {
   var g = authGuest_(ev, req);
   if (g.row.blocked) throw err_('blocked', 'Posting is turned off for this guest.');
   if (s.closesAt && Date.now() > Date.parse(s.closesAt)) throw err_('closed', 'This album is closed.');
+  var clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+  // A retry of the same message (weak signal) returns the first result instead of failing.
+  if (clientId) {
+    var prev = readNotes_(ev).filter(function (n) { return n.guestId === g.row.guestId && n.clientId === clientId; })[0];
+    if (prev) return { id: prev.id, status: prev.status, duplicate: true };
+  }
   var text = cleanText_(req.text, LIMITS.NOTE_TEXT);
   var audio = null, mime = '';
   if (req.audio) {
     audio = decodeB64_(req.audio);
     if (audio.length > LIMITS.AUDIO_BYTES) throw err_('too_large', 'That voice message is too long.');
-    var sniff = sniffMime_(audio);
-    if (sniff === 'video/webm') mime = 'audio/webm';
-    else if (sniff === 'video/mp4' || isM4a_(audio)) mime = 'audio/mp4';
-    else throw err_('bad_type', 'Unsupported audio format.');
+    mime = sniffAudio_(audio);
+    if (!mime) throw err_('bad_type', 'This phone recorded in a format we can’t save. Try typing a message instead.');
   }
   if (!text && !audio) throw err_('bad_request', 'Write a note or record a message.');
-  if (!rateOk_('gb:' + ev.id + ':' + g.row.guestId, 3, 60)) throw err_('rate_limited', 'Slow down a little.');
+  if (!rateOk_('gb:' + ev.id + ':' + g.row.guestId, 4, 60)) throw err_('rate_limited', 'Slow down a little.');
+  var existing = readNotes_(ev).filter(function (n) { return n.guestId === g.row.guestId && n.status !== 'deleted'; }).length;
+  if (existing >= LIMITS.NOTES_PER_GUEST) throw err_('full', 'You’ve left the maximum number of messages.');
   var status = s.approval ? 'pending' : 'visible';
   var id = randomId_(12);
   var audioId = '';
-  withLock_(function () {
-    var sh = notesSheet_(ev);
-    var rows = sh.getDataRange().getValues();
-    var mineCount = 0;
-    for (var r = 1; r < rows.length; r++) if (String(rows[r][1]) === g.row.guestId && rows[r][6] !== 'deleted') mineCount++;
-    if (mineCount >= LIMITS.NOTES_PER_GUEST) throw err_('full', 'You’ve left the maximum number of messages.');
-    if (audio) {
-      var f = subFolder_(ev, 'Guestbook voice messages').createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + (mime === 'audio/webm' ? '.webm' : '.m4a')));
-      if (status === 'visible') share_(f, null, true, ev.id);
-      audioId = f.getId();
-    }
-    sh.appendRow([id, g.row.guestId, g.row.label, text, audioId, Date.now(), status]);
-  });
+  var dur = int_(req.dur, 0, 600, 0);
+  // Save the recording before taking the lock, so the lock is held only for the sheet write.
+  if (audio) {
+    var ext = { 'audio/webm': '.webm', 'audio/mp4': '.m4a', 'audio/ogg': '.ogg' }[mime];
+    var f = subFolder_(ev, 'Guestbook voice messages').createFile(Utilities.newBlob(audio, mime, 'guestbook_' + id + ext));
+    if (status === 'visible') share_(f, null, true, ev.id);
+    audioId = f.getId();
+  }
+  try {
+    withLock_(function () {
+      notesSheet_(ev).appendRow([id, g.row.guestId, g.row.label, text, audioId, Date.now(), status, clientId, dur]);
+    });
+  } catch (x) {
+    if (audioId) { try { DriveApp.getFileById(audioId).setTrashed(true); } catch (y) { /* ignore */ } }
+    throw x;
+  }
   bumpVersion_(ev.id);
   return { id: id, status: status };
+}
+
+/** Audio containers browsers record: WebM (Chrome/Android), MP4/M4A (Safari, newer Chrome), Ogg (Firefox). */
+function sniffAudio_(b) {
+  if (b.length < 12) return '';
+  if (u8_(b[0]) === 0x1a && u8_(b[1]) === 0x45 && u8_(b[2]) === 0xdf && u8_(b[3]) === 0xa3) return 'audio/webm';
+  if (u8_(b[4]) === 0x66 && u8_(b[5]) === 0x74 && u8_(b[6]) === 0x79 && u8_(b[7]) === 0x70) return 'audio/mp4';
+  if (u8_(b[0]) === 0x4f && u8_(b[1]) === 0x67 && u8_(b[2]) === 0x67 && u8_(b[3]) === 0x53) return 'audio/ogg';
+  return '';
 }
 
 function isM4a_(bytes) {
@@ -433,7 +451,7 @@ function isM4a_(bytes) {
 
 function readNotes_(ev) {
   return notesSheet_(ev).getDataRange().getValues().slice(1).map(function (r) {
-    return { id: String(r[0]), guestId: String(r[1]), label: r[2], text: r[3], audioId: r[4] || '', createdAt: r[5], status: r[6] };
+    return { id: String(r[0]), guestId: String(r[1]), label: r[2], text: r[3], audioId: r[4] || '', createdAt: r[5], status: r[6], clientId: String(r[7] || ''), dur: Number(r[8]) || 0 };
   });
 }
 
@@ -445,7 +463,7 @@ function aGuestbookList(req) {
   if (!s.guestbook || !isRevealed_(s) || (!s.guestGallery && !isWall)) return { notes: [] };
   return {
     notes: readNotes_(ev).filter(function (n) { return n.status === 'visible'; }).map(function (n) {
-      return { id: n.id, g: n.label, text: n.text, a: n.audioId, c: n.createdAt };
+      return { id: n.id, g: n.label, text: n.text, a: n.audioId, c: n.createdAt, d: n.dur };
     })
   };
 }
@@ -454,7 +472,7 @@ function aHostGuestbook(req) {
   var ev = authHost_(req);
   return {
     notes: readNotes_(ev).filter(function (n) { return n.status !== 'deleted'; }).map(function (n) {
-      return { id: n.id, g: n.label, gid: n.guestId, text: n.text, a: n.audioId, c: n.createdAt, s: n.status };
+      return { id: n.id, g: n.label, gid: n.guestId, text: n.text, a: n.audioId, c: n.createdAt, s: n.status, d: n.dur };
     })
   };
 }
@@ -690,6 +708,13 @@ function aHostMedia(req) {
   var ev = authHost_(req);
   var id = str_(req.id, 100);
   var m = findMedia_(ev, id);
+  if (!m && req.which === 'note') {
+    // Voice message from this event's guestbook (lets hosts listen before approving).
+    var note = readNotes_(ev).filter(function (n) { return n.audioId === id && n.status !== 'deleted'; })[0];
+    if (!note) throw err_('not_found', 'Not found');
+    var ab = DriveApp.getFileById(id).getBlob();
+    return { mime: ab.getContentType(), data: Utilities.base64Encode(ab.getBytes()) };
+  }
   if (!m || m.row.status === 'deleted') throw err_('not_found', 'Not found');
   var which = req.which === 'orig' ? m.row.id : (m.row.thumbId || m.row.id);
   var blob = DriveApp.getFileById(which).getBlob();

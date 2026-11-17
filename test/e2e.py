@@ -20,6 +20,7 @@ def wait_js(page, expr, timeout=15000):
     raise AssertionError("timed out waiting for: " + expr)
 
 def watch(page, name):
+    page.on("response", lambda r: errors.append(f"[{name}] HTTP {r.status} {r.url}") if r.status >= 400 and "mock-lh3" not in r.url and "/mock-drive/thumbnail" not in r.url else None)
     page.on("console", lambda m: errors.append(f"[{name}] console.{m.type}: {m.text}") if m.type in ("error",) else None)
     page.on("pageerror", lambda e: errors.append(f"[{name}] pageerror: {e}"))
 
@@ -116,6 +117,15 @@ with sync_playwright() as p:
     cam.fill(".modal textarea", "Congratulations you two!")
     cam.click(".modal button:has-text('Send')")
     expect(cam.locator(".toast").last).to_contain_text("guestbook", timeout=15000)
+    # a voice message
+    cam.wait_for_timeout(1200)
+    cam.click("text=Sign the guestbook")
+    cam.click(".modal button:has-text('Record a voice message')")
+    cam.wait_for_timeout(2500)
+    cam.click(".modal button:has-text('Stop recording')")
+    expect(cam.locator(".modal")).to_contain_text("Voice message ready", timeout=10000)
+    cam.click(".modal button:has-text('Send')")
+    expect(cam.locator(".toast").last).to_contain_text("guestbook", timeout=20000)
 
     # reload keeps identity and shot count
     cam.reload()
@@ -144,7 +154,9 @@ with sync_playwright() as p:
     album.goto(f"{BASE}/album.html?e={event_id}&view=mine")
     expect(album.locator(".tile")).to_have_count(4, timeout=15000)
     album.click("role=tab[name='Guestbook']")
-    expect(album.locator(".note")).to_contain_text("Congratulations", timeout=15000)
+    expect(album.locator(".note").filter(has_text="Congratulations")).to_have_count(1, timeout=15000)
+    expect(album.locator(".voice")).to_contain_text("Voice message, 0:0", timeout=15000)
+    wait_js(album, "(() => { const a = document.querySelector('.voice audio'); return a && a.readyState >= 1; })()", 15000)
 
     # ---- host moderation sees the report and restores it
     host.click("role=tab[name=/Photos/]")
@@ -166,7 +178,7 @@ with sync_playwright() as p:
     host.click("text=Find missing photos")
     expect(host.locator(".toast").last).to_contain_text("Nothing missing", timeout=20000)
     host.click("role=tab[name='Guestbook']")
-    expect(host.locator(".note")).to_contain_text("Congratulations")
+    expect(host.locator(".note").filter(has_text="Congratulations")).to_have_count(1)
 
     # ---- settings save (develop later) → album hides photos
     host.click("role=tab[name='Settings']")
@@ -219,7 +231,9 @@ with sync_playwright() as p:
     browser.close()
 
 # network failures to the real Koinos RPC are expected in sandboxed runs
-bad = [e for e in errors if "favicon" not in e and "ERR_TUNNEL_CONNECTION_FAILED" not in e and not ("Failed to load resource" in e and e.startswith("[recover]"))]
+# Drive thumbnail 404s are expected when a photo turns private (reported/hidden): the app falls back.
+# Any other HTTP error is still reported by the response listener above.
+bad = [e for e in errors if "favicon" not in e and not ("Failed to load resource" in e and "404" in e) and "ERR_TUNNEL_CONNECTION_FAILED" not in e and not ("Failed to load resource" in e and e.startswith("[recover]"))]
 if bad:
     print("Browser errors:\n" + "\n".join(bad))
     sys.exit(1)
