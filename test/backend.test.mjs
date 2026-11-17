@@ -172,6 +172,13 @@ t('voice notes: Safari m4a and Firefox ogg accepted, retries are idempotent, dur
   assert.equal(listen.ok, true); assert.ok(/^audio\//.test(listen.mime));
   const other = makeEvent(env, { name: 'B' });
   assert.equal(env.post({ a: 'hostMedia', e: other.id, k: other.hostKey, id: notes[0].a, which: 'note' }).error, 'not_found');
+  const pub = env.post({ a: 'noteAudio', e: ev.id, id: notes[0].a });
+  assert.equal(pub.ok, true, JSON.stringify(pub)); assert.ok(/^audio\//.test(pub.mime));
+  assert.equal(env.post({ a: 'noteAudio', e: other.id, id: notes[0].a }).error, 'not_found');
+  const photoId = upload(env, ev.id, g).id;
+  assert.equal(env.post({ a: 'noteAudio', e: ev.id, id: photoId }).error, 'not_found', 'only guestbook audio');
+  env.post({ a: 'hostGuestbookModerate', e: ev.id, k: ev.hostKey, action: 'hide', ids: [notes[0].id] });
+  assert.equal(env.post({ a: 'noteAudio', e: ev.id, id: notes[0].a }).error, 'not_found', 'hidden notes not served');
 });
 
 t('rejects non-JPEG photos, html, png and spoofed types', () => {

@@ -88,6 +88,7 @@ with sync_playwright() as p:
     expect(cam.locator(".counter-window")).to_have_text("4")
     wait_js(cam, "document.querySelector('video') && document.querySelector('video').videoWidth > 0", 15000)
     cam.click("button[data-look=mono]")
+    expect(cam.locator(".viewfinder")).to_have_class(re.compile("look-mono"))
     cam.click(".shutter")
     expect(cam.locator(".counter-window")).to_have_text("3", timeout=15000)
     cam.wait_for_timeout(600)
@@ -156,7 +157,12 @@ with sync_playwright() as p:
     album.click("role=tab[name='Guestbook']")
     expect(album.locator(".note").filter(has_text="Congratulations")).to_have_count(1, timeout=15000)
     expect(album.locator(".voice")).to_contain_text("Voice message, 0:0", timeout=15000)
-    wait_js(album, "(() => { const a = document.querySelector('.voice audio'); return a && a.readyState >= 1; })()", 15000)
+    album.click(".voice button:has-text('Play')")
+    wait_js(album, "(() => { const a = document.querySelector('.voice audio'); return a && a.src.startsWith('blob:') && a.readyState >= 1; })()", 15000)
+    # the phone remembers the event on the home page
+    album.goto(f"{BASE}/index.html")
+    expect(album.locator("#my-events")).to_contain_text("Sam & Alex")
+    expect(album.locator("#my-events a:has-text('Camera')")).to_have_attribute("href", re.compile(event_id))
 
     # ---- host moderation sees the report and restores it
     host.click("role=tab[name=/Photos/]")

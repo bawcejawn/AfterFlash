@@ -1,5 +1,5 @@
 // Guestbook: write a note and/or record a short voice message; list notes.
-import { h, clear, toast, blobToBase64, fmtWhen, videoUrl, isDriveId, randomId } from './util.js';
+import { h, clear, toast, blobToBase64, fmtWhen, isDriveId, randomId } from './util.js';
 import { api } from './api.js';
 
 const MAX_SEC = 60;
@@ -88,27 +88,38 @@ export function openComposer({ studio, eventId, auth, dark = false, onDone }) {
 
 const fmtDur = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
-/** Audio player that shows the real length (recorded WebM/MP4 files often report 0 or ∞). */
-function voicePlayer(n) {
-  const audio = h('audio', { controls: true, preload: 'metadata', src: videoUrl(n.a) });
-  audio.addEventListener('loadedmetadata', () => {
-    if (!isFinite(audio.duration) || audio.duration === 0) {
-      // Seeking far ahead makes the browser work out the true duration.
-      const reset = () => { audio.removeEventListener('timeupdate', reset); audio.currentTime = 0; };
-      audio.addEventListener('timeupdate', reset);
-      try { audio.currentTime = 1e7; } catch { /* ignore */ }
+/**
+ * Voice message player. Audio is fetched through the app (Google Drive won't stream audio
+ * into other websites reliably), then played from memory. fetchAudio(id) → {mime, data}.
+ */
+export function voicePlayer(n, fetchAudio) {
+  const label = h('span', { class: 'small muted' }, n.d ? `Voice message, ${fmtDur(n.d)}` : 'Voice message');
+  const btn = h('button', { class: 'btn small', type: 'button' }, '▶ Play');
+  const box = h('div', { class: 'voice' }, label, btn);
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Loading…';
+    try {
+      const m = await fetchAudio(n.a);
+      if (!/^audio\/(webm|mp4|ogg)$/.test(m.mime)) throw new Error('Unexpected file type');
+      const bytes = Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
+      const audio = h('audio', { controls: true, src: URL.createObjectURL(new Blob([bytes], { type: m.mime })) });
+      btn.replaceWith(audio);
+      audio.play().catch(() => {});
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '▶ Play';
+      toast(e.message || 'Couldn’t play this message.', 'error');
     }
   });
-  return h('div', { class: 'voice' }, h('span', { class: 'small muted' }, n.d ? `Voice message, ${fmtDur(n.d)}` : 'Voice message'), audio);
+  return box;
 }
 
 /** Render notes as cards. Audio plays straight from Drive. */
-export function renderNotes(notes) {
+export function renderNotes(notes, fetchAudio) {
   if (!notes.length) return h('p', { class: 'empty' }, 'No messages yet.');
   return h('div', { class: 'notes' }, notes.slice().sort((a, b) => b.c - a.c).map((n) => h('article', { class: 'note' },
     n.text ? h('p', null, n.text) : null,
-    n.a && isDriveId(n.a) ? voicePlayer(n) : null,
+    n.a && isDriveId(n.a) && fetchAudio ? voicePlayer(n, fetchAudio) : null,
     h('p', { class: 'small muted' }, [n.g, fmtWhen(n.c)].filter(Boolean).join(', ')))));
 }
 
-export { clear, voicePlayer };
+export { clear };

@@ -1,7 +1,7 @@
 // Host dashboard: share, moderate, guests, settings.
 import {
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtBytes,
-  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial, videoUrl,
+  link, qrSvg, copy, isoToLocalInput, localInputToIso, frameGuard, config, base64ToBytes, loadDriveImage, serial,
 } from './util.js';
 import { api } from './api.js';
 import { LOOKS } from './film.js';
@@ -283,24 +283,11 @@ async function guestbookTab() {
     h('p', { class: 'muted' }, ev.settings.guestbook ? `${notes.length} messages. Guests sign it from the camera page.` : 'The guestbook is turned off in Settings.'),
     notes.length ? h('div', { class: 'notes' }, notes.map((n) => h('article', { class: 'note' },
       n.text ? h('p', null, n.text) : null,
-      n.a && isDriveId(n.a) ? (n.s === 'visible' ? voicePlayer(n) : privateVoice(n)) : null,
+      n.a && isDriveId(n.a) ? voicePlayer(n, (id) => api(studio, 'hostMedia', { e: eventId, k: key, id, which: 'note' }, { timeout: 60000 })) : null,
       h('p', { class: 'small muted' }, `${n.g}, ${fmtWhen(n.c)} `, h('span', { class: 'state ' + n.s }, stateLabel[n.s] || n.s)),
       h('div', { class: 'row' },
         n.s !== 'visible' ? h('button', { class: 'btn small primary', onclick: () => modNote(n.id, 'show') }, 'Show') : h('button', { class: 'btn small', onclick: () => modNote(n.id, 'hide') }, 'Hide'),
         h('button', { class: 'btn small danger', onclick: () => modNote(n.id, 'delete') }, 'Delete'))))) : null);
-}
-
-/** Pending/hidden voice notes are private in Drive, so fetch them through the API to listen. */
-function privateVoice(n) {
-  const btn = h('button', { class: 'btn small', onclick: async () => {
-    btn.disabled = true; btn.textContent = 'Loading…';
-    try {
-      const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: n.a, which: 'note' }, { timeout: 60000 });
-      if (!/^audio\/(webm|mp4|ogg)$/.test(m.mime)) throw new Error('Unexpected file type');
-      btn.replaceWith(h('audio', { controls: true, autoplay: true, src: URL.createObjectURL(new Blob([base64ToBytes(m.data)], { type: m.mime })) }));
-    } catch (e) { btn.disabled = false; btn.textContent = 'Listen'; toast(e.message, 'error'); }
-  } }, 'Listen');
-  return h('div', { class: 'voice' }, h('span', { class: 'small muted' }, 'Voice message '), btn);
 }
 
 async function modNote(id, action) {
