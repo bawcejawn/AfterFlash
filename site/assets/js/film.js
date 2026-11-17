@@ -98,41 +98,83 @@ export function canvasToBlob(canvas, type = 'image/jpeg', quality = 0.88) {
 }
 
 /**
- * "Enhance": automatic, natural touch-up (non-destructive — applied to a copy).
- * Per-channel levels stretch from robust percentiles (fixes dull/cast photos), a gentle
- * S-curve and a small saturation lift. Pure pixel math, runs on the viewer's device.
+ * "Enhance": automatic, natural touch-up applied to a copy (originals never change).
+ * Adapts to each photo: dull/dark/flat shots get levels, brightness and a mild white-balance
+ * fix; already-good shots change very little. Plus gentle local contrast and vibrance.
+ * Tuned on sample photos (see docs/ARCHITECTURE.md). Runs on the viewer's device.
  */
 export function enhance(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const { width: w, height: h } = canvas;
-  const img = ctx.getImageData(0, 0, w, h);
-  const d = img.data;
-  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
-  const step = Math.max(1, Math.floor((w * h) / 250000)) * 4;
-  let n = 0;
-  for (let i = 0; i < d.length; i += step) { hist[0][d[i]]++; hist[1][d[i + 1]]++; hist[2][d[i + 2]]++; n++; }
-  const pct = (hst, p) => { let acc = 0; const target = n * p; for (let v = 0; v < 256; v++) { acc += hst[v]; if (acc >= target) return v; } return 255; };
-  const luts = hist.map((hst) => {
-    let lo = pct(hst, 0.005), hi = pct(hst, 0.995);
-    if (hi - lo < 40) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 20); hi = Math.min(255, mid + 20); }
-    const scale = Math.min(1.6, 255 / Math.max(1, hi - lo));
-    const lut = new Uint8ClampedArray(256);
-    for (let v = 0; v < 256; v++) {
-      let x = ((v - lo) * scale) / 255;
-      x = Math.min(1, Math.max(0, x));
-      x = x + 0.08 * Math.sin(2 * Math.PI * (x - 0.5)) * (x * (1 - x) * 4) * 0.5; // gentle S-curve
-      lut[v] = Math.round(x * 255);
-    }
-    return lut;
-  });
-  const sat = 1.1;
-  for (let i = 0; i < d.length; i += 4) {
-    let r = luts[0][d[i]], g = luts[1][d[i + 1]], b = luts[2][d[i + 2]];
-    const l = 0.299 * r + 0.587 * g + 0.114 * b;
-    d[i] = l + (r - l) * sat; d[i + 1] = l + (g - l) * sat; d[i + 2] = l + (b - l) * sat;
-  }
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  enhancePixels(img.data, canvas.width, canvas.height);
   ctx.putImageData(img, 0, 0);
   return canvas;
+}
+
+function enhancePixels(d, w, h) {
+  const N = w * h;
+  const Y = new Float32Array(N);
+  for (let i = 0, p = 0; p < N; i += 4, p++) Y[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  // --- tone: partial levels + midtone gamma (luminance only, hue preserved)
+  const hist = new Uint32Array(256);
+  for (let p = 0; p < N; p++) hist[Y[p] | 0]++;
+  const pct = (q) => { let acc = 0; const t = N * q; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= t) return v; } return 255; };
+  const lo0 = pct(0.005), hi0 = pct(0.995);
+  const lo = Math.max(0, lo0 - 2), hi = Math.min(255, hi0 + 3);
+  const gain = Math.min(1.8, 252 / Math.max(1, hi - lo));
+  let mean = 0;
+  for (let p = 0; p < N; p++) mean += Math.min(255, Math.max(0, (Y[p] - lo) * gain));
+  mean /= N * 255;
+  let gamma = Math.log(0.47) / Math.log(Math.min(0.95, Math.max(0.05, mean)));
+  gamma = Math.min(1.35, Math.max(0.85, gamma));
+  gamma = 1 + (gamma - 1) * 0.8;
+  const tone = new Float32Array(256);
+  for (let v = 0; v < 256; v++) tone[v] = 255 * Math.pow(Math.min(1, Math.max(0, ((v - lo) * gain) / 255)), 1 / gamma);
+  // --- gentle white balance from midtones (35% toward neutral, capped ±6%)
+  let sr = 0, sg = 0, sb = 0, sc = 0;
+  for (let i = 0, p = 0; p < N; i += 4, p++) if (Y[p] > 40 && Y[p] < 220) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; sc++; }
+  let wr = 1, wg = 1, wb = 1;
+  if (sc > N * 0.05) {
+    const avg = (sr + sg + sb) / 3;
+    const k = (c) => Math.min(1.1, Math.max(0.9, 1 + ((avg / c) - 1) * 0.5));
+    wr = k(sr); wg = k(sg); wb = k(sb);
+  }
+  // --- local contrast / sharpening: unsharp mask on luminance (box blur x2 ≈ gaussian r≈2)
+  const blur = boxBlur(boxBlur(Y, w, h, 2), w, h, 2);
+  for (let i = 0, p = 0; p < N; i += 4, p++) {
+    const y = Y[p];
+    const detail = y - blur[p];
+    const yNew = Math.min(255, Math.max(0, tone[y | 0] + (Math.abs(detail) > 2 ? detail * 0.35 : 0)));
+    const s = y > 1 ? yNew / y : 1;
+    let r = d[i] * wr * s, g = d[i + 1] * wg * s, b = d[i + 2] * wb * s;
+    // vibrance: lift muted colours more than already-saturated ones
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    const vib = 1 + 0.18 * (1 - sat) * sat * 4 * 0.5;
+    const l = 0.299 * r + 0.587 * g + 0.114 * b;
+    d[i] = l + (r - l) * vib; d[i + 1] = l + (g - l) * vib; d[i + 2] = l + (b - l) * vib;
+  }
+}
+
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h), n = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    let acc = 0; const row = y * w;
+    for (let x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = acc / n;
+      acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / n;
+      acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+    }
+  }
+  return out;
 }
 
 /**

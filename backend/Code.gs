@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.4.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -309,6 +309,7 @@ function aList(req) {
   var all = readMedia_(ev);
   var visible = all.filter(function (m) { return m.status === 'visible'; });
   base.count = visible.length;
+  base.pending = all.filter(function (m) { return m.status === 'pending'; }).length;
   if (!revealed || (!s.guestGallery && !isWall)) {
     base.items = [];
     return base;
@@ -947,7 +948,7 @@ function publicEvent_(ev) {
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, dateStamp: s.dateStamp,
-    accent: s.accent, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
+    accent: s.accent, approval: s.approval, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
   };
 }
 

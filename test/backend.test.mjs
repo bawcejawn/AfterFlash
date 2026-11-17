@@ -219,6 +219,8 @@ t('approval mode keeps photos private until approved', () => {
   assert.equal(up.status, 'pending');
   assert.equal(env.gas.files.get(up.id).sharing, 'PRIVATE');
   assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 0);
+  assert.equal(env.post({ a: 'list', e: ev.id }).pending, 1);
+  assert.equal(env.post({ a: 'event', e: ev.id }).event.approval, true);
   env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'approve', ids: [up.id] });
   assert.equal(env.gas.files.get(up.id).sharing, 'ANYONE_WITH_LINK');
   assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 1);
