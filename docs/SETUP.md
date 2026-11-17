@@ -27,6 +27,8 @@ The backend receives uploads and saves them to **your** Google Drive.
 
 > **"Who has access: Anyone"** is required so guests can upload without signing in. It doesn't expose your Drive. Every request must pass the checks in `Code.gs`, and the script can only touch files it created for an event (see [SECURITY.md](../SECURITY.md)).
 
+> **Google Workspace accounts** (e.g. a business domain) get URLs like `https://script.google.com/a/macros/yourdomain.com/s/…/exec`. That's supported. If "Anyone" is missing from the access options, a Workspace admin must allow sharing web apps outside the domain.
+
 ## 2. Point the site at your backend
 
 Edit [`site/config.js`](../site/config.js) and paste your Web app URL:
@@ -98,3 +100,14 @@ These are Google's free-tier limits. Workspace accounts are higher. Google publi
 - `site/config.js → appName` changes the name everywhere.
 - Each event has an **accent colour** in its settings.
 - The main design tokens are at the top of `site/assets/css/app.css`.
+
+## Troubleshooting
+
+| What you see | Fix |
+|---|---|
+| Admin page says "Can't reach the backend" | Check the URL in `config.js` ends in `/exec`, and the deployment's **Who has access** is **Anyone**. |
+| "The backend didn't answer correctly" | Same as above, or the code didn't save. Open Apps Script, check `Code.gs` has no red errors, then **Manage deployments → Edit → New version**. |
+| Admin key rejected | Run `rotateAdminKey` in Apps Script and use the new key from the execution log. |
+| Uploads fail with a sharing error | Workspace accounts: allow "Anyone with the link" sharing in the Google Admin console. |
+| Changes to `Code.gs` don't take effect | Every code change needs **Manage deployments → Edit (pencil) → Version: New version → Deploy**. |
+| Site still shows old behaviour after a push | Wait for the Pages workflow to finish (Actions tab), then reload twice: the offline cache updates on the next visit. |

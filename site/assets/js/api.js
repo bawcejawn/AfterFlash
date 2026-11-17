@@ -3,7 +3,8 @@
 // (Apps Script can't answer preflights). No cookies, no referrer.
 import { config } from './util.js';
 
-const PROD_URL = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
+// Personal accounts: /macros/s/ID/exec. Google Workspace accounts: /a/macros/DOMAIN/s/ID/exec.
+const PROD_URL = /^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
 
 export class ApiError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
@@ -11,7 +12,7 @@ export class ApiError extends Error {
 
 export function backendUrl(studio) {
   const url = (config.backends || {})[studio];
-  if (!url) throw new ApiError('not_configured', 'This site is not connected to a backend yet.');
+  if (!url || url.includes('REPLACE_WITH')) throw new ApiError('not_configured', 'This site is not connected to a backend yet. Add your Apps Script URL to config.js.');
   const devOk = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /^\/[a-z0-9/_-]+$/i.test(url);
   if (!PROD_URL.test(url) && !devOk) throw new ApiError('not_configured', 'Backend URL in config.js is not a valid Apps Script /exec URL.');
   return url;
@@ -55,7 +56,24 @@ async function once(url, action, payload, timeout) {
     clearTimeout(timer);
   }
   let data;
-  try { data = await res.json(); } catch { throw new ApiError('server_error', 'Unexpected response from server.'); }
+  try { data = await res.json(); } catch {
+    // Apps Script answers with an HTML page when the deployment isn't public or the code failed to load.
+    throw new ApiError('backend_misconfigured', 'The backend didn’t answer correctly. In Apps Script, check the web app deployment is set to “Who has access: Anyone”.');
+  }
   if (!data || data.ok !== true) throw new ApiError((data && data.error) || 'server_error', data && data.message);
   return data;
+}
+
+/** Health check (GET). Resolves to { ok, version } or { ok:false, message }. */
+export async function ping(studio) {
+  let url;
+  try { url = backendUrl(studio); } catch (e) { return { ok: false, message: e.message }; }
+  try {
+    const res = await fetch(url, { method: 'GET', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
+    const data = await res.json();
+    if (data && data.ok && data.app === 'photoshare') return { ok: true, version: data.version };
+    return { ok: false, message: 'That URL answered, but it isn’t a PhotoShare backend.' };
+  } catch {
+    return { ok: false, message: 'Can’t reach the backend. Check the URL in config.js and that the deployment’s access is “Anyone”.' };
+  }
 }

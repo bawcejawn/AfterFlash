@@ -51,7 +51,7 @@ export async function sendOps(prov, ownerSigner, payerSigner, calls) {
 
 /** POST to a PhotoShare Apps Script backend (same protocol as the site). */
 export async function backend(url, action, payload) {
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) throw new Error('Backend URL must be an Apps Script /exec URL');
+  if (!/^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) throw new Error('Backend URL must be an Apps Script /exec URL');
   for (let attempt = 0; ; attempt++) {
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...payload, a: action }), redirect: 'follow' });

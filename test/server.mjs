@@ -30,6 +30,11 @@ http.createServer((req, res) => {
     });
     return;
   }
+  if (url.pathname === '/mock-api' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(gas.ctx.doGet().body);
+    return;
+  }
   if (url.pathname.startsWith('/mock-drive/')) {
     const id = url.searchParams.get('id') || url.pathname.split('/')[4];
     const f = gas.files.get(id);
