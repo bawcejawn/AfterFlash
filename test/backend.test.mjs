@@ -105,6 +105,20 @@ t('guest join + upload strips EXIF and stores sha256 of stored bytes', () => {
   assert.equal(host.items[0].sha, crypto.createHash('sha256').update(stored).digest('hex'));
 });
 
+t('previews go to a subfolder; originals stay alone in the event folder', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const up = upload(env, ev.id, joinGuest(env, ev.id));
+  upload(env, ev.id, joinGuest(env, ev.id));
+  const orig = env.gas.files.get(up.id);
+  const thumbId = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items.find((x) => x.i === up.id).t;
+  const thumb = env.gas.files.get(thumbId);
+  assert.equal(thumb.parent.name, 'Previews (used by the app)');
+  assert.equal(thumb.parent.parent, orig.parent);
+  const subfolders = [...env.gas.files.values()].filter((f) => f.parent === orig.parent && f.name === 'Previews (used by the app)');
+  assert.equal(subfolders.length, 1, 'one previews folder, reused');
+});
+
 t('rejects non-JPEG photos, html, png and spoofed types', () => {
   const env = boot();
   const ev = makeEvent(env);
@@ -219,6 +233,8 @@ t('approval mode keeps photos private until approved', () => {
   assert.equal(up.status, 'pending');
   assert.equal(env.gas.files.get(up.id).sharing, 'PRIVATE');
   assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 0);
+  assert.equal(env.post({ a: 'list', e: ev.id }).pending, 1);
+  assert.equal(env.post({ a: 'event', e: ev.id }).event.approval, true);
   env.post({ a: 'hostModerate', e: ev.id, k: ev.hostKey, action: 'approve', ids: [up.id] });
   assert.equal(env.gas.files.get(up.id).sharing, 'ANYONE_WITH_LINK');
   assert.equal(env.post({ a: 'list', e: ev.id }).items.length, 1);
@@ -449,12 +465,12 @@ t('a failure after saving the file leaves no orphan files and refunds the shot',
   const env = boot();
   const ev = makeEvent(env, { shotsPerGuest: 2 });
   const g = joinGuest(env, ev.id);
-  const before = [...env.gas.files.values()].filter((f) => !f.trashed).length;
+  const before = [...env.gas.files.values()].filter((f) => f.blob && !f.trashed).length;
   env.gas.faults.append = true;
   const r = upload(env, ev.id, g, { clientId: 'retryme00001' });
   assert.equal(r.ok, false);
   env.gas.faults.append = false;
-  const live = [...env.gas.files.values()].filter((f) => !f.trashed).length;
+  const live = [...env.gas.files.values()].filter((f) => f.blob && !f.trashed).length;
   assert.equal(live, before, 'created files were trashed');
   const probs = env.post({ a: 'adminProblems', k: env.adminKey }).problems;
   assert.ok(probs.some((p) => /Unexpected error/.test(p.m)));

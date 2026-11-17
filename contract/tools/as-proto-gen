@@ -1,0 +1,5 @@
+#!/bin/sh
+# protoc plugin wrapper: give the Node plugin a fresh blocking stdin pipe. Some CI runners
+# hand protoc a non-blocking stdin, which makes Node's synchronous read fail with EAGAIN.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+cat | "$DIR/node_modules/.bin/as-proto-gen"

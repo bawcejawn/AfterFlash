@@ -119,7 +119,10 @@ function renderAlbum(body, r) {
     return;
   }
   if (!ev.guestGallery) { body.append(h('div', { class: 'empty' }, h('p', null, 'The hosts are keeping this album private. Thanks for adding your photos!'))); return; }
-  if (!items.length) { body.append(h('div', { class: 'empty' }, h('p', null, 'No photos yet. Be the first!'))); return; }
+  if (!items.length) {
+    body.append(h('div', { class: 'empty' }, h('p', null, r.pending ? `${r.pending} photo${r.pending > 1 ? 's are' : ' is'} waiting for the hosts to approve.` : 'No photos yet. Be the first!')));
+    return;
+  }
   const picks = items.filter((x) => x.f);
   if (picks.length) {
     body.append(h('div', { class: 'row album-filter' },
@@ -127,6 +130,7 @@ function renderAlbum(body, r) {
       h('button', { class: 'btn small' + (picksOnly ? ' primary' : ''), onclick: () => { picksOnly = true; render(); } }, `♥ Hosts’ picks (${picks.length})`)));
   }
   const shown = picksOnly && picks.length ? picks : items;
+  if (r.pending) body.append(h('p', { class: 'callout' }, `${r.pending} new photo${r.pending > 1 ? 's are' : ' is'} waiting for the hosts to approve.`));
   body.append(h('div', { class: 'masonry' }, shown.map((it, idx) => {
     const img = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo', loading: 'lazy', decoding: 'async' });
     if (it.w && it.h) { img.width = 600; img.height = Math.round((600 * it.h) / it.w); }
@@ -212,9 +216,9 @@ function showLb() {
     });
   } else {
     media = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo' });
-    if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
-    else if (lbMine) proxyThumb(it.i).then((u) => { if (u && token === showToken) media.src = u; });
+    if (lbMine) proxyThumb(it.i).then((u) => { if (u && token === showToken && !media.dataset.enhanced) media.src = u; });
     else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
+    if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
   }
   clear(lb.stage).append(media);
   lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', ');
@@ -226,15 +230,29 @@ function showLb() {
   lb.dl.textContent = enhanceOn && canEnhance ? 'Download enhanced' : 'Download';
 }
 
-/** Enhanced view, built from the preview so it's quick. Originals are never changed. */
+/** Enhanced view from the full-size original (the normal photo shows until it's ready). */
+const enhancedCache = new Map();
 async function applyEnhanced(img, it, token) {
   try {
-    const url = await proxyThumb(it.i);
-    if (!url || token !== showToken) return;
-    const c = enhance(await canvasFromUrl(url));
-    const blob = await canvasToBlob(c, 'image/jpeg', 0.9);
-    if (token === showToken) img.src = URL.createObjectURL(blob);
-  } catch { toast('Couldn’t enhance this photo.', 'error'); }
+    let url = enhancedCache.get(it.i);
+    if (!url) {
+      lb.who.textContent = 'Enhancing…';
+      const r = await api(studio, 'photo', { e: eventId, id: it.i, pin: pin || undefined, ...guestAuth() }, { retries: 1, timeout: 90000 });
+      if (token !== showToken) return;
+      const raw = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' }));
+      const c = await canvasFromUrl(raw);
+      URL.revokeObjectURL(raw);
+      await new Promise((res) => setTimeout(res, 0));
+      const blob = await canvasToBlob(enhance(c), 'image/jpeg', 0.92);
+      url = URL.createObjectURL(blob);
+      enhancedCache.set(it.i, url);
+    }
+    if (token !== showToken) return;
+    img.dataset.enhanced = '1';
+    img.onload = null; img.onerror = null;
+    img.src = url;
+    lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', ');
+  } catch { if (token === showToken) toast('Couldn’t enhance this photo.', 'error'); }
 }
 
 function canvasFromUrl(url) {
@@ -269,7 +287,9 @@ async function download() {
   try {
     const r = await api(studio, 'photo', { e: eventId, id: it.i, pin: pin || undefined, ...guestAuth() }, { retries: 1, timeout: 90000 });
     let blob = new Blob([base64ToBytes(r.data)], { type: 'image/jpeg' });
-    if (wantEnhanced) {
+    if (wantEnhanced && enhancedCache.has(it.i)) {
+      blob = await (await fetch(enhancedCache.get(it.i))).blob();
+    } else if (wantEnhanced) {
       const url = URL.createObjectURL(blob);
       const c = await canvasFromUrl(url);
       URL.revokeObjectURL(url);

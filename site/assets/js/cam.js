@@ -91,6 +91,7 @@ function welcome(errMsg) {
       ev.date ? h('p', { class: 'muted' }, fmtDate(ev.date)) : null,
       ev.welcome ? h('p', null, ev.welcome) : null),
     h('p', null, `You get ${ev.shotsPerGuest} shots${ev.allowVideo ? ', and any of them can be a short video' : ''}. Make them count.`),
+    ev.approval ? h('p', { class: 'muted' }, 'The hosts approve photos before they appear in the album.') : null,
     ev.reveal === 'after' ? h('p', { class: 'muted' }, ev.revealAt ? `Everyone’s photos develop ${fmtWhen(Date.parse(ev.revealAt))}.` : 'Everyone’s photos develop after the event.') : null,
     st ? h('p', { class: 'callout' }, st) : null,
     h('label', { class: 'field' }, h('span', null, 'Your name'), name, h('small', null, 'Shown next to your photos. Leave blank to stay anonymous.')),
@@ -199,7 +200,7 @@ async function startCamera() {
         pending = Math.max(0, pending - 1);
         if (e.result && e.result.guest) shotsLeftServer = e.result.guest.shotsLeft;
         auth.shotsLeft = shotsLeftServer; store.set(authKey(), auth);
-        updateQueuePill(pending ? `${pending} uploading…` : 'All photos uploaded ✓');
+        updateQueuePill(pending ? `${pending} uploading…` : (ev.approval ? 'All photos uploaded ✓ They’ll appear once the hosts approve them.' : 'All photos uploaded ✓'));
         renderCounter();
       } else if (e.type === 'dropped') {
         pending = Math.max(0, pending - 1);
@@ -309,7 +310,7 @@ async function onShutter() {
     applyLook(canvas, look);
     if (ev.dateStamp) stampDate(canvas);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88);
-    const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
+    const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
     await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
     if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
   } catch (e) {
@@ -384,7 +385,7 @@ async function fromFiles(files) {
       const canvas = drawScaled(src.img, src.w, src.h, 2560);
       src.done();
       const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88); // re-encode: strips location data
-      const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
+      const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
     } catch {
       toast('That file couldn’t be read as a photo.', 'error');

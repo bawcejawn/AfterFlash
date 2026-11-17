@@ -55,6 +55,19 @@
 - **Volume:** the backend's main limit is Apps Script concurrency (about 30 simultaneous requests per account). The offline queue absorbs bursts. For several large events at once, split them across studios (accounts).
 - **Koinos for clients:** register each event under the studio's address and send the couple the recovery link (`recover.html?o=…&e=…`) and the manifest. It's a permanent, verifiable record of their day.
 
+## Enhance
+
+The album's **Enhance** toggle runs `enhance()` in `site/assets/js/film.js` on the viewer's device, using the full-size original. It adapts to each photo:
+- **Levels:** a robust black and white point stretch, with the gain capped.
+- **Brightness:** a midtone gamma correction.
+- **White balance:** a mild correction from the midtones (capped ±10%).
+- **Local contrast:** an unsharp mask on luminance.
+- **Vibrance:** boosts muted colours more than saturated ones.
+
+Dull or dark photos improve clearly, and good photos change very little. Originals are never modified.
+
+![Enhance on sample photos: left = before, right = after; odd rows = original, even rows = a dull, dark, warm-cast version](img/enhance-samples.jpg)
+
 ## Possible next steps
 
 - **IPFS second copy:** pin originals to a free IPFS pinning tier or your own node, and store the CID next to the hash.
