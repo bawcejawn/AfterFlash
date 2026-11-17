@@ -150,6 +150,30 @@ t('date stamp is off by default for new events', () => {
   assert.equal(env.post({ a: 'event', e: ev.id }).event.dateStamp, false);
 });
 
+t('voice notes: Safari m4a and Firefox ogg accepted, retries are idempotent, duration kept', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = joinGuest(env, ev.id);
+  const m4a = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from('ftypM4A '), Buffer.alloc(200, 3)]);
+  const ogg = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(200, 4)]);
+  const a = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(m4a), dur: 12, clientId: 'note-abc-0001' });
+  assert.equal(a.ok, true, JSON.stringify(a));
+  const again = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(m4a), dur: 12, clientId: 'note-abc-0001' });
+  assert.equal(again.duplicate, true); assert.equal(again.id, a.id);
+  const b = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(ogg), dur: 3, clientId: 'note-abc-0002' });
+  assert.equal(b.ok, true, JSON.stringify(b));
+  const notes = env.post({ a: 'guestbookList', e: ev.id }).notes;
+  assert.equal(notes.length, 2);
+  assert.ok(notes.some((n) => n.d === 12));
+  const mimes = notes.map((n) => env.gas.files.get(n.a).blob.mime).sort();
+  assert.deepEqual(mimes, ['audio/mp4', 'audio/ogg']);
+  assert.equal(env.gas.files.get(notes[0].a).parent.name, 'Guestbook voice messages');
+  const listen = env.post({ a: 'hostMedia', e: ev.id, k: ev.hostKey, id: notes[0].a, which: 'note' });
+  assert.equal(listen.ok, true); assert.ok(/^audio\//.test(listen.mime));
+  const other = makeEvent(env, { name: 'B' });
+  assert.equal(env.post({ a: 'hostMedia', e: other.id, k: other.hostKey, id: notes[0].a, which: 'note' }).error, 'not_found');
+});
+
 t('rejects non-JPEG photos, html, png and spoofed types', () => {
   const env = boot();
   const ev = makeEvent(env);
@@ -574,7 +598,7 @@ t('guestbook: text + voice, validated, moderated, respects reveal', () => {
   assert.equal(env.post({ a: 'hostGuestbook', e: ev.id, k: ev.hostKey }).notes.length, 2);
   // limits + turning it off
   const g2 = joinGuest(env, ev.id);
-  for (let i = 0; i < 3; i++) env.post({ a: 'guestbookAdd', e: ev.id, g: g2.g, t: g2.t, text: 'x' + i });
+  for (let i = 0; i < 4; i++) env.post({ a: 'guestbookAdd', e: ev.id, g: g2.g, t: g2.t, text: 'x' + i });
   assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g2.g, t: g2.t, text: 'again' }).error, 'rate_limited');
   env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { guestbook: false } });
   assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, text: 'x' }).error, 'disabled');
