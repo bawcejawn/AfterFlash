@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.0.0';
+var APP_VERSION = '1.3.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -832,6 +832,13 @@ function authAdmin_(req) {
 
 function authHost_(req) {
   var ev = loadEvent_(req.e);
+  // Studio admins can open any event dashboard they're allowed to manage, using their own
+  // admin key (sent as "admin:<key>") instead of the event's host key.
+  if (typeof req.k === 'string' && req.k.indexOf('admin:') === 0) {
+    var me = authAdmin_({ k: req.k.slice(6) });
+    requireEventAdmin_(me, ev.id);
+    return ev;
+  }
   var bucket = 'badhost:' + ev.id;
   if (!rateOk_(bucket, LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
   if (!req.k || !safeEq_(sha256Hex_(String(req.k)), ev.hostKeyHash)) {

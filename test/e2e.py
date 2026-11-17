@@ -61,6 +61,11 @@ with sync_playwright() as p:
     second_key = page.locator(".keybox").last.inner_text().strip()
     assert second_key != ADMIN_KEY and len(second_key) > 30
     expect(page.locator("table.list").last).to_contain_text("Sarah")
+    # owner opens an event dashboard straight from the admin list (no host link needed)
+    page.locator("table.list a:has-text('Open dashboard')").first.click()
+    expect(page.locator(".event-code")).to_be_visible(timeout=15000)
+    assert "admin:" not in page.url
+    page.go_back()
 
     # ---- host dashboard
     host = desk.new_page(); watch(host, "host")

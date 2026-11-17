@@ -22,7 +22,10 @@ async function boot() {
   eventId = q.get('e');
   if (!isEventId(eventId)) return fail('This host link is missing its event code.');
   key = f.get('k') || store.get(keyName(), sessionStorage) || store.get(keyName());
-  if (f.get('k')) {
+  // Opened from the studio admin page: use the signed-in admin key (never put in the URL).
+  const adminKey = store.get(`ps:ak:${studio}`, sessionStorage);
+  if (q.get('admin') === '1' && adminKey) key = 'admin:' + adminKey;
+  if (f.get('k') && !key.startsWith('admin:')) {
     store.set(keyName(), key, sessionStorage);
     history.replaceState(null, '', location.pathname + location.search); // keep the key out of the address bar
   }
@@ -30,8 +33,9 @@ async function boot() {
   try {
     ev = (await api(studio, 'hostGet', { e: eventId, k: key })).event;
   } catch (e) {
-    if (e.code === 'unauthorized') { store.del(keyName(), sessionStorage); store.del(keyName()); }
-    return fail(e.code === 'unauthorized' ? 'This host link is no longer valid. Ask the studio for a new one.' : e.message);
+    if (e.code === 'unauthorized' && !key.startsWith('admin:')) { store.del(keyName(), sessionStorage); store.del(keyName()); }
+    if (e.code === 'forbidden') return fail('Only the studio owner or the admin who created this event can open its dashboard.');
+    return fail(e.code === 'unauthorized' ? (key.startsWith('admin:') ? 'Please sign in again on the studio admin page.' : 'This host link is no longer valid. Ask the studio for a new one.') : e.message);
   }
   setAccent(ev.accent);
   setTitle(ev.name + ' host');
@@ -368,7 +372,7 @@ function keepsakesTab() {
     h('p', null, 'Save a screen-quality copy of every photo, plus a fingerprint of the originals, on the Koinos blockchain. It stays recoverable even if the Drive folder is lost, and anyone can check that a photo is an untouched original.'),
     h('p', null, 'Each photo costs about 25 mana. Mana comes back on its own, so there’s nothing to pay.'),
     enabled
-      ? h('a', { class: 'btn primary', href: link('archive.html', { e: eventId, s: studio, frag: { k: key } }), rel: 'noopener' }, 'Open the archive tool')
+      ? h('a', { class: 'btn primary', href: key.startsWith('admin:') ? link('archive.html', { e: eventId, s: studio, extra: { admin: '1' } }) : link('archive.html', { e: eventId, s: studio, frag: { k: key } }), rel: 'noopener' }, 'Open the archive tool')
       : h('p', { class: 'callout' }, 'Koinos isn’t configured for this site yet. Add the contract address to config.js (see docs/KOINOS.md).')));
 }
 
@@ -378,7 +382,7 @@ function securityTab() {
   bodyEl.append(h('div', { class: 'stack narrow' },
     h('h2', null, 'Who can manage this event'),
     h('p', null, 'Anyone with the host link can moderate, change settings and download originals. Share it only with people you trust, like your planner or a co-host.'),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: remembered, onchange: (e) => { if (e.target.checked) store.set(keyName(), key); else store.del(keyName()); toast(e.target.checked ? 'This device will stay signed in' : 'You’ll need the host link next time'); } }),
+    key.startsWith('admin:') ? h('p', { class: 'muted' }, 'You opened this dashboard from the studio admin page, using your admin key.') : h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: remembered, onchange: (e) => { if (e.target.checked) store.set(keyName(), key); else store.del(keyName()); toast(e.target.checked ? 'This device will stay signed in' : 'You’ll need the host link next time'); } }),
       h('span', null, 'Remember me on this device', h('small', null, 'Leave off on shared computers.'))),
     h('hr', { class: 'divider' }),
     h('h3', null, 'Make a new host link'),
