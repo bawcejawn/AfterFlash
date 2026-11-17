@@ -1,6 +1,6 @@
 // Studio admin: create events, hand out host links, delete events.
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config } from './util.js';
-import { api } from './api.js';
+import { api, ping } from './api.js';
 
 frameGuard();
 const root = $('#app');
@@ -18,7 +18,8 @@ function login(msg) {
     studioSel ? h('label', { class: 'field' }, h('span', null, 'Studio'), studioSel) : null,
     h('label', { class: 'field' }, h('span', null, 'Admin key'), keyIn),
     msg ? h('p', { class: 'callout warn', role: 'alert' }, msg) : null,
-    h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'));
+    h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'),
+    h('p', { class: 'small muted', id: 'health', 'aria-live': 'polite' }, 'Checking the backend connection…'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (studioSel) studio = studioSel.value;
@@ -33,6 +34,13 @@ function login(msg) {
   });
   clear(root).append(form);
   keyIn.focus();
+  const check = async () => {
+    const r = await ping(studio);
+    const el = document.getElementById('health');
+    if (el) el.textContent = r.ok ? `Backend connected (version ${r.version}).` : r.message;
+  };
+  check();
+  if (studioSel) studioSel.addEventListener('change', () => { studio = studioSel.value; check(); });
 }
 
 async function dashboard(created) {

@@ -41,6 +41,7 @@ with sync_playwright() as p:
     # ---- admin create
     page = desk.new_page(); watch(page, "admin")
     page.goto(BASE + "/admin.html")
+    expect(page.locator("#health")).to_contain_text("Backend connected")
     page.fill("#ak", "wrong-key"); page.click("text=Sign in")
     expect(page.locator(".callout")).to_contain_text("isn’t right")
     page.fill("#ak", ADMIN_KEY); page.click("text=Sign in")

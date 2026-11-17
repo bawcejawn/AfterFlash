@@ -365,15 +365,30 @@ async function fromFiles(files) {
     if (shotsLeft() <= 0) { toast('Your roll is finished!'); break; }
     if (!file.type.startsWith('image/')) continue;
     try {
-      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-      const canvas = drawScaled(bmp, bmp.width, bmp.height, 2560);
-      bmp.close && bmp.close();
+      const src = await decodeImage(file);
+      const canvas = drawScaled(src.img, src.w, src.h, 2560);
+      src.done();
       const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88); // re-encode: strips location data
       const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 1024), 'image/jpeg', 0.78);
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
     } catch {
       toast('That file couldn’t be read as a photo.', 'error');
     }
+  }
+}
+
+/** Decode a picked file, respecting EXIF rotation; falls back to <img> on older Safari. */
+async function decodeImage(file) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    return { img: bmp, w: bmp.width, h: bmp.height, done: () => bmp.close && bmp.close() };
+  } catch {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+    await img.decode();
+    return { img, w: img.naturalWidth, h: img.naturalHeight, done: () => URL.revokeObjectURL(url) };
   }
 }
 
