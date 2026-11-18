@@ -2,7 +2,7 @@
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -85,6 +85,7 @@ async function dashboard(created) {
       h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     CLOUD ? cloudBanner() : null,
     CLOUD ? planPanel({ studio, adminKey, me }) : null,
+    CLOUD ? partnerPanel({ me }) : null,
     CLOUD && !ended ? drivePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
     needsDrive || ended ? null : createForm(),
@@ -104,6 +105,7 @@ async function dashboard(created) {
     problemsPanel(),
     !CLOUD && me.role === 'owner' ? adminsPanel() : null,
     CLOUD && me.role === 'owner' ? ownerPanel({ studio, adminKey }) : null,
+    CLOUD && me.role === 'owner' ? partnersPanel({ studio, adminKey }) : null,
     me.role === 'owner' || CLOUD ? keyBackupPanel() : null);
 }
 

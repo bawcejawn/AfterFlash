@@ -5,16 +5,17 @@ import {
   sniffMime, sniffAudio, sniffImage, isEnc, ENC_OVERHEAD, stripJpegMeta, cleanText, str, int, parseJson,
 } from './lib.js';
 import { driveFor } from './google.js';
-import { createCheckout, readCheckout, PLAN_DAYS } from './stripe.js';
+import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted } from './stripe.js';
 
-export const VERSION = '1.10.0';
+export const VERSION = '1.11.0';
 
 const LIMITS = {
   PHOTO_BYTES: 8 * 1024 * 1024, VIDEO_BYTES: 20 * 1024 * 1024, THUMB_BYTES: 400 * 1024, AUDIO_BYTES: 3 * 1024 * 1024,
   LOGO_BYTES: 200 * 1024, NAME: 80, WELCOME: 280, LABEL: 24, MAX_GUESTS: 5000, MAX_SHOTS: 500, MAX_EVENTS_LIST: 500,
   UPLOADS_PER_GUEST_PER_MIN: 20, UPLOADS_PER_EVENT_PER_MIN: 600, JOINS_PER_EVENT_PER_MIN: 120, BAD_PIN_PER_EVENT_PER_10MIN: 40,
   BAD_KEY_PER_10MIN: 30, REPORTS_PER_GUEST: 15, NOTES_PER_GUEST: 5, NOTE_TEXT: 500, BLUR_THRESHOLD: 40,
-  READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60,
+  READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60, REF_LOOKUPS_PER_10MIN: 300,
+  HOLD_MS: 365 * 86400000, PAYOUT_WAIT_MS: 14 * 86400000, MAX_PCT: 50, MAX_CASH_CENTS: 100000,
 };
 
 // ----------------------------------------------------------------- context
@@ -123,6 +124,14 @@ async function accountOf(c, ev) {
 const drive = async (c, ev) => driveFor(c.env, c.db, await accountOf(c, ev));
 const expired = (a) => a.kind !== 'owner' && Number(a.expires) > 0 && Number(a.expires) < Date.now();
 const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+/** Albums stay online for 12 months after a plan ends; after that only the host's Drive has the photos. */
+const archived = (a) => a.kind !== 'owner' && Number(a.expires) > 0 && Number(a.expires) + LIMITS.HOLD_MS < Date.now();
+async function loadPublicEvent(c, id) {
+  const ev = await loadEvent(c, id);
+  const a = await accountOf(c, ev);
+  if (archived(a)) throw err('archived', 'This album has closed: albums stay online for 12 months after the host’s plan ends. The photos are still in the host’s Google Drive.');
+  return ev;
+}
 /** Hosting (dashboards, new photos) needs the event's account to have an active plan. Viewing albums doesn't. */
 async function requireActivePlan(c, ev, forGuests) {
   const a = await accountOf(c, ev);
@@ -228,10 +237,10 @@ const mediaRow = (c, ev, id) => c.one('SELECT * FROM media WHERE event = ? AND i
 // ================================================================= public (guests)
 const A = {};
 
-A.event = async (c, req) => ({ event: publicEvent(await loadEvent(c, req.e)) });
+A.event = async (c, req) => ({ event: publicEvent(await loadPublicEvent(c, req.e)) });
 
 A.join = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   await checkPin(c, ev, req.pin);
   if (!(await rateOk(c, 'join:' + ev.id, LIMITS.JOINS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Too many people joining at once. Try again in a moment.');
   if (req.g && req.t) {
@@ -247,13 +256,13 @@ A.join = async (c, req) => {
 };
 
 A.me = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const g = await authGuest(c, ev, req);
   return { guest: guestView(ev, g), key: (await eventKey(c, ev)) || undefined };
 };
 
 A.upload = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const s = ev.settings;
   const g = await authGuest(c, ev, req);
   const now = c.now();
@@ -349,7 +358,7 @@ A.upload = async (c, req) => {
 };
 
 A.list = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const s = ev.settings;
   const isWall = req.mode === 'wall' && !!req.wk && safeEq(String(req.wk), await wallKey(ev));
   if (!isWall) await checkPin(c, ev, req.pin);
@@ -368,7 +377,7 @@ A.list = async (c, req) => {
 };
 
 A.thumb = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
   const m = await mediaRow(c, ev, req.id);
   if (!(await readable(c, ev, req, m))) throw err('not_found', 'Not found');
@@ -384,7 +393,7 @@ A.thumb = async (c, req) => {
 };
 
 A.photo = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
   const m = await mediaRow(c, ev, req.id);
   if (!(await readable(c, ev, req, m))) throw err('not_found', 'Not found');
@@ -403,14 +412,14 @@ A.photo = async (c, req) => {
 };
 
 A.mine = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const g = await authGuest(c, ev, req);
   const rows = await c.all("SELECT * FROM media WHERE event = ? AND guest = ? AND status != 'deleted' ORDER BY seq", ev.id, g.id);
   return { items: rows.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', c: m.created, w: m.w, h: m.h, s: m.status })), guest: guestView(ev, g) };
 };
 
 A.report = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   if (!ev.settings.allowReports) throw err('disabled', 'Reporting is turned off.');
   const g = await authGuest(c, ev, req);
   if (g.uploads < 1) throw err('not_allowed', 'Take a photo first, then you can report photos.');
@@ -428,7 +437,7 @@ A.report = async (c, req) => {
 
 // ---- guestbook
 A.guestbookAdd = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const s = ev.settings;
   if (!s.guestbook) throw err('disabled', 'The guestbook is turned off.');
   const g = await authGuest(c, ev, req);
@@ -471,7 +480,7 @@ A.guestbookAdd = async (c, req) => {
 const audioParts = (a) => { const [id, mime] = String(a || '').split('|'); return { id: id || '', mime: mime || '' }; };
 
 A.guestbookList = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const s = ev.settings;
   const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
   if (!isWall) await checkPin(c, ev, req.pin);
@@ -481,7 +490,7 @@ A.guestbookList = async (c, req) => {
 };
 
 A.noteAudio = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   const s = ev.settings;
   const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
   if (!isWall) await checkPin(c, ev, req.pin);
@@ -498,7 +507,7 @@ A.noteAudio = async (c, req) => {
 };
 
 A.logo = async (c, req) => {
-  const ev = await loadEvent(c, req.e);
+  const ev = await loadPublicEvent(c, req.e);
   if (!ev.logo) throw err('not_found', 'No logo');
   if (!(await rateOk(c, 'logo:' + ev.id, 240, 60))) throw err('rate_limited', 'Busy, try again.');
   const bytes = await (await drive(c, ev)).download(ev.logo.id);
@@ -679,7 +688,10 @@ A.adminCheck = async (c, req) => {
   return { version: VERSION, me: {
     name: a.kind === 'owner' ? 'Owner' : (a.email || 'Host'), role: a.kind === 'owner' ? 'owner' : 'host', cloud: true,
     drive: !!a.refresh_enc, googleEmail: a.google_email || '',
-    plan: a.kind === 'owner' ? 'lifetime' : (a.plan || 'lifetime'), expires: a.kind === 'owner' ? 0 : Number(a.expires) || 0, expired: expired(a) } };
+    plan: a.kind === 'owner' ? 'lifetime' : (a.plan || 'lifetime'), expires: a.kind === 'owner' ? 0 : Number(a.expires) || 0, expired: expired(a),
+    maxEvents: Number(a.max_events) || 0, eventsUsed: (await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id)).n,
+    holdUntil: Number(a.expires) > 0 && a.kind !== 'owner' ? Number(a.expires) + LIMITS.HOLD_MS : 0,
+    partner: await partnerView(c, a) } };
 };
 
 A.driveStatus = async (c, req) => {
@@ -737,6 +749,10 @@ A.adminCreate = async (c, req) => {
   if (!a.refresh_enc) throw err('drive_not_connected', 'Connect your Google Drive first: it’s where your photos are saved.');
   const n = await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ? AND deleted = 0', a.id);
   if (n.n >= LIMITS.EVENTS_PER_ACCOUNT) throw err('full', 'You’ve reached the event limit. Delete old events first.');
+  if (Number(a.max_events) > 0) {
+    const all = await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id); // deleted ones count too
+    if (all.n >= Number(a.max_events)) throw err('plan_limit', `Your plan includes ${a.max_events === 1 ? '1 event' : a.max_events + ' events'}, and it’s been used. Get 1 month or 12 months for unlimited events.`);
+  }
   const d = await driveFor(c.env, c.db, a);
   let root = a.root_folder;
   if (!root) { root = await d.createFolder('PhotoShare'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
@@ -789,26 +805,85 @@ A.adminExportKeys = async (c, req) => {
   return { keys };
 };
 
+// ---- referral codes
+const normCode = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
+const pct = (v, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(0, Math.min(LIMITS.MAX_PCT, n)) : d; };
+async function activeCode(c, code) {
+  code = normCode(code);
+  if (code.length < 3) return null;
+  return c.one('SELECT * FROM ref_codes WHERE code = ? AND active = 1', code);
+}
+/** Earnings for one code, in cents. "ready" = earned on sales older than 14 days (past the refund window), minus payouts. */
+async function codeStats(c, code) {
+  const cut = c.now() - LIMITS.PAYOUT_WAIT_MS;
+  const r = await c.one("SELECT COUNT(*) AS sales, COALESCE(SUM(paid), 0) AS revenue, COALESCE(SUM(amount), 0) AS earned, COALESCE(SUM(CASE WHEN created < ? THEN amount ELSE 0 END), 0) AS settled FROM commissions WHERE code = ? AND status = 'ok'", cut, code);
+  const yr = Date.UTC(new Date(c.now()).getUTCFullYear(), 0, 1);
+  const p = await c.one('SELECT COALESCE(SUM(amount), 0) AS paid, COALESCE(SUM(CASE WHEN created >= ? THEN amount ELSE 0 END), 0) AS year FROM payouts WHERE code = ?', yr, code);
+  return { sales: r.sales, revenue: r.revenue, earned: r.earned, paid: p.paid, paidThisYear: p.year, owed: r.earned - p.paid, ready: Math.max(0, r.settled - p.paid) };
+}
+/** What a partner sees on their own admin page: their code, link and earnings (never customers' details). */
+async function partnerView(c, a) {
+  if (a.kind === 'owner') return null;
+  const rows = await c.all('SELECT * FROM ref_codes WHERE account = ? ORDER BY created', a.id);
+  if (!rows.length) return null;
+  const codes = [];
+  for (const r of rows) {
+    const recent = await c.all('SELECT created, plan, paid, amount, status FROM commissions WHERE code = ? ORDER BY id DESC LIMIT 25', r.code);
+    codes.push({ code: r.code, discount: r.discount, commission: r.commission, active: !!r.active, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`, ...(await codeStats(c, r.code)), recent });
+  }
+  return { codes };
+}
+/** Public: is this code valid, and how much does it take off? */
+A.refLookup = async (c, req) => {
+  if (!(await rateOk(c, 'reflookup', LIMITS.REF_LOOKUPS_PER_10MIN, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
+  if (!(await rateOk(c, 'badcode', 60, 600, true))) throw err('rate_limited', 'Too many tries. Wait 10 minutes.');
+  const r = await activeCode(c, req.code);
+  if (!r) { await rateHit(c, 'badcode', 600); throw err('bad_code', 'That code isn’t valid.'); }
+  const p = planPrices(c.env);
+  return { code: r.code, discount: r.discount, prices: Object.fromEntries(ON_SALE.map((id) => [id, r.discount ? discounted(p[id], r.discount) : p[id]])) };
+};
+
 // ---- buying a key
 A.checkoutStart = async (c, req) => {
   if (!(await rateOk(c, 'checkout', LIMITS.CHECKOUTS_PER_10MIN, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
-  const plan = Object.prototype.hasOwnProperty.call(PLAN_DAYS, req.plan) ? req.plan : 'lifetime';
-  let account = '';
+  if (!ON_SALE.includes(req.plan)) throw err('bad_request', 'Pick a plan.');
+  const plan = req.plan;
+  let a = null;
   if (req.k) { // renewing or upgrading a signed-in account
-    const a = await authAccount(c, req, { allowExpired: true });
+    a = await authAccount(c, req, { allowExpired: true });
     if (a.kind === 'owner') throw err('bad_request', 'The owner account doesn’t need a plan.');
     if ((a.plan || 'lifetime') === 'lifetime' && !Number(a.expires)) throw err('bad_request', 'You already have lifetime access.');
-    account = a.id;
+    if (plan === 'event' && a.plan !== 'event' && !expired(a)) throw err('bad_request', 'You already have unlimited events. Add 1 month or 12 months instead.');
   }
-  return { url: await createCheckout(c.env, plan, account) };
+  let ref = null;
+  if (req.ref) {
+    ref = await activeCode(c, req.ref);
+    if (!ref) throw err('bad_code', 'That code isn’t valid. Remove it to pay full price.');
+  } else if (a && a.ref) ref = await activeCode(c, a.ref); // renewals keep the code the customer first used
+  if (ref && a && ref.account === a.id) ref = null; // partners can't earn on their own purchases
+  return { url: await createCheckout(c.env, { plan, account: a ? a.id : '', ref }) };
 };
 
-/** New end date after buying `plan` (time is added to what's left; lifetime never ends). */
-function extend(a, plan, now) {
-  if (plan === 'lifetime') return { plan: 'lifetime', expires: 0 };
-  if (a && (a.plan || 'lifetime') === 'lifetime' && !Number(a.expires)) return { plan: 'lifetime', expires: 0 };
+/** Plan after buying `plan`: time is added to what's left; the one-event plan adds one event. */
+function extend(a, plan, now, eventsUsed = 0) {
+  if (plan === 'lifetime') return { plan: 'lifetime', expires: 0, max_events: 0 };
+  if (a && (a.plan || 'lifetime') === 'lifetime' && !Number(a.expires)) return { plan: 'lifetime', expires: 0, max_events: 0 };
   const base = Math.max(now, (a && Number(a.expires)) || 0);
-  return { plan, expires: base + PLAN_DAYS[plan] * 86400000 };
+  const expires = base + PLAN_DAYS[plan] * 86400000;
+  if (plan !== 'event') return { plan, expires, max_events: 0 };
+  if (a && a.plan !== 'event' && !expired(a)) return { plan: a.plan, expires, max_events: 0 }; // already unlimited
+  const had = a && a.plan === 'event' ? Number(a.max_events) || 0 : 0;
+  return { plan: 'event', expires, max_events: Math.max(had, eventsUsed) + 1 };
+}
+
+/** Records a partner's commission for a sale (once per sale; never for their own purchases). */
+async function recordCommission(c, { code, session, customer, plan, paid, rate, method }) {
+  if (!code || !paid) return;
+  const r = await c.one('SELECT * FROM ref_codes WHERE code = ?', code);
+  if (!r || (r.account && r.account === customer)) return;
+  const amount = Math.round(paid * (rate == null ? r.commission : rate) / 100);
+  await c.run('INSERT OR IGNORE INTO commissions (code, session, customer, plan, paid, amount, created, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    code, session, customer, plan, paid, amount, c.now(), method);
 }
 
 /** After paying: turn the Stripe Checkout Session into an account and show its admin key. */
@@ -822,9 +897,11 @@ A.claimPurchase = async (c, req) => {
     if (!a) throw err('not_found', 'That account wasn’t found. Contact support with your receipt.');
     const done = await c.one('SELECT session FROM purchases WHERE session = ?', sid);
     if (!done) {
-      const n = extend(a, p.plan, c.now());
-      await c.run('INSERT INTO purchases (session, account, plan, amount, created) VALUES (?, ?, ?, ?, ?)', sid, a.id, p.plan, p.amount, c.now());
-      await c.run('UPDATE accounts SET plan = ?, expires = ? WHERE id = ?', n.plan, n.expires, a.id);
+      const used = (await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id)).n;
+      const n = extend(a, p.plan, c.now(), used);
+      await c.run('INSERT INTO purchases (session, account, plan, amount, created, ref) VALUES (?, ?, ?, ?, ?, ?)', sid, a.id, p.plan, p.amount, c.now(), p.ref);
+      await c.run('UPDATE accounts SET plan = ?, expires = ?, max_events = ?, ref = CASE WHEN ref = \'\' OR ref IS NULL THEN ? ELSE ref END WHERE id = ?', n.plan, n.expires, n.max_events, p.ref, a.id);
+      await recordCommission(c, { code: p.ref, session: sid, customer: a.id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card' });
     }
     const now = await c.one('SELECT plan, expires FROM accounts WHERE id = ?', a.id);
     return { renewed: true, plan: now.plan, expires: Number(now.expires) || 0, email: p.email };
@@ -840,25 +917,33 @@ A.claimPurchase = async (c, req) => {
   }
   const id = randomId(12);
   const n = extend(null, p.plan, c.now());
-  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until, plan, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000, n.plan, n.expires);
-  await c.run('INSERT OR IGNORE INTO purchases (session, account, plan, amount, created) VALUES (?, ?, ?, ?, ?)', sid, id, p.plan, p.amount, c.now());
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until, plan, expires, max_events, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000, n.plan, n.expires, n.max_events, p.ref);
+  await c.run('INSERT OR IGNORE INTO purchases (session, account, plan, amount, created, ref) VALUES (?, ?, ?, ?, ?, ?)', sid, id, p.plan, p.amount, c.now(), p.ref);
+  await recordCommission(c, { code: p.ref, session: sid, customer: id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card' });
   return { adminKey: key, email: p.email, plan: n.plan, expires: n.expires };
 };
 
 // ---- owner tools
-A.ownerCreateAccount = async (c, req) => {
-  requireOwner(await authAccount(c, req));
+async function newAccount(c, { plan, kind, email = '', note = '', ref = '' }) {
   const key = randomKey(32);
   const id = randomId(12);
-  const plan = Object.prototype.hasOwnProperty.call(PLAN_DAYS, req.plan) ? req.plan : 'lifetime';
   const n = extend(null, plan, c.now());
-  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note, plan, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, await sha256Hex(key), 'comp', '', c.now(), cleanText(req.note, 60), n.plan, n.expires);
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note, plan, expires, max_events, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, await sha256Hex(key), kind, email, c.now(), note, n.plan, n.expires, n.max_events, ref);
   return { id, adminKey: key, plan: n.plan, expires: n.expires };
+}
+const cleanEmail = (v) => { const e = str(v, 120).trim(); return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(e) ? e : ''; };
+const dollarsToCents = (v) => { const m = /^\s*\$?\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(String(v == null ? '' : v)); return m ? Number(m[1]) * 100 + Number((m[2] || '0').padEnd(2, '0')) : -1; };
+
+A.ownerCreateAccount = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const plan = Object.prototype.hasOwnProperty.call(PLAN_DAYS, req.plan) ? req.plan : 'lifetime';
+  return newAccount(c, { plan, kind: 'comp', note: cleanText(req.note, 60) });
 };
 A.ownerAccounts = async (c, req) => {
   requireOwner(await authAccount(c, req));
-  const rows = await c.all("SELECT a.id, a.kind, a.status, a.email, a.created, a.google_email, a.note, a.plan, a.expires, (SELECT COALESCE(SUM(amount), 0) FROM purchases p WHERE p.account = a.id) AS paid, a.refresh_enc != '' AS drive, (SELECT COUNT(*) FROM events e WHERE e.account = a.id AND e.deleted = 0) AS events FROM accounts a WHERE a.kind != 'owner' ORDER BY a.created DESC LIMIT 1000");
+  const rows = await c.all("SELECT a.id, a.kind, a.status, a.email, a.created, a.google_email, a.note, a.plan, a.expires, a.ref, (SELECT COALESCE(SUM(amount), 0) FROM purchases p WHERE p.account = a.id) AS paid, a.refresh_enc != '' AS drive, (SELECT COUNT(*) FROM events e WHERE e.account = a.id AND e.deleted = 0) AS events FROM accounts a WHERE a.kind != 'owner' ORDER BY a.created DESC LIMIT 1000");
   return { accounts: rows.map((r) => ({ ...r, drive: !!r.drive })) };
 };
 A.ownerSetStatus = async (c, req) => {
@@ -867,6 +952,80 @@ A.ownerSetStatus = async (c, req) => {
   const r = await c.run("UPDATE accounts SET status = ? WHERE id = ? AND kind != 'owner'", status, str(req.id, 20));
   if (!r.meta.changes) throw err('not_found', 'Account not found');
   return {};
+};
+
+/** Referral partners: every code with its earnings, the latest sales and payouts. */
+A.ownerCodes = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const rows = await c.all('SELECT * FROM ref_codes ORDER BY created DESC LIMIT 500');
+  const codes = [];
+  for (const r of rows) codes.push({ code: r.code, name: r.name, email: r.email, discount: r.discount, commission: r.commission, active: !!r.active, created: r.created, note: r.note, hasKey: !!r.account, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`, ...(await codeStats(c, r.code)) });
+  const sales = await c.all('SELECT id, code, plan, paid, amount, created, status, method FROM commissions ORDER BY id DESC LIMIT 200');
+  const payouts = await c.all('SELECT id, code, amount, created, method, note FROM payouts ORDER BY id DESC LIMIT 500');
+  return { codes, sales, payouts };
+};
+/** New partner code. With withKey, also makes the partner a free lifetime admin key linked to the code. */
+A.ownerCodeCreate = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const name = cleanText(req.name, 60);
+  if (!name) throw err('bad_request', 'Enter the partner’s name.');
+  let code = normCode(req.code);
+  if (code && code.length < 3) throw err('bad_request', 'Codes need 3 to 16 letters or numbers.');
+  if (!code) {
+    const base = normCode(name).replace(/[0-9]/g, '').slice(0, 8) || 'PS';
+    for (let i = 0; i < 20 && !code; i++) {
+      const t = base + String(10 + Math.floor(Math.random() * 90));
+      if (!(await c.one('SELECT code FROM ref_codes WHERE code = ?', t))) code = t;
+    }
+  } else if (await c.one('SELECT code FROM ref_codes WHERE code = ?', code)) throw err('bad_request', 'That code is taken. Pick another.');
+  if (!code) throw err('bad_request', 'Pick a code.');
+  let acct = null;
+  if (req.withKey) acct = await newAccount(c, { plan: 'lifetime', kind: 'comp', email: cleanEmail(req.email), note: ('Partner ' + name).slice(0, 60) });
+  await c.run('INSERT INTO ref_codes (code, account, name, email, discount, commission, created, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    code, acct ? acct.id : '', name, cleanEmail(req.email), pct(req.discount, 10), pct(req.commission, 20), c.now(), cleanText(req.note, 120));
+  return { code, link: `${c.env.SITE_ORIGIN || ''}/?ref=${code}`, adminKey: acct ? acct.adminKey : undefined };
+};
+A.ownerCodeUpdate = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const r = await c.one('SELECT * FROM ref_codes WHERE code = ?', normCode(req.code));
+  if (!r) throw err('not_found', 'Code not found');
+  await c.run('UPDATE ref_codes SET discount = ?, commission = ?, active = ?, name = ?, email = ? WHERE code = ?',
+    pct(req.discount, r.discount), pct(req.commission, r.commission), req.active === undefined ? r.active : (req.active ? 1 : 0),
+    cleanText(req.name, 60) || r.name, req.email === undefined ? r.email : cleanEmail(req.email), r.code);
+  return {};
+};
+/** Records money the owner paid a partner (by Venmo, PayPal, cash...). */
+A.ownerPayout = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const r = await c.one('SELECT code FROM ref_codes WHERE code = ?', normCode(req.code));
+  if (!r) throw err('not_found', 'Code not found');
+  const cents = dollarsToCents(req.amount);
+  if (cents <= 0) throw err('bad_request', 'Enter the amount you paid, like 12.50.');
+  const st = await codeStats(c, r.code);
+  if (cents > st.owed) throw err('bad_request', `That’s more than they’re owed ($${(st.owed / 100).toFixed(2)}).`);
+  await c.run('INSERT INTO payouts (code, amount, created, method, note) VALUES (?, ?, ?, ?, ?)', r.code, cents, c.now(), cleanText(req.method, 30), cleanText(req.note, 120));
+  return { owed: st.owed - cents };
+};
+/** Voids (or restores) a commission, e.g. after refunding that sale in Stripe. */
+A.ownerVoidSale = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const r = await c.run('UPDATE commissions SET status = ? WHERE id = ?', req.restore ? 'ok' : 'void', int(req.id, 0, 1e12, 0));
+  if (!r.meta.changes) throw err('not_found', 'Sale not found');
+  return {};
+};
+/** A sale paid in cash (or any way outside Stripe): makes a new admin key and credits the partner's code. */
+A.ownerCashSale = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  if (!ON_SALE.includes(req.plan)) throw err('bad_request', 'Pick a plan.');
+  const cents = dollarsToCents(req.amount);
+  if (cents < 0 || cents > LIMITS.MAX_CASH_CENTS) throw err('bad_request', 'Enter the amount they paid, like 10 or 9.50.');
+  let code = '';
+  if (req.code) { const r = await activeCode(c, req.code); if (!r) throw err('bad_code', 'That code isn’t valid.'); code = r.code; }
+  const acct = await newAccount(c, { plan: req.plan, kind: 'paid', email: cleanEmail(req.email), note: cleanText(req.note, 60), ref: code });
+  const session = 'cash:' + randomId(16);
+  await c.run('INSERT INTO purchases (session, account, plan, amount, created, ref, method) VALUES (?, ?, ?, ?, ?, ?, ?)', session, acct.id, req.plan, cents, c.now(), code, 'cash');
+  await recordCommission(c, { code, session, customer: acct.id, plan: req.plan, paid: cents, method: 'cash' });
+  return acct;
 };
 
 export const ACTIONS = A;

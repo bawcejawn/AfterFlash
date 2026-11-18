@@ -14,7 +14,13 @@ const list = (...items) => h('ul', null, items.map((i) => h('li', null, i)));
 const TERMS = [
   h('h1', null, `${app} terms of service`), h('p', { class: 'muted' }, `Last updated ${updated}. These terms are between you and ${biz}.`),
   ...sec('What you’re buying',
-    `${app} lets you run shared photo albums for your events. Guests take photos in their phone’s browser and the photos are saved to your own Google Drive. A one-time purchase gives you an admin key for your own account, with unlimited events for as long as we run the service. It isn’t a subscription.`,
+    `${app} lets you run shared photo albums for your events. Guests take photos in their phone’s browser and the photos are saved to your own Google Drive. A one-time payment gives you an admin key for a set time: one event within 30 days, unlimited events for 1 month (30 days), or unlimited events for 12 months (365 days), counted from the purchase. Nothing renews automatically and it isn’t a subscription. Buying again with the same key adds time, or another event, to it.`,
+    'When your plan ends you can still sign in, see your events and back up your keys, but you can’t create events, open host dashboards or receive new guest photos until you buy more time.'),
+  ...sec('How long albums stay online',
+    `Album, guest and photo-wall links stay online while your plan is active and for 12 months after it ends. After that they close and we may delete the event records on our side. The photos themselves stay in your Google Drive, under your control, for as long as you keep them there. ${app} doesn’t sell storage: any extra space comes from Google at Google’s price.`),
+  ...sec('Referral codes',
+    'A referral code gives the discount shown before checkout. Codes can’t be combined, have no cash value, and may be turned off at any time. If you bought with a code, the person who shared it may earn a commission on that purchase and on later purchases with the same key. They see the date, plan and amount, never your name or email.'),
+  ...sec('Your key',
     'Your key is for you or your business. You may run events for your own clients and charge them whatever you like. Don’t resell, share publicly or transfer the key itself.'),
   ...sec('Your Google Drive and your files',
     `Photos, videos and voice messages are stored in the Google account you connect. You’re responsible for that account, its storage space and any Google charges. ${app} can only access the files it creates there. If you disconnect Google or delete files, ${app} can’t restore them.`,
@@ -45,7 +51,7 @@ const PRIVACY = [
   ...sec('Service providers',
     'We use Cloudflare to run the website and its database, Google for sign-in and Drive storage, and Stripe for payments. Each handles data under its own privacy terms.'),
   ...sec('Keeping and deleting data',
-    'Event records stay until the host deletes the event or asks us to delete their account. Photos live in the host’s Google Drive and are under the host’s control. Hosts can disconnect PhotoShare any time in their Google account settings (Security → Third-party access).'),
+    'If a host used a referral code, we record which code and the amount paid, so its owner can be paid a commission; the code owner never sees the buyer’s name or email. Event records stay until the host deletes the event or asks us to delete their account, or until 12 months after the host’s plan ends. Photos live in the host’s Google Drive and are under the host’s control. Hosts can disconnect PhotoShare any time in their Google account settings (Security → Third-party access).'),
   ...sec('Children', `${app} isn’t directed at children under 13. Hosts decide who attends their events and are responsible for appropriate consent.`),
   ...sec('Your rights and contact', h('p', null, 'To ask what we hold about you, or to delete it, contact ', contact, '.')),
 ];

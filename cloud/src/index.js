@@ -4,6 +4,7 @@
 import { ACTIONS, VERSION, makeCtx } from './actions.js';
 import { ApiErr, randomKey, sha256Hex } from './lib.js';
 import { authUrl, exchangeCode, sealRefresh } from './google.js';
+import { ON_SALE, PLAN_NAMES, planPrices, money } from './stripe.js';
 
 const BODY_LIMIT = 30 * 1024 * 1024;
 const SEC_HEADERS = {
@@ -91,21 +92,24 @@ export async function handleOAuth(request, env) {
   return back('/admin.html#recover=' + encodeURIComponent(ticket));
 }
 
+const PLAN_NOTES = { event: 'One event, open 30 days', month: 'Unlimited events for 30 days', year: 'Unlimited events for a year' };
+function plansFor(env) {
+  const p = planPrices(env);
+  return ON_SALE.map((id) => ({ id, name: PLAN_NAMES[id], price: money(p[id]), cents: p[id], note: PLAN_NOTES[id], on: !!env.STRIPE_SECRET_KEY, best: id === 'year' }));
+}
+
 export function configJs(env) {
   const cfg = {
     appName: env.APP_NAME || 'PhotoShare',
     backends: { main: '/api' },
     cloud: {
-      plans: [
-        { id: 'month', name: '1 month', price: env.PRICE_MONTH || '$5', note: 'One event, start to finish', on: !!env.STRIPE_PRICE_MONTH },
-        { id: 'year', name: '1 year', price: env.PRICE_YEAR || '$20', note: 'A year of parties', on: !!env.STRIPE_PRICE_YEAR, best: true },
-        { id: 'lifetime', name: 'Lifetime', price: env.PRICE_LIFETIME || env.PRICE_LABEL || '$50', note: 'Pay once, host forever', on: !!(env.STRIPE_PRICE_LIFETIME || env.STRIPE_PRICE_ID) },
-      ],
-      price: env.PRICE_LIFETIME || env.PRICE_LABEL || '$50',
+      plans: plansFor(env),
+      price: money(planPrices(env).event),
+      holdMonths: 12,
       support: env.SUPPORT_EMAIL || '',
       business: env.BUSINESS_NAME || env.APP_NAME || 'PhotoShare',
       testMode: String(env.STRIPE_SECRET_KEY || '').startsWith('sk_test_'),
-      payments: !!(env.STRIPE_SECRET_KEY && (env.STRIPE_PRICE_MONTH || env.STRIPE_PRICE_YEAR || env.STRIPE_PRICE_LIFETIME || env.STRIPE_PRICE_ID)),
+      payments: !!env.STRIPE_SECRET_KEY,
       google: !!env.GOOGLE_CLIENT_ID,
     },
     koinos: { rpc: '', contract: '', explorer: '' },

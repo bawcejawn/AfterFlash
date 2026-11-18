@@ -28,7 +28,7 @@ async function claim() {
   }
 }
 
-const until = (r) => (r.plan === 'lifetime' && !r.expires ? 'for life' : `until ${new Date(r.expires).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`);
+const until = (r) => (r.plan === 'lifetime' && !r.expires ? 'for life' : `${r.plan === 'event' ? 'for one event, ' : ''}until ${new Date(r.expires).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`);
 
 function renewed(r) {
   clear(root).append(h('div', { class: 'narrow section stack' },
