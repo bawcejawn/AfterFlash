@@ -52,9 +52,10 @@ with sync_playwright() as p:
     page.goto(BASE + "/index.html")
     expect(page.locator("#pricing")).to_be_visible()
     expect(page.locator(".plan")).to_have_count(3)
-    expect(page.locator(".plans")).to_contain_text("$5")
-    expect(page.locator(".plans")).to_contain_text("$20")
-    expect(page.locator(".plans")).to_contain_text("$50")
+    for price in ("$5", "$10", "$30"):
+        expect(page.locator(".plans")).to_contain_text(price)
+    expect(page.locator(".plans")).not_to_contain_text("Lifetime")
+    expect(page.locator("#ref-form")).to_be_visible()
     expect(page.locator(".test-banner")).to_contain_text("Test mode")
     expect(page.locator("a[href='setup.html']")).to_have_count(2)  # present but hidden (self-host only)
     assert not page.locator("a[href='setup.html']").first.is_visible()
@@ -73,7 +74,7 @@ with sync_playwright() as p:
 
     # ---- connect Google Drive
     expect(page.locator("h2", has_text="Step 1: Connect your Google Drive")).to_be_visible(timeout=15000)
-    expect(page.locator(".plan-status")).to_contain_text("1-year plan: 365 days left")
+    expect(page.locator(".plan-status")).to_contain_text("12-month plan: 365 days left")
     expect(page.locator("text=New event")).to_have_count(0)
     page.screenshot(path=f"{SHOTS}/03-connect.png", full_page=True)
     page.click("button:has-text('Connect Google Drive')")
@@ -142,6 +143,52 @@ with sync_playwright() as p:
     expect(page.locator("text=Free admin key")).to_be_visible()
     expect(page.locator("text=/2 accounts: 1 paid, 1 free/")).to_be_visible()
     page.screenshot(path=f"{SHOTS}/05-owner.png", full_page=True)
+
+    # ---- referral partner: owner adds a friend with a lifetime key
+    expect(page.locator("text=Owner: referral partners")).to_be_visible()
+    page.fill("input[placeholder='Partner’s name']", "Mike")
+    page.fill("input[placeholder='Code (optional)']", "mike")
+    page.click("button:has-text('Add partner')")
+    expect(page.locator("h3", has_text="Partner code MIKE")).to_be_visible(timeout=15000)
+    box = page.locator(".panel", has=page.locator("h3", has_text="Partner code MIKE"))
+    partner_link = box.locator(".partner-link").first.inner_text().strip()
+    assert partner_link.endswith("/?ref=MIKE"), partner_link
+    partner_key = box.locator(".keybox").last.inner_text().strip()
+    assert len(partner_key) == 43
+
+    # a friend of Mike's opens his link: 10% off shows, and they buy 12 months
+    buyer = browser.new_context(viewport={"width": 1200, "height": 900})
+    buyer.route("https://checkout.stripe.com/**", fake_stripe)
+    bp = buyer.new_page(); watch(bp, "buyer")
+    bp.goto(BASE + "/?ref=MIKE")
+    expect(bp.locator("#ref-msg")).to_contain_text("Code MIKE: 10% off applied")
+    expect(bp.locator(".plans")).to_contain_text("$27")
+    assert "ref=" not in bp.url, "code removed from the address bar"
+    bp.screenshot(path=f"{SHOTS}/06-referral.png", full_page=True)
+    bp.click("button[data-plan=year]")
+    expect(bp.locator("h1")).to_contain_text("Here’s your admin key", timeout=20000)
+    # a wrong code is refused politely
+    bp.goto(BASE + "/index.html")
+    bp.click("#ref-form button:has-text('Remove')")
+    bp.fill("#ref-code", "nope99")
+    bp.click("#ref-form button:has-text('Apply')")
+    expect(bp.locator("#ref-msg")).to_contain_text("isn’t valid")
+
+    # owner sees the sale and Mike's commission
+    page.reload()
+    expect(page.locator("text=Owner: referral partners")).to_be_visible(timeout=15000)
+    row = page.locator("section", has=page.locator("h2", has_text="Owner: referral partners")).locator("table.list tbody tr").first
+    expect(row).to_contain_text("1 ($27.00)")
+    expect(row).to_contain_text("$5.40")
+
+    # Mike signs in with his lifetime key and sees his code and earnings
+    page.click("text=Sign out")
+    page.fill("#ak", partner_key)
+    page.click("button:has-text('Sign in')")
+    expect(page.locator("h2", has_text="Your referral code")).to_be_visible(timeout=15000)
+    expect(page.locator("text=Plan: Lifetime")).to_be_visible()
+    expect(page.locator("text=/1 sale\\. Earned \\$5\\.40/")).to_be_visible()
+    page.screenshot(path=f"{SHOTS}/07-partner.png", full_page=True)
 
     # ---- legal pages
     for name in ("terms", "privacy"):

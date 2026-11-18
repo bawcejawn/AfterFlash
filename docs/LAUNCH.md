@@ -90,29 +90,26 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 
 ## Part 6: Stripe (payments)
 
+You don't need to create products in Stripe: PhotoShare sets the prices itself, which is what makes referral discounts exact.
+
 1. **dashboard.stripe.com** → sign up. Stay in **Test mode** (toggle at the top) for now.
-2. **Product catalog** → **+ Add product**, three times. Each one is **One-off** pricing, not recurring:
-
-   | Name | Price | Description |
-   |---|---|---|
-   | `PhotoShare 1 month` | $5.00 | `Host unlimited events for 30 days.` |
-   | `PhotoShare 1 year` | $20.00 | `Host unlimited events for 365 days.` |
-   | `PhotoShare Lifetime` | $50.00 | `Host unlimited events forever.` |
-
-3. Open each product, click its price and copy the **Price ID** (starts `price_`).
-4. **Developers** → **API keys** → copy the **Secret key** (starts `sk_test_`).
-5. GitHub → **Settings → Secrets and variables → Actions**:
-   - **Variables**: `STRIPE_PRICE_MONTH`, `STRIPE_PRICE_YEAR` and `STRIPE_PRICE_LIFETIME` = the three price IDs, plus `SUPPORT_EMAIL` = the email customers should write to.
-   - If you change a price in Stripe, also set `PRICE_MONTH` / `PRICE_YEAR` / `PRICE_LIFETIME` (e.g. `$7`). That's only the text on the site; Stripe charges the real price.
-   - **Secrets**: `STRIPE_SECRET_KEY` = the secret key.
-6. Run **Deploy PhotoShare Cloud**. The site shows the yellow **Test mode** bar and three plans.
+2. **Developers** → **API keys** → copy the **Secret key** (starts `sk_test_`).
+3. GitHub → **Settings → Secrets and variables → Actions**:
+   - **Secrets** → `STRIPE_SECRET_KEY` = the secret key.
+   - **Variables** → `SUPPORT_EMAIL` = the email customers should write to.
+   - Prices are $5 (1 event), $10 (1 month) and $30 (12 months). To change one, add a variable `PRICE_EVENT`, `PRICE_MONTH` or `PRICE_YEAR` with the dollar amount, e.g. `15`.
+4. Run **Deploy PhotoShare Cloud**. The site shows the yellow **Test mode** bar and three plans. Buy each one with card `4242 4242 4242 4242`.
+5. Optional, after you go live (Part 8): **Settings → Payments → Payment methods** → turn on **Crypto**, so people can pay in USDC stablecoin. The fee is 1.5% instead of 2.9% + 30¢, and you get dollars. Only US businesses can turn it on, and only on a live (activated) account. Nothing to change in PhotoShare.
 
 **How plans work:**
-- 1 month = 30 days and 1 year = 365 days from purchase.
-- Buying again while signed in adds time to the same key. Lifetime never ends.
-- When a plan ends, the host can still sign in, see their events and back up private keys. Albums stay online and photos stay in their Drive.
-- Creating events, host dashboards and new guest photos stop until they renew. Guests' phones keep the photos and upload them after renewal.
-- Nothing renews automatically, and there are no email reminders yet: the admin page warns hosts 7 days before the end.
+- **1 event** ($5): one event, usable for 30 days from purchase. Deleting it doesn't give the event back.
+- **1 month** ($10) and **12 months** ($30): unlimited events for 30 or 365 days.
+- Buying again while signed in adds time (or one more event) to the same key. Lifetime keys exist, but only you can give them (owner panel).
+- When a plan ends, hosts can still sign in, see their events and back up private keys. Creating events, host dashboards and new guest photos stop until they renew; guests' phones keep the photos and upload them after renewal.
+- **Albums stay online for 12 months after a plan ends**, then their links close. The photos stay in the host's Google Drive. Renewing reopens them.
+- Nothing renews automatically and there are no reminder emails yet: the admin page warns hosts 7 days before the end.
+
+**Referral partners and cash sales** are in your owner panel; see [PARTNERS.md](PARTNERS.md).
 
 ## Part 7: Test the whole thing yourself (test mode, no real money)
 
@@ -126,7 +123,7 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 
 ## Part 8: Go live
 
-1. Stripe: **Activate payments** (business details, bank account for payouts). Switch the toggle to **Live mode**. Repeat Part 6 steps 2–4 in Live mode (three new price IDs, `sk_live_` key), update those GitHub settings, and run the workflow again. The yellow bar disappears.
+1. Stripe: **Activate payments** (business details, bank account for payouts). Switch the toggle to **Live mode**. Repeat Part 6 steps 2–4 in Live mode (`sk_live_` key), update the `STRIPE_SECRET_KEY` secret, and run the workflow again. The yellow bar disappears.
 2. Read your **Terms** and **Privacy** pages (`/terms.html`, `/privacy.html`). They include a 14-day refund promise; change it if you want a different policy. To edit, tell me or change `site/assets/js/legal.js`. Have a lawyer glance at both when you can.
 3. Business basics (ask an accountant for your state):
    - an LLC
@@ -149,21 +146,21 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 3. Write a list of 30 people who'll host something in the next 3 months: engaged couples, people planning a 30th/40th/50th birthday, graduation parties, baby showers, reunions.
 4. Send each one a personal text (not a group blast):
 
-   > "Hey! I built an app for [event]: guests scan a QR code and every photo they take lands in your Google Drive, with a live slideshow on the TV and a highlight video the next morning. No app for guests. Want to try it for yours? It's $5 for the month, and I'll set it up with you."
+   > "Hey! I built an app for [event]: guests scan a QR code and every photo they take lands in your Google Drive, with a live slideshow on the TV and a highlight video the next morning. No app for guests. Want to try it for yours? It's $5 for your event, and I'll set it up with you."
 
-5. In Stripe → **Product catalog** → **Coupons** → **+ Create coupon**: 25% off, **Once**, limit 10 redemptions. In the coupon's **Promotion codes** section, add the code `FIRST10`. Buyers type it at checkout ("Add promotion code").
+5. Give your own launch code: Owner panel → **Referral partners** → name `Launch`, code `FIRST10`, 10% off, 0% commission, untick the free key. Send people `YOUR-SITE/?ref=FIRST10` and the discount shows on the price. Turn it off when the launch ends.
 
 **Weeks 2–4: planners (your wife's network)**
 
 6. List 15 wedding planners, venues, DJs and photographers she knows.
 7. Give each a **free key** (Owner tools → Create a free key) for their next event, in exchange for honest feedback, a testimonial and permission to mention them.
-8. Ask the ones who like it to recommend it to clients, or to buy one for each couple and include it in their packages (they can mark it up).
+8. Make the ones who like it **referral partners** (see [PARTNERS.md](PARTNERS.md)): they get a code that gives their clients 10% off and earns them 20% of every sale. Or they buy a 12-month key and include events in their packages (they can mark it up).
 
 **Ongoing (30 minutes a day)**
 
 9. Post short videos (TikTok, Instagram Reels, Facebook): "the TV wall filling up live", "the morning-after highlight video", "how guests join in 5 seconds". Real events beat polished ads.
 10. Local Facebook groups (wedding planning, moms, event pros): share your real event video when it's allowed. Read each group's rules first.
 11. Every printed QR sign already shows your brand to 100+ guests. After each event, ask the host: "Know anyone else hosting something?"
-12. Track it in Stripe (sales) and the owner panel (accounts, events, Drive connected). Expect the first sale from the warm list or a planner, not from strangers.
+12. Track it in Stripe (sales) and the owner panel (accounts, events, Drive connected, partner sales). Expect the first sale from the warm list or a planner, not from strangers.
 
 **A realistic first goal:** 10 paying hosts. Then decide whether to spend on ads.

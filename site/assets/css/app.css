@@ -396,3 +396,11 @@ details summary { cursor: pointer; font-weight: 700; }
 .plan-badge { position: absolute; top: -0.8rem; right: 1rem; background: var(--accent, #0f7c7a); color: #fff; font-size: 0.8rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; }
 .plan-status.warn { border-left: 4px solid #c0392b; }
 .plans > .panel { margin: 0; }
+
+.price-tag .was { font-size: 0.5em; color: var(--muted); font-weight: 500; }
+.ref-form { display: grid; gap: 0.4rem; justify-items: start; margin-top: 1.2rem; }
+.ref-form input { text-transform: uppercase; max-width: 12rem; }
+.partner-link { word-break: break-all; }
+.upper { text-transform: uppercase; }
+input.narrow { width: 5rem; }
+input.mid { width: 10rem; }

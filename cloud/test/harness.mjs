@@ -117,8 +117,7 @@ export function fakes() {
         const sid = 'cs_test_' + Math.random().toString(36).slice(2) + 'abcdefghij';
         const metadata = {};
         for (const [k, v] of f) { const m = /^metadata\[(\w+)\]$/.exec(k); if (m) metadata[m[1]] = v; }
-        const amounts = { price_month: 500, price_year: 2000, price_lifetime: 5000 };
-        sessions.set(sid, { paid: false, email: 'buyer@example.com', metadata, amount: amounts[f.get('line_items[0][price]')] || 0, success: f.get('success_url').replace('{CHECKOUT_SESSION_ID}', sid) });
+        sessions.set(sid, { paid: false, email: 'buyer@example.com', metadata, amount: Number(f.get('line_items[0][price_data][unit_amount]')) || 0, name: f.get('line_items[0][price_data][product_data][name]'), success: f.get('success_url').replace('{CHECKOUT_SESSION_ID}', sid) });
         return reply({ id: sid, url: `https://checkout.stripe.com/c/pay/${sid}` });
       }
       const m = /^\/v1\/checkout\/sessions\/(.+)$/.exec(u.pathname);
@@ -151,10 +150,8 @@ export function makeEnv(extra = {}) {
     DB: d1(),
     SITE_ORIGIN: 'http://localhost:8788',
     GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret',
-    STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_PRICE_MONTH: 'price_month', STRIPE_PRICE_YEAR: 'price_year', STRIPE_PRICE_LIFETIME: 'price_lifetime',
-    PRICE_MONTH: '$5', PRICE_YEAR: '$20', PRICE_LIFETIME: '$50',
+    STRIPE_SECRET_KEY: 'sk_test_fake', PRICE_EVENT: '$5', PRICE_MONTH: '$10', PRICE_YEAR: '$30',
     DATA_KEY: 'test-data-key-0123456789abcdef0123456789', OWNER_KEY: 'owner-key-for-tests-0123456789',
-    PRICE_LABEL: '$39',
     ASSETS: { fetch: (req) => serveAsset(new URL(req.url).pathname) },
     ...extra,
   };

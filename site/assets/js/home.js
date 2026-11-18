@@ -75,21 +75,75 @@ if (cloud) {
   const msg = $('#buy-msg');
   const box = $('#plans');
   if (!plans.length) msg.textContent = 'Sales open soon.';
+
+  // Referral codes: ?ref=CODE links are remembered for 60 days on this device, or typed in the box.
+  const REF_KEY = 'ps:ref', REF_DAYS = 60;
+  const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
+  let ref = null; // { code, discount, prices }
+  const fromUrl = norm(new URLSearchParams(location.search).get('ref'));
+  if (fromUrl.length >= 3) {
+    store.set(REF_KEY, { code: fromUrl, t: Date.now() });
+    const u = new URL(location.href); u.searchParams.delete('ref'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+  }
+  const saved = store.get(REF_KEY);
+  const savedCode = saved && typeof saved.code === 'string' && Date.now() - Number(saved.t) < REF_DAYS * 86400000 ? norm(saved.code) : '';
+
+  const priceEls = {};
+  const draw = () => {
+    for (const p of plans) {
+      const el = clear(priceEls[p.id]);
+      const now = ref && ref.prices && ref.prices[p.id] != null ? ref.prices[p.id] : p.cents;
+      if (ref && now < p.cents) el.append(h('s', { class: 'was' }, p.price), ' ');
+      el.append(fmt(now), h('small', null, 'one time'));
+    }
+  };
+  const fmt = (c) => '$' + (c % 100 ? (c / 100).toFixed(2) : String(c / 100));
+
   for (const p of plans) {
-    const btn = h('button', { class: 'btn ' + (p.best ? 'flash' : 'primary'), type: 'button', dataset: { plan: p.id } }, `Get ${p.name.toLowerCase()}`);
+    const btn = h('button', { class: 'btn ' + (p.best ? 'flash' : 'primary'), type: 'button', dataset: { plan: p.id } }, p.id === 'event' ? 'Get 1 event' : `Get ${p.name.toLowerCase()}`);
     btn.addEventListener('click', async () => {
       for (const b of box.querySelectorAll('button')) b.disabled = true;
       msg.textContent = 'Opening secure checkout…';
       try {
-        const { url } = await api('main', 'checkoutStart', { plan: p.id }, { retries: 1 });
+        const { url } = await api('main', 'checkoutStart', { plan: p.id, ...(ref ? { ref: ref.code } : {}) }, { retries: 1 });
         if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.');
         location.href = url;
       } catch (e) { msg.textContent = e.message; for (const b of box.querySelectorAll('button')) b.disabled = false; }
     });
+    priceEls[p.id] = h('div', { class: 'price-tag' });
     box.append(h('div', { class: 'panel plan' + (p.best ? ' best' : '') },
       p.best ? h('span', { class: 'plan-badge' }, 'Best value') : null,
-      h('h3', null, p.name),
-      h('div', { class: 'price-tag' }, p.price, h('small', null, 'one time')),
+      h('h3', null, p.name), priceEls[p.id],
       h('p', { class: 'muted' }, p.note), btn));
+  }
+  draw();
+
+  const refForm = $('#ref-form'), refInput = $('#ref-code'), refMsg = $('#ref-msg');
+  const showRef = () => {
+    clear(refMsg);
+    if (ref) {
+      const rm = h('button', { class: 'btn small ghost', type: 'button' }, 'Remove');
+      rm.addEventListener('click', () => { ref = null; store.del(REF_KEY); refInput.value = ''; showRef(); draw(); });
+      refMsg.append(`Code ${ref.code}: ${ref.discount}% off applied. `, rm);
+    }
+  };
+  const apply = async (code, quiet) => {
+    code = norm(code);
+    if (code.length < 3) { if (!quiet) refMsg.textContent = 'Enter the code you were given.'; return; }
+    try {
+      ref = await api('main', 'refLookup', { code }, { retries: 1 });
+      store.set(REF_KEY, { code: ref.code, t: Date.now() });
+      refInput.value = ref.code;
+    } catch (e) {
+      ref = null;
+      if (quiet) store.del(REF_KEY); else refMsg.textContent = e.message;
+      draw(); return;
+    }
+    showRef(); draw();
+  };
+  if (refForm && plans.length) {
+    refForm.hidden = false;
+    refForm.addEventListener('submit', (e) => { e.preventDefault(); apply(refInput.value, false); });
+    if (savedCode) apply(savedCode, true);
   }
 }

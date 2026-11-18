@@ -41,13 +41,9 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          STRIPE_PRICE_ID: ${{ vars.STRIPE_PRICE_ID }}
-          STRIPE_PRICE_MONTH: ${{ vars.STRIPE_PRICE_MONTH }}
-          STRIPE_PRICE_YEAR: ${{ vars.STRIPE_PRICE_YEAR }}
-          STRIPE_PRICE_LIFETIME: ${{ vars.STRIPE_PRICE_LIFETIME }}
+          PRICE_EVENT: ${{ vars.PRICE_EVENT }}
           PRICE_MONTH: ${{ vars.PRICE_MONTH }}
           PRICE_YEAR: ${{ vars.PRICE_YEAR }}
-          PRICE_LIFETIME: ${{ vars.PRICE_LIFETIME }}
           SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
           BUSINESS_NAME: ${{ vars.BUSINESS_NAME }}
           APP_NAME: ${{ vars.APP_NAME }}

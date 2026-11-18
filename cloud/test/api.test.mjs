@@ -33,8 +33,8 @@ async function boot(extra) {
 }
 
 /** Buy → claim key → connect Drive. Returns the host's admin key. */
-async function hostWithDrive(s, { sub = 'google-sub-1', plan = 'lifetime' } = {}) {
-  const { url } = await s.call({ a: 'checkoutStart', plan });
+async function hostWithDrive(s, { sub = 'google-sub-1', plan = 'year', ref } = {}) {
+  const { url } = await s.call({ a: 'checkoutStart', plan, ref });
   const sid = url.split('/').pop();
   s.fk.pay(sid);
   const { adminKey } = await s.call({ a: 'claimPurchase', session_id: sid });
@@ -49,7 +49,7 @@ t('health, config and unknown actions', async () => {
   const h = await (await s.get('/api')).json();
   assert.equal(h.app, 'photoshare'); assert.equal(h.cloud, true);
   const cfg = await (await s.get('/config.js')).text();
-  assert.match(cfg, /"main":"\/api"/); assert.match(cfg, /"price":"\$5"/); assert.match(cfg, /"price":"\$50"/); assert.match(cfg, /"testMode":true/);
+  assert.match(cfg, /"main":"\/api"/); assert.match(cfg, /"price":"\$5"/); assert.match(cfg, /"price":"\$30"/); assert.doesNotMatch(cfg, /lifetime/i); assert.match(cfg, /"testMode":true/);
   assert.doesNotMatch(cfg, /sk_test|test-secret|DATA_KEY|owner-key/);
   for (const a of ['constructor', '__proto__', 'toString', 'nope']) assert.equal((await s.call({ a })).error, 'bad_request');
   const res = await s.worker.fetch(new Request('http://localhost:8788/api', { method: 'POST', headers: { origin: 'https://evil.example' }, body: '{"a":"event"}' }), s.env);
@@ -58,7 +58,7 @@ t('health, config and unknown actions', async () => {
 
 t('a purchase becomes exactly one account; the key can be re-shown only briefly', async () => {
   const s = await boot();
-  const { url } = await s.call({ a: 'checkoutStart' });
+  const { url } = await s.call({ a: 'checkoutStart', plan: 'year' });
   assert.match(url, /^https:\/\/checkout\.stripe\.com\//);
   const sid = url.split('/').pop();
   assert.equal((await s.call({ a: 'claimPurchase', session_id: sid })).error, 'not_paid');
@@ -77,7 +77,7 @@ t('a purchase becomes exactly one account; the key can be re-shown only briefly'
 
 t('creating events needs Google Drive connected; connect stores an encrypted token', async () => {
   const s = await boot();
-  const { url } = await s.call({ a: 'checkoutStart' });
+  const { url } = await s.call({ a: 'checkoutStart', plan: 'year' });
   const sid = url.split('/').pop(); s.fk.pay(sid);
   const { adminKey } = await s.call({ a: 'claimPurchase', session_id: sid });
   const me = await s.call({ a: 'adminCheck', k: adminKey });
@@ -264,7 +264,7 @@ t('a full Drive or a revoked Google connection gives clear errors and refunds th
   void driveFor;
 });
 
-t('plans: 1 month and 1 year keys expire, renewals add time once, lifetime never ends', async () => {
+t('plans: 1 month and 12 month keys expire, renewals add time once, lifetime is owner-only', async () => {
   const s = await boot();
   const day = 86400000;
   const k = await hostWithDrive(s, { plan: 'month' });
@@ -297,17 +297,118 @@ t('plans: 1 month and 1 year keys expire, renewals add time once, lifetime never
   // early renewal adds to the time left
   const u2 = (await s.call({ a: 'checkoutStart', plan: 'month', k })).url.split('/').pop(); s.fk.pay(u2);
   assert.ok(Math.abs((await s.call({ a: 'claimPurchase', session_id: u2 })).expires - (r.expires + 30 * day)) < 60000);
-  // upgrade to lifetime
-  const u3 = (await s.call({ a: 'checkoutStart', plan: 'lifetime', k })).url.split('/').pop(); s.fk.pay(u3);
-  const life = await s.call({ a: 'claimPurchase', session_id: u3 });
-  assert.equal(life.plan, 'lifetime'); assert.equal(life.expires, 0);
-  assert.equal((await s.call({ a: 'checkoutStart', plan: 'month', k })).error, 'bad_request', 'nothing to renew on lifetime');
+  // lifetime isn't for sale, and the one-event plan can't replace unlimited time
+  assert.equal((await s.call({ a: 'checkoutStart', plan: 'lifetime', k })).error, 'bad_request');
+  assert.equal((await s.call({ a: 'checkoutStart', plan: 'event', k })).error, 'bad_request');
   const owner = s.env.OWNER_KEY;
-  const comp = await s.call({ a: 'ownerCreateAccount', k: owner, plan: 'month', note: 'trial' });
-  assert.equal(comp.plan, 'month');
+  const comp = await s.call({ a: 'ownerCreateAccount', k: owner, plan: 'lifetime', note: 'friend' });
+  assert.equal(comp.plan, 'lifetime'); assert.equal(comp.expires, 0);
+  assert.equal((await s.call({ a: 'checkoutStart', plan: 'month', k: comp.adminKey })).error, 'bad_request', 'nothing to renew on lifetime');
   const accts = (await s.call({ a: 'ownerAccounts', k: owner })).accounts;
-  assert.equal(accts.find((a) => a.kind === 'paid').paid, 500 + 2000 + 500 + 5000);
+  assert.equal(accts.find((a) => a.kind === 'paid').paid, 1000 + 3000 + 1000);
   assert.equal(s.env.DB.raw.prepare('SELECT COUNT(*) n FROM accounts').get().n, 3, 'renewals reuse the account (+ owner row + comp)');
+});
+
+t('one-event plan: one event, 30 days; buying again adds one more', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s, { plan: 'event' });
+  let me = (await s.call({ a: 'adminCheck', k })).me;
+  assert.equal(me.plan, 'event'); assert.equal(me.maxEvents, 1); assert.ok(Math.abs(me.expires - (Date.now() + 30 * 86400000)) < 60000);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Wedding' } });
+  assert.ok(ev.id);
+  assert.equal((await s.call({ a: 'adminCreate', k, settings: { name: 'Second' } })).error, 'plan_limit');
+  assert.equal((await s.call({ a: 'adminDelete', k, e: ev.id, confirm: ev.id })).ok, true);
+  assert.equal((await s.call({ a: 'adminCreate', k, settings: { name: 'Delete and redo' } })).error, 'plan_limit', 'deleting doesn’t give the event back');
+  const sid = (await s.call({ a: 'checkoutStart', plan: 'event', k })).url.split('/').pop(); s.fk.pay(sid);
+  await s.call({ a: 'claimPurchase', session_id: sid });
+  me = (await s.call({ a: 'adminCheck', k })).me;
+  assert.equal(me.maxEvents, 2);
+  assert.ok((await s.call({ a: 'adminCreate', k, settings: { name: 'Another' } })).id);
+  // upgrading to a month makes events unlimited
+  const u = (await s.call({ a: 'checkoutStart', plan: 'month', k })).url.split('/').pop(); s.fk.pay(u);
+  await s.call({ a: 'claimPurchase', session_id: u });
+  assert.equal((await s.call({ a: 'adminCheck', k })).me.maxEvents, 0);
+  assert.ok((await s.call({ a: 'adminCreate', k, settings: { name: 'Third' } })).id);
+});
+
+t('albums stay online 12 months after a plan ends, then close (Drive keeps the photos)', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s, { plan: 'month' });
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Party' } });
+  s.env.DB.raw.prepare("UPDATE accounts SET expires = ? WHERE kind = 'paid'").run(Date.now() - 364 * 86400000);
+  assert.equal((await s.call({ a: 'list', e: ev.id })).ok, true, 'still inside the 12 months');
+  assert.ok((await s.call({ a: 'adminCheck', k })).me.holdUntil > Date.now());
+  s.env.DB.raw.prepare("UPDATE accounts SET expires = ? WHERE kind = 'paid'").run(Date.now() - 366 * 86400000);
+  for (const a of ['event', 'join', 'list']) assert.equal((await s.call({ a, e: ev.id })).error, 'archived', a);
+  assert.equal((await s.call({ a: 'adminList', k })).events.length, 1, 'the host still sees it and can renew');
+  const sid = (await s.call({ a: 'checkoutStart', plan: 'month', k })).url.split('/').pop(); s.fk.pay(sid);
+  await s.call({ a: 'claimPurchase', session_id: sid });
+  assert.equal((await s.call({ a: 'list', e: ev.id })).ok, true, 'renewing reopens it');
+});
+
+t('referral codes: discount, commission on every sale, partner view, payouts, voids, cash sales', async () => {
+  const s = await boot();
+  const owner = s.env.OWNER_KEY;
+  // only the owner manages codes
+  const k0 = await hostWithDrive(s, { plan: 'month', sub: 'someone' });
+  for (const a of ['ownerCodes', 'ownerCodeCreate', 'ownerPayout', 'ownerCashSale', 'ownerVoidSale', 'ownerCodeUpdate']) {
+    assert.equal((await s.call({ a, k: k0, name: 'x', code: 'X1X', plan: 'month', amount: '1' })).error, 'forbidden', a);
+  }
+  const p = await s.call({ a: 'ownerCodeCreate', k: owner, name: 'Mike Smith', email: 'mike@example.com', withKey: true });
+  assert.match(p.code, /^MIKESMIT\d\d$/); assert.ok(p.adminKey); assert.match(p.link, /\/\?ref=/);
+  assert.equal((await s.call({ a: 'ownerCodeCreate', k: owner, name: 'Dup', code: p.code })).error, 'bad_request', 'codes are unique');
+  const big = await s.call({ a: 'ownerCodeCreate', k: owner, name: 'Greedy', code: 'greedy-1', discount: 90, commission: 99 });
+  assert.equal(big.code, 'GREEDY1');
+  const gr = (await s.call({ a: 'ownerCodes', k: owner })).codes.find((c) => c.code === 'GREEDY1');
+  assert.equal(gr.discount, 50); assert.equal(gr.commission, 50, 'percentages are capped at 50');
+  // partner's own key is lifetime
+  const pm = (await s.call({ a: 'adminCheck', k: p.adminKey })).me;
+  assert.equal(pm.plan, 'lifetime'); assert.equal(pm.partner.codes[0].code, p.code); assert.equal(pm.partner.codes[0].sales, 0);
+  // public lookup
+  const look = await s.call({ a: 'refLookup', code: p.code.toLowerCase() });
+  assert.equal(look.discount, 10); assert.deepEqual(look.prices, { event: 450, month: 900, year: 2700 });
+  assert.equal((await s.call({ a: 'refLookup', code: 'NOPE99' })).error, 'bad_code');
+  assert.equal((await s.call({ a: 'checkoutStart', plan: 'year', ref: 'NOPE99' })).error, 'bad_code');
+  // a buyer uses the code: 10% off, 20% of what they paid goes to Mike
+  const kb = await hostWithDrive(s, { plan: 'year', ref: p.code, sub: 'buyer-2' });
+  const sess = [...s.env.DB.raw.prepare('SELECT * FROM purchases ORDER BY created').all()].pop();
+  assert.equal(sess.amount, 2700); assert.equal(sess.ref, p.code);
+  // renewal by the same customer keeps the code (and the commission) automatically
+  const r = (await s.call({ a: 'checkoutStart', plan: 'month', k: kb })).url.split('/').pop(); s.fk.pay(r);
+  await s.call({ a: 'claimPurchase', session_id: r });
+  await s.call({ a: 'claimPurchase', session_id: r }); // reloading the thank-you page doesn't double-count
+  let st = (await s.call({ a: 'adminCheck', k: p.adminKey })).me.partner.codes[0];
+  assert.equal(st.sales, 2); assert.equal(st.revenue, 2700 + 900); assert.equal(st.earned, 540 + 180); assert.equal(st.ready, 0, 'not payable until 14 days pass');
+  assert.equal(st.recent[0].plan, 'month'); assert.equal(st.recent[0].customer, undefined, 'partners never see who bought');
+  // a partner can't earn on their own purchases
+  const own = await s.call({ a: 'checkoutStart', plan: 'month', ref: p.code });
+  assert.ok(own.url); // anonymous buyer: fine
+  const sf = (await s.call({ a: 'checkoutStart', plan: 'month', k: p.adminKey, ref: p.code })).error;
+  assert.equal(sf, 'bad_request', 'lifetime partner has nothing to buy anyway');
+  // cash sale credited to the code
+  const cash = await s.call({ a: 'ownerCashSale', k: owner, plan: 'event', amount: '5', code: p.code, email: 'aunt@example.com' });
+  assert.ok(cash.adminKey); assert.equal(cash.plan, 'event');
+  assert.equal((await s.call({ a: 'ownerCashSale', k: owner, plan: 'lifetime', amount: '5' })).error, 'bad_request');
+  assert.equal((await s.call({ a: 'ownerCashSale', k: owner, plan: 'month', amount: '-3' })).error, 'bad_request');
+  // 14 days later the money is ready to pay out
+  s.env.DB.raw.prepare('UPDATE commissions SET created = ?').run(Date.now() - 15 * 86400000);
+  let oc = await s.call({ a: 'ownerCodes', k: owner });
+  let mc = oc.codes.find((c) => c.code === p.code);
+  assert.equal(mc.earned, 540 + 180 + 100); assert.equal(mc.ready, 820); assert.equal(oc.sales.length, 3);
+  assert.equal((await s.call({ a: 'ownerPayout', k: owner, code: p.code, amount: '9.00' })).error, 'bad_request', 'can’t pay more than owed');
+  assert.equal((await s.call({ a: 'ownerPayout', k: owner, code: p.code, amount: '5.20', method: 'Venmo' })).owed, 300);
+  // refund one sale in Stripe → void its commission
+  const cashRow = oc.sales.find((x) => x.method === 'cash');
+  await s.call({ a: 'ownerVoidSale', k: owner, id: cashRow.id });
+  oc = await s.call({ a: 'ownerCodes', k: owner });
+  mc = oc.codes.find((c) => c.code === p.code);
+  assert.equal(mc.owed, 200); assert.equal(mc.paidThisYear, 520); assert.equal(oc.payouts[0].method, 'Venmo');
+  // turning a code off stops new discounts
+  await s.call({ a: 'ownerCodeUpdate', k: owner, code: p.code, active: false });
+  assert.equal((await s.call({ a: 'refLookup', code: p.code })).error, 'bad_code');
+  assert.ok((await s.call({ a: 'checkoutStart', plan: 'month', k: kb })).url, 'renewal still works, at full price');
+  const last = [...s.fk.sessions.values()].pop();
+  assert.equal(last.amount, 1000); assert.equal(last.metadata.ref, undefined);
 });
 
 let passed = 0;
