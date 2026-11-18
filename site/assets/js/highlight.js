@@ -63,7 +63,7 @@ export async function renderHighlight(opts) {
   const per = Math.max(1.5, Math.min(6, opts.perPhoto || 3));
   const fade = Math.min(0.8, per / 4);
   const progress = opts.onProgress || (() => {});
-  const display = opts.font === 'script' ? '"Great Vibes", "Cormorant", cursive' : opts.font === 'elegant' ? '"Cormorant", Georgia, serif' : '"Bricolage", system-ui, sans-serif';
+  const display = opts.font === 'script' ? '"Great Vibes", "Cormorant", cursive' : opts.font === 'elegant' ? '"Cormorant", Georgia, serif' : '"Figtree", system-ui, sans-serif';
   const body = '"Atkinson", system-ui, sans-serif';
   const noteFont = opts.font === 'modern' || !opts.font ? display : '"Cormorant", Georgia, serif'; // script is too hard to read at length
   try { await Promise.all([document.fonts.load(`64px ${display}`), document.fonts.load(`32px ${body}`), document.fonts.load('600 32px "Cormorant"')]); } catch { /* fallback fonts */ }

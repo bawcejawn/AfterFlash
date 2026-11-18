@@ -7,7 +7,7 @@ V="$ROOT/site/assets/vendor"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 cd "$TMP"
-for p in koilib@10.0.0 kondor-js@1.3.0 qrcode-generator@2.0.4 @fontsource/bricolage-grotesque@5.3.0 @fontsource/atkinson-hyperlegible@5.3.0 @fontsource/cormorant-garamond@5.3.0 @fontsource/great-vibes@5.3.0; do
+for p in koilib@10.0.0 kondor-js@1.3.0 qrcode-generator@2.0.4 @fontsource/figtree@5.3.0 @fontsource/atkinson-hyperlegible@5.3.0 @fontsource/cormorant-garamond@5.3.0 @fontsource/great-vibes@5.3.0; do
   npm pack --silent "$p" >/dev/null
 done
 for f in *.tgz; do mkdir -p "x/${f%.tgz}"; tar -xzf "$f" -C "x/${f%.tgz}"; done
@@ -15,7 +15,7 @@ mkdir -p out/fonts
 cp x/koilib-10.0.0/package/dist/koinos.min.js out/koilib.min.js
 cp x/kondor-js-1.3.0/package/dist/kondor.min.js out/kondor.min.js
 cp x/qrcode-generator-2.0.4/package/dist/qrcode.mjs out/qrcode.mjs
-for w in 500 700 800; do cp x/fontsource-bricolage-grotesque-5.3.0/package/files/bricolage-grotesque-latin-$w-normal.woff2 out/fonts/; done
+for w in 600 700 800; do cp x/fontsource-figtree-5.3.0/package/files/figtree-latin-$w-normal.woff2 out/fonts/; done
 for w in 400 700; do cp x/fontsource-atkinson-hyperlegible-5.3.0/package/files/atkinson-hyperlegible-latin-$w-normal.woff2 out/fonts/; done
 for w in 600 700; do cp x/fontsource-cormorant-garamond-5.3.0/package/files/cormorant-garamond-latin-$w-normal.woff2 out/fonts/; done
 cp x/fontsource-great-vibes-5.3.0/package/files/great-vibes-latin-400-normal.woff2 out/fonts/

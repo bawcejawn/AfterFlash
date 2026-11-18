@@ -2,9 +2,9 @@
    Cool print-paper, deep developer-ink navy, flashbulb yellow for the one thing that matters
    (the shutter / the call to act). Event accent colour is injected per event via --accent. */
 
-@font-face { font-family: "Bricolage"; src: url("../vendor/fonts/bricolage-grotesque-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
-@font-face { font-family: "Bricolage"; src: url("../vendor/fonts/bricolage-grotesque-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Bricolage"; src: url("../vendor/fonts/bricolage-grotesque-latin-800-normal.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Figtree"; src: url("../vendor/fonts/figtree-latin-600-normal.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "Figtree"; src: url("../vendor/fonts/figtree-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Figtree"; src: url("../vendor/fonts/figtree-latin-800-normal.woff2") format("woff2"); font-weight: 800; font-display: swap; }
 @font-face { font-family: "Atkinson"; src: url("../vendor/fonts/atkinson-hyperlegible-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Atkinson"; src: url("../vendor/fonts/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
 @font-face { font-family: "Cormorant"; src: url("../vendor/fonts/cormorant-garamond-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
@@ -27,7 +27,7 @@
   --radius-s: 6px;
   --radius-m: 12px;
   --radius-l: 22px;
-  --display: "Bricolage", ui-sans-serif, system-ui, sans-serif;
+  --display: "Figtree", ui-sans-serif, system-ui, sans-serif;
   --body: "Atkinson", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --step--1: 0.875rem;
   --step-0: 1rem;
