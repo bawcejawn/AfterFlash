@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.8.0';
+var APP_VERSION = '1.9.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -96,12 +96,8 @@ var ACTIONS = {
   guestbookAdd: aGuestbookAdd,
   guestbookList: aGuestbookList,
   noteAudio: aNoteAudio,
-  hostFavorite: aHostFavorite,
-  hostRecover: aHostRecover,
-  hostGuestbook: aHostGuestbook,
-  hostGuestbookModerate: aHostGuestbookModerate,
   me: aMe,
-  // host
+  // host (host key, or an admin's own key for events they manage)
   hostGet: aHostGet,
   hostUpdate: aHostUpdate,
   hostList: aHostList,
@@ -113,10 +109,15 @@ var ACTIONS = {
   hostManifest: aHostManifest,
   hostSaveManifest: aHostSaveManifest,
   hostMarkArchived: aHostMarkArchived,
+  hostFavorite: aHostFavorite,
+  hostRecover: aHostRecover,
+  hostGuestbook: aHostGuestbook,
+  hostGuestbookModerate: aHostGuestbookModerate,
   // admin
   adminCheck: aAdminCheck,
   adminProblems: aAdminProblems,
   adminExportKeys: aAdminExportKeys,
+  adminImportKeys: aAdminImportKeys,
   adminClearProblems: aAdminClearProblems,
   adminListAdmins: aAdminListAdmins,
   adminAddAdmin: aAdminAddAdmin,
@@ -192,7 +193,7 @@ function aJoin(req) {
     var sh = eventSheet_(ev, 'guests');
     // Joins are cheap, so cap them too (people re-joining on new phones/browsers is expected).
     if (sh.getLastRow() - 1 >= s.maxGuests * 4 + 50) throw err_('full', 'This event has reached its guest limit.');
-    sh.appendRow([guestId, sha256Hex_(token), label, 0, 0, Date.now(), 0, false]);
+    sh.appendRow([guestId, sha256Hex_(token), txt_(label), 0, 0, Date.now(), 0, false]);
   });
   var row = { guestId: guestId, label: label, shots: 0, uploads: 0, blocked: false };
   return { guest: guestView_(ev, row), token: token, event: publicEvent_(ev), shotsPerGuest: s.shotsPerGuest, key: eventKey_(ev) || undefined };
@@ -236,7 +237,7 @@ function aUpload(req) {
     // Private storage: the phone encrypted the file (and already stripped location data when it
     // re-encoded the photo). The server can't look inside, so it checks the envelope and the
     // declared type; the app re-checks the real type after decrypting before showing anything.
-    if (!isEnc_(bytes)) throw err_('bad_type', 'This event needs the latest version of the camera page. Please reload.');
+    if (!isEnc_(bytes)) throw err_('needs_update', 'This event needs the latest version of the camera page. Please reload.');
     mime = String(req.mime || '');
     if (kind === 'photo' && mime !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
     if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err_('bad_type', 'Unsupported video format.');
@@ -380,7 +381,7 @@ function aThumb(req) {
   return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
 
-/** Full-resolution photo (JPEG) for enhance/download, same access rules as aThumb. */
+/** Full-resolution photo or video for enhance/download/playback, same access rules as aThumb. */
 function aPhoto(req) {
   var ev = loadEvent_(req.e);
   if (!rateOk_('photo:' + ev.id, LIMITS.PHOTOS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
@@ -392,8 +393,13 @@ function aPhoto(req) {
     if (bytes.length > LIMITS.VIDEO_BYTES + ENC_OVERHEAD) throw err_('too_large', 'Too large');
     return { mime: String(m.row.mime), enc: true, data: Utilities.base64Encode(bytes) };
   }
-  if (m.row.kind !== 'photo') throw err_('not_found', 'Not found');
-  if (bytes.length > LIMITS.PHOTO_BYTES || sniffMime_(bytes) !== 'image/jpeg') throw err_('not_found', 'Not found');
+  var mime = sniffMime_(bytes);
+  if (m.row.kind === 'video') {
+    // Videos come through here only when Drive can't serve them (e.g. a guest's own video before it's public).
+    if (bytes.length > LIMITS.VIDEO_BYTES || (mime !== 'video/mp4' && mime !== 'video/webm')) throw err_('not_found', 'Not found');
+    return { mime: mime, data: Utilities.base64Encode(bytes) };
+  }
+  if (bytes.length > LIMITS.PHOTO_BYTES || mime !== 'image/jpeg') throw err_('not_found', 'Not found');
   return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
 
@@ -437,7 +443,7 @@ function aGuestbookAdd(req) {
     audio = decodeB64_(req.audio);
     if (audio.length > LIMITS.AUDIO_BYTES + ENC_OVERHEAD) throw err_('too_large', 'That voice message is too long.');
     if (s.encrypted) {
-      if (!isEnc_(audio)) throw err_('bad_type', 'This event needs the latest version of the page. Please reload.');
+      if (!isEnc_(audio)) throw err_('needs_update', 'This event needs the latest version of the page. Please reload.');
       mime = /^audio\/(webm|mp4|ogg)$/.test(String(req.audioMime)) ? String(req.audioMime) : '';
     } else {
       mime = sniffAudio_(audio);
@@ -461,7 +467,7 @@ function aGuestbookAdd(req) {
   }
   try {
     withLock_(function () {
-      notesSheet_(ev).appendRow([id, g.row.guestId, g.row.label, text, audioId, Date.now(), status, clientId, dur]);
+      notesSheet_(ev).appendRow([id, g.row.guestId, txt_(g.row.label), txt_(text), audioId, Date.now(), status, clientId, dur]);
     });
   } catch (x) {
     if (audioId) { try { DriveApp.getFileById(audioId).setTrashed(true); } catch (y) { /* ignore */ } }
@@ -488,7 +494,7 @@ function isM4a_(bytes) {
 
 function readNotes_(ev) {
   return notesSheet_(ev).getDataRange().getValues().slice(1).map(function (r) {
-    return { id: String(r[0]), guestId: String(r[1]), label: r[2], text: r[3], audioId: r[4] || '', createdAt: r[5], status: r[6], clientId: String(r[7] || ''), dur: Number(r[8]) || 0 };
+    return { id: String(r[0]), guestId: String(r[1]), label: String(r[2]), text: String(r[3] == null ? '' : r[3]), audioId: r[4] || '', createdAt: r[5], status: r[6], clientId: String(r[7] || ''), dur: Number(r[8]) || 0 };
   });
 }
 
@@ -577,6 +583,18 @@ function aHostRecover(req) {
     var f = it.next();
     scanned++;
     if (known[f.getId()] || f.isTrashed()) continue;
+    if (ev.settings.encrypted) {
+      // Private storage: files are locked, so match by name and the lock header instead.
+      var em = /^(.+)\.(jpg|mp4|webm)\.enc$/.exec(f.getName());
+      if (!em || /_preview$/.test(em[1])) continue;
+      var eb = f.getBlob().getBytes();
+      if (!isEnc_(eb)) continue;
+      var csha = sha256Hex_(eb);
+      if (known['csha:' + csha]) { dupes++; continue; }
+      known['csha:' + csha] = true;
+      found.push({ file: f, mime: { jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm' }[em[2]], bytes: eb.length, sha: '', created: f.getDateCreated().getTime(), base: em[1] });
+      continue;
+    }
     var mime = f.getMimeType();
     if (mime !== 'image/jpeg' && mime !== 'video/mp4' && mime !== 'video/webm') continue;
     if (/_preview\.jpg$/.test(f.getName())) continue;
@@ -592,6 +610,12 @@ function aHostRecover(req) {
   var status = ev.settings.approval ? 'pending' : 'visible';
   var rows = found.map(function (x) {
     var thumbId = '';
+    if (x.base) { // private storage: reuse the locked preview saved at upload time, if it's there
+      var pit = subFolder_(ev, 'Previews (used by the app)').getFilesByName(x.base + '_preview.jpg.enc');
+      if (pit.hasNext()) thumbId = pit.next().getId();
+      return [0, x.file.getId(), thumbId, 'recovered', x.mime.indexOf('video') === 0 ? 'video' : 'photo', x.mime, x.bytes, x.sha,
+        0, 0, 0, x.created, status, 0, 'recovered-' + x.file.getId().slice(0, 40), '', '', 'recovered,encrypted', false];
+    }
     try {
       var t = x.file.getThumbnail();
       if (t) thumbId = subFolder_(ev, 'Previews (used by the app)').createFile(t.setName(x.file.getName().replace(/\.[^.]+$/, '') + '_preview.jpg')).getId();
@@ -673,7 +697,7 @@ function aHostUpdate(req) {
   }
   withLock_(function () {
     var row = findEventRow_(ev.id);
-    row.sheet.getRange(row.rowIndex, 2).setValue(next.name);
+    row.sheet.getRange(row.rowIndex, 2).setValue(txt_(next.name));
     row.sheet.getRange(row.rowIndex, 7, 1, 2).setValues([[JSON.stringify(next), pinHash]]);
   });
   dropEventCache_(ev.id);
@@ -905,7 +929,7 @@ function aAdminCreate(req) {
     PropertiesService.getScriptProperties().setProperty('EK:' + id, randomKey_(32));
   }
   withLock_(function () {
-    indexSheet_().appendRow([id, settings.name, Date.now(), folder.getId(), ss.getId(), sha256Hex_(hostKey), JSON.stringify(settings), '', false, me.id]);
+    indexSheet_().appendRow([id, txt_(settings.name), Date.now(), folder.getId(), ss.getId(), sha256Hex_(hostKey), JSON.stringify(settings), '', false, me.id]);
   });
   return { id: id, hostKey: hostKey };
 }
@@ -957,13 +981,15 @@ function aAdminDelete(req) {
 /** Returns { id, name, role } for the owner key (from setup) or an added admin's key. */
 function authAdmin_(req) {
   var ownerHash = prop_('ADMIN_KEY_HASH');
-  if (!rateOk_('badadmin', LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
-  var given = req.k ? sha256Hex_(String(req.k)) : '';
+  // Keys are 256-bit random values, so guessing is hopeless; the limit only stops abuse.
+  // A correct key always works, so a stranger spamming wrong keys can't lock the studio out.
+  var given = req.k ? sha256Hex_(String(req.k).slice(0, 200)) : '';
   if (given && safeEq_(given, ownerHash)) return { id: 'owner', name: 'Owner', role: 'owner' };
   var admins = readAdmins_();
   for (var i = 0; i < admins.length; i++) {
     if (given && safeEq_(given, admins[i].hash)) return { id: admins[i].id, name: admins[i].name, role: 'admin' };
   }
+  if (!rateOk_('badadmin', LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
   rateHit_('badadmin', 600);
   throw err_('unauthorized', 'Invalid admin key');
 }
@@ -977,19 +1003,17 @@ function authHost_(req) {
     requireEventAdmin_(me, ev.id);
     return ev;
   }
+  if (req.k && safeEq_(sha256Hex_(String(req.k).slice(0, 200)), ev.hostKeyHash)) return ev;
   var bucket = 'badhost:' + ev.id;
   if (!rateOk_(bucket, LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
-  if (!req.k || !safeEq_(sha256Hex_(String(req.k)), ev.hostKeyHash)) {
-    rateHit_(bucket, 600);
-    throw err_('unauthorized', 'Invalid host link');
-  }
-  return ev;
+  rateHit_(bucket, 600);
+  throw err_('unauthorized', 'Invalid host link');
 }
 
 function authGuest_(ev, req) {
   var gid = str_(req.g, 40);
   var g = gid ? findGuest_(ev, gid) : null;
-  if (!g || !req.t || !safeEq_(g.row.tokenHash, sha256Hex_(String(req.t)))) throw err_('unauthorized', 'Please re-open the event link.');
+  if (!g || !req.t || !safeEq_(g.row.tokenHash, sha256Hex_(String(req.t).slice(0, 200)))) throw err_('unauthorized', 'Please re-open the event link.');
   return g;
 }
 
@@ -1043,7 +1067,7 @@ function sanitizeSettings_(s) {
     var t = Date.parse(v);
     return isNaN(t) ? '' : new Date(t).toISOString();
   };
-  var looks = ['none', 'classic', 'warm', 'mono', 'vivid', 'fade'];
+  var looks = ['none', 'glow', 'vivid', 'classic', 'warm', 'fade', 'moody', 'mono'];
   var color = /^#[0-9a-fA-F]{6}$/.test(String(s.accent)) ? String(s.accent) : '#0f7c7a';
   return {
     name: cleanText_(s.name, LIMITS.NAME),
@@ -1068,6 +1092,7 @@ function sanitizeSettings_(s) {
     paused: s.paused === true,
     look: looks.indexOf(s.look) >= 0 ? s.look : 'classic',
     guestLooks: s.guestLooks !== false,
+    beauty: s.beauty !== false,
     dateStamp: s.dateStamp === true,
     accent: color
   };
@@ -1085,7 +1110,7 @@ function publicEvent_(ev) {
     id: ev.id, name: s.name, date: s.date, welcome: s.welcome, reveal: s.reveal, revealAt: s.revealAt,
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
-    allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, dateStamp: s.dateStamp,
+    allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
     accent: s.accent, approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
   };
 }
@@ -1182,7 +1207,7 @@ function countActiveGuests_(ev) {
 function guestLabels_(ev) {
   var data = eventSheet_(ev, 'guests').getDataRange().getValues();
   var out = {};
-  for (var r = 1; r < data.length; r++) out[data[r][0]] = data[r][2];
+  for (var r = 1; r < data.length; r++) out[data[r][0]] = String(data[r][2]);
   return out;
 }
 
@@ -1255,6 +1280,24 @@ function aAdminExportKeys(req) {
   var keys = {};
   Object.keys(all).forEach(function (k) { if (k.indexOf('EK:') === 0) keys[k.slice(3)] = all[k]; });
   return { keys: keys };
+}
+
+/** Owner-only: put back keys from a backup file. Only fills in missing keys for private events. */
+function aAdminImportKeys(req) {
+  requireOwner_(authAdmin_(req));
+  var keys = req.keys && typeof req.keys === 'object' ? req.keys : {};
+  var props = PropertiesService.getScriptProperties();
+  var restored = 0, skipped = 0;
+  Object.keys(keys).slice(0, 2000).forEach(function (id) {
+    var k = String(keys[id]);
+    if (!/^[A-Za-z0-9]{6,20}$/.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(k)) { skipped++; return; }
+    var row = findEventRow_(id);
+    var settings = row ? parseJson_(row.row[6]) : null;
+    if (!settings || settings.encrypted !== true || props.getProperty('EK:' + id)) { skipped++; return; }
+    props.setProperty('EK:' + id, k);
+    restored++;
+  });
+  return { restored: restored, skipped: skipped };
 }
 
 // ---------------------------------------------------------------- problem log (shown on admin page)
@@ -1349,21 +1392,23 @@ function sniffMime_(bytes) {
  * Keeps APP0 (JFIF) and everything from SOS onward. Returns the original on parse errors.
  */
 function stripJpegMeta_(bytes) {
-  var out = [0xff, 0xd8];
+  // Works on the signed byte arrays Apps Script uses; copies whole segments with slice().
+  var slice = Array.prototype.slice;
+  var parts = [slice.call(bytes, 0, 2)];
   var i = 2, n = bytes.length;
   while (i + 4 <= n) {
     if (u8_(bytes[i]) !== 0xff) return bytes;
     var marker = u8_(bytes[i + 1]);
     if (marker === 0xd9) break;
-    if (marker === 0xda) { // start of scan: copy the rest verbatim
-      for (var j = i; j < n; j++) out.push(u8_(bytes[j]));
-      return toSigned_(out);
+    if (marker === 0xda) { // start of scan: keep the rest verbatim
+      parts.push(slice.call(bytes, i));
+      return Array.prototype.concat.apply([], parts);
     }
-    if (marker >= 0xd0 && marker <= 0xd7 || marker === 0x01) { out.push(0xff, marker); i += 2; continue; }
+    if (marker >= 0xd0 && marker <= 0xd7 || marker === 0x01) { parts.push(slice.call(bytes, i, i + 2)); i += 2; continue; }
     var len = (u8_(bytes[i + 2]) << 8) | u8_(bytes[i + 3]);
     if (len < 2 || i + 2 + len > n) return bytes;
     var drop = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe;
-    if (!drop) for (var k = i; k < i + 2 + len; k++) out.push(u8_(bytes[k]));
+    if (!drop) parts.push(slice.call(bytes, i, i + 2 + len));
     i += 2 + len;
   }
   return bytes;
@@ -1434,6 +1479,12 @@ function cleanText_(v, max) {
   // The UI also renders every user string as plain text.
   return String(v).replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim()
     .replace(/^[=+\-@\s]+/, '').slice(0, max);
+}
+
+/** Text for a sheet cell: a leading apostrophe stops Sheets reading "3/4" as a date or "007" as 7. */
+function txt_(v) {
+  v = String(v == null ? '' : v);
+  return /^[0-9.,:\/\s]|^(true|false)$/i.test(v) ? "'" + v : v;
 }
 
 function str_(v, max) { return v == null ? '' : String(v).slice(0, max); }

@@ -84,6 +84,11 @@ export function createUploader({ studio, ev, getAuth, onEvent }) {
           if (FATAL.has(code)) {
             await queue.remove(item.clientId);
             onEvent({ type: 'dropped', item, error: e });
+          } else if (code === 'needs_update') {
+            // Private event and this phone doesn't have the event key yet: fetch it, keep the photo.
+            onEvent({ type: 'refresh', error: e });
+            await new Promise((r) => setTimeout(r, 3000));
+            if (!getAuth() || !getAuth().key) break;
           } else if (code === 'unauthorized') {
             onEvent({ type: 'auth', error: e });
             break;

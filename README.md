@@ -24,13 +24,15 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 
 | Page | Who uses it | What it does |
 |---|---|---|
-| **Camera** (`cam.html`) | Guests | Opens when they scan the QR code. A limited roll of shots, film looks, short videos. Works on weak signal: photos upload when there's a connection. |
+| **Camera** (`cam.html`) | Guests | Opens when they scan the QR code. A limited roll of shots, 8 looks (Glow, Bright, Classic film, Golden hour, Soft pastel, Moody, Black & white) shown live in the viewfinder, an optional **Beauty** touch-up (softens skin and blemishes, keeps eyes and hair sharp), short videos. Works on weak signal: photos upload when there's a connection. |
 | **Album** (`album.html`) | Guests | Browse, download and report photos. **Enhance** toggle (an automatic touch-up; originals never change), **Hosts’ picks**, **My photos** (each guest’s own shots, even before the reveal), and the **Guestbook**. |
 | **TV wall** (`tv.html`) | A TV or projector | New photos appear in seconds, with the QR code beside them. |
 | **Host dashboard** (`host.html`) | The host | QR sign, moderation, **♥ favorites** (shown more often on the TV, one-click download), **blurry-photo flags**, guestbook moderation, guests, settings. |
 | **Studio admin** (`admin.html`) | You | Create and delete events, add admins. |
 
 Photos are stored in your Google Drive (15 GB free). Location data is removed from every photo.
+
+![The camera looks, with Beauty on](docs/img/looks.jpg)
 
 ---
 

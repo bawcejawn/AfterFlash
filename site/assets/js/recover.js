@@ -64,7 +64,7 @@ async function fetchKeepsake(i) {
   if (!k || k.removed || !k.data) return null;
   const bytes = base64ToBytes(k.data);
   if (!keepsakeMimeOk(k.mime, bytes)) return null; // never render anything that isn't a real image
-  return { i, bytes, mime: k.mime, caption: typeof k.caption === 'string' ? k.caption : '', original: k.original_sha256 ? String(k.original_sha256).replace(/^0x/, '') : '' };
+  return { i, bytes, mime: k.mime, caption: typeof k.caption === 'string' ? k.caption.slice(0, 300) : '', original: k.original_sha256 ? String(k.original_sha256).replace(/^0x/, '') : '' };
 }
 
 async function more() {

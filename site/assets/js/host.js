@@ -137,7 +137,7 @@ function shareTab() {
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
       ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them. ',
-        h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : null,
+        h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : h('p', null, h('button', { class: 'btn small', onclick: downloadAll }, 'Download all photos and videos'), ' ', h('span', { class: 'small muted' }, 'Zipped in your browser; works for co-hosts too.')),
       h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs PhotoShare can open it.)'),
       h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
 }
@@ -195,7 +195,7 @@ function photosTab() {
       h('div', { class: 'meta' }, h('span', { class: 'state ' + it.s }, label, /blurry/.test(it.f || '') ? ', blurry' : ''),
         h('button', { class: 'heart' + (it.fv ? ' on' : ''), 'aria-pressed': String(!!it.fv), 'aria-label': it.fv ? 'Remove from favorites' : 'Add to favorites', onclick: () => setFav([it.i], !it.fv) }, it.fv ? '♥' : '♡')),
       h('div', { class: 'meta' }, h('span', { class: 'muted' }, it.k === 'v' ? 'Video' : it.g)),
-      h('div', { class: 'meta' }, ev.encrypted ? h('button', { class: 'linkbtn', onclick: () => downloadOne(it) }, 'Download') : h('a', { href: `https://drive.google.com/file/d/${encodeURIComponent(it.i)}/view`, target: '_blank', rel: 'noopener' }, 'View'), h('span', { class: 'muted' }, fmtWhen(it.c))));
+      h('div', { class: 'meta' }, h('span', null, h('button', { class: 'linkbtn', onclick: () => viewOne(it) }, 'Open'), ' ', h('button', { class: 'linkbtn', onclick: () => downloadOne(it) }, 'Download')), h('span', { class: 'muted' }, fmtWhen(it.c))));
   })));
 }
 
@@ -242,14 +242,30 @@ async function setFav(ids, fav) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-/** Zip the favorite originals in the browser (photos and videos up to 150 items). */
+/** Original file through the app (works for co-hosts and admins who can't open the owner's Drive). */
+async function origBlob(it) {
+  const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'orig' }, { retries: 2, timeout: 120000 });
+  return mediaBlob(m, eventKey);
+}
+const EXT = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+function saveBlob(blob, name) {
+  const href = URL.createObjectURL(blob);
+  h('a', { href, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(href), 120000);
+}
 async function downloadOne(it) {
   try {
-    const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'orig' }, { retries: 2, timeout: 120000 });
-    const blob = await mediaBlob(m, eventKey);
-    const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'bin';
-    h('a', { href: URL.createObjectURL(blob), download: `${eventId}-${it.i.slice(0, 8)}.${ext}` }).click();
+    const blob = await origBlob(it);
+    saveBlob(blob, `${eventId}-${it.i.slice(0, 8)}.${EXT[blob.type] || 'bin'}`);
   } catch (e) { toast(e.message, 'error'); }
+}
+async function viewOne(it) {
+  const w = window.open('', '_blank'); // opened now so pop-up blockers allow it
+  try {
+    const url = URL.createObjectURL(await origBlob(it));
+    if (w) { w.opener = null; w.location.href = url; } else saveBlob(await origBlob(it), `${eventId}-${it.i.slice(0, 8)}`);
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
+  } catch (e) { if (w) w.close(); toast(e.message, 'error'); }
 }
 
 /** Private storage: Drive only holds locked files, so download everything through the app in zip parts. */
@@ -257,19 +273,18 @@ async function downloadAll() {
   const list = items.filter((x) => x.s !== 'deleted');
   if (!list.length) return;
   const { makeZip } = await import('./zip.js');
-  const PART = 250 * 1024 * 1024;
+  const PART = 150 * 1024 * 1024; // keeps memory use sane on laptops; more parts for big albums
   let files = [], size = 0, part = 1, done = 0;
   const flush = () => {
     if (!files.length) return;
-    h('a', { href: URL.createObjectURL(makeZip(files)), download: `${eventId}-album-part${part}.zip` }).click();
+    saveBlob(makeZip(files), `${eventId}-album-part${part}.zip`);
     part++; files = []; size = 0;
   };
   for (const it of list) {
     toast(`Unlocking ${++done} of ${list.length}…`);
     try {
-      const m = await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'orig' }, { retries: 2, timeout: 120000 });
-      const blob = await mediaBlob(m, eventKey);
-      const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'bin';
+      const blob = await origBlob(it);
+      const ext = EXT[blob.type] || 'bin';
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (size + bytes.length > PART) flush();
       files.push({ name: `${eventId}-${String(done).padStart(4, '0')}${it.g ? '-' + it.g.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20) : ''}.${ext}`, bytes });
@@ -294,8 +309,7 @@ async function downloadFavorites() {
       files.push({ name: `${eventId}-favorite-${String(i + 1).padStart(3, '0')}.${ext}`, bytes: new Uint8Array(await blob.arrayBuffer()) });
     } catch (e) { toast(`Skipped one: ${e.message}`, 'error'); }
   }
-  const a = h('a', { href: URL.createObjectURL(makeZip(files)), download: `${eventId}-favorites.zip` });
-  a.click();
+  saveBlob(makeZip(files), `${eventId}-favorites.zip`);
   toast(`Downloaded ${files.length} favorites`, 'ok');
 }
 
@@ -360,7 +374,7 @@ async function block(g, yes) {
 function settingsTab() {
   const s = ev.settings;
   const inp = (name, attrs = {}) => h('input', { name, ...attrs });
-  const check = (name, label, help) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name, checked: !!s[name] }), h('span', null, label, help ? h('small', null, help) : null));
+  const check = (name, label, help) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name, checked: name === 'beauty' ? s.beauty !== false : !!s[name] }), h('span', null, label, help ? h('small', null, help) : null));
   const lookSel = h('select', { name: 'look' }, Object.entries(LOOKS).map(([k, v]) => h('option', { value: k, selected: s.look === k }, v.label)));
   const revealSel = h('select', { name: 'reveal' }, h('option', { value: 'live', selected: s.reveal === 'live' }, 'Live, as photos are taken'), h('option', { value: 'after', selected: s.reveal === 'after' }, 'Develop later'));
   const form = h('form', { class: 'stack' },
@@ -376,6 +390,7 @@ function settingsTab() {
       h('label', { class: 'field' }, h('span', null, 'Film look'), lookSel)),
       check('allowVideo', 'Allow short videos', 'Each video uses one shot.'),
       check('guestLooks', 'Let guests pick a film look'),
+      check('beauty', 'Beauty touch-up', 'Gently smooths skin and softens blemishes on faces. Guests can switch it off on their camera.'),
       check('dateStamp', 'Add a date stamp to photos'),
       check('allowLibrary', 'Allow uploads from the camera roll', 'Off keeps it a true disposable camera.')),
     h('fieldset', null, h('legend', null, 'Timing'), h('div', { class: 'grid-form' },
@@ -405,7 +420,7 @@ function settingsTab() {
       look: fd.get('look'), reveal: fd.get('reveal'),
       revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')),
     };
-    for (const k of ['allowVideo', 'guestLooks', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports', 'enhance', 'guestbook']) settings[k] = fd.get(k) === 'on';
+    for (const k of ['allowVideo', 'guestLooks', 'beauty', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports', 'enhance', 'guestbook']) settings[k] = fd.get(k) === 'on';
     const payload = { e: eventId, k: key, settings };
     const pin = String(fd.get('pin') || '').trim();
     if (fd.get('clearPin') === 'on') payload.pin = '';

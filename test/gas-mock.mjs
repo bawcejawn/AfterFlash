@@ -49,6 +49,11 @@ export function createGas() {
       return { hasNext: () => i < list.length, next: () => list[i++] };
     }
     createFile(blob) { return new File(blob, this); }
+    getFilesByName(name) {
+      const list = [...files.values()].filter((f) => f instanceof File && f.parent === this && f.getName() === name);
+      let i = 0;
+      return { hasNext: () => i < list.length, next: () => list[i++] };
+    }
     getFiles() {
       const list = [...files.values()].filter((f) => f instanceof File && f.parent === this);
       let i = 0;
@@ -72,7 +77,7 @@ export function createGas() {
       for (let i = 0; i < this.nr; i++) {
         const idx = this.r - 1 + i;
         this.sheet.rows[idx] = this.sheet.rows[idx] || [];
-        for (let j = 0; j < this.nc; j++) this.sheet.rows[idx][this.c - 1 + j] = v[i][j];
+        for (let j = 0; j < this.nc; j++) { const x = v[i][j]; this.sheet.rows[idx][this.c - 1 + j] = typeof x === 'string' && x[0] === "'" ? x.slice(1) : x; }
       }
       return this;
     }
@@ -82,7 +87,7 @@ export function createGas() {
     constructor(name) { this.name = name; this.rows = []; }
     setName(n) { this.name = n; return this; }
     getRange(r, c, nr, nc) { return new Range(this, r, c, nr, nc); }
-    appendRow(row) { if (faults.append) throw new Error('Service Spreadsheets failed'); this.rows.push(row.slice()); return this; }
+    appendRow(row) { if (faults.append) throw new Error('Service Spreadsheets failed'); this.rows.push(row.map((v) => (typeof v === 'string' && v[0] === "'" ? v.slice(1) : v))); return this; }
     getLastRow() { return this.rows.length; }
     getDataRange() {
       const nc = Math.max(1, ...this.rows.map((r) => r.length));
