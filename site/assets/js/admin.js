@@ -2,6 +2,7 @@
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
+import { installButton, rememberPlace } from './install.js';
 import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
@@ -71,6 +72,7 @@ async function signedIn(key, { show = false } = {}) {
 }
 
 async function dashboard(created) {
+  rememberPlace('admin', studio);
   clear(root).append(h('p', { class: 'muted' }, 'Loading events…'));
   let events = [];
   try { events = (await api(studio, 'adminList', { k: adminKey })).events; } catch (e) {
@@ -82,7 +84,7 @@ async function dashboard(created) {
   const ended = CLOUD && me.expired;
   clear(root).append(
     h('div', { class: 'row spread' }, h('h1', null, 'Events'),
-      h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
+      h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), installButton('admin'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     CLOUD ? cloudBanner() : null,
     CLOUD ? planPanel({ studio, adminKey, me }) : null,
     CLOUD ? partnerPanel({ studio, adminKey, me }) : null,

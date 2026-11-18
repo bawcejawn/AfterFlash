@@ -1,5 +1,6 @@
 // Guest camera: join → shoot → photos saved locally → uploaded by the offline queue.
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, setTitle, fmtDate, fmtWhen, randomId, link, registerSW, frameGuard, config } from './util.js';
+import { installButton } from './install.js';
 import { api, ApiError } from './api.js';
 import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore, encodeBest, encodePreview } from './film.js';
 import { openComposer } from './guestbook.js';
@@ -213,7 +214,7 @@ async function startCamera() {
       h('div', { class: 'cam-links' },
         h('a', { href: link('album.html', { e: eventId, s: studio, extra: { view: 'mine' } }) }, 'My photos'),
         ev.guestbook ? h('button', { class: 'linkbtn', onclick: () => openComposer({ studio, eventId, auth, dark: true }) }, 'Sign the guestbook') : null,
-        isStandalone() ? null : h('button', { class: 'linkbtn', onclick: showInstall }, 'Add to home screen')),
+        installButton('cam', 'linkbtn')),
       libInput, fallbackInput, els.hdInput)));
   renderCounter();
   applyLookPreview();
@@ -522,29 +523,6 @@ async function fromCameraApp(file) {
     const t = stream && stream.getVideoTracks()[0];
     if (!t || t.readyState === 'ended') openStream();
   }
-}
-
-// ------------------------------------------------------------------ add to home screen
-let installPrompt = null;
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
-function isStandalone() {
-  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-}
-function showInstall() {
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const close = () => overlay.remove();
-  const body = installPrompt
-    ? [h('p', null, 'Adds an AfterFlash icon to your phone. Tap it any time to jump straight back into this event’s camera.'),
-      h('button', { class: 'btn flash', onclick: async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; close(); } }, 'Add to home screen')]
-    : ios
-      ? [h('p', null, 'Get back to this camera with one tap:'),
-        h('ol', null, h('li', null, 'Tap the Share button (the square with an arrow) in Safari.'), h('li', null, 'Scroll down and tap “Add to Home Screen”.'), h('li', null, 'Tap “Add”.')),
-        h('p', { class: 'small muted' }, 'The AfterFlash icon opens your most recent event’s camera.')]
-      : [h('p', null, 'Open your browser’s menu (⋮) and choose “Add to Home screen” or “Install app”.'),
-        h('p', { class: 'small muted' }, 'The AfterFlash icon opens your most recent event’s camera.')];
-  const overlay = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Add to home screen' },
-    h('div', { class: 'panel stack dark-panel' }, h('h2', null, 'Keep this camera handy'), ...body, h('button', { class: 'btn', onclick: close }, 'Close')));
-  document.body.append(overlay);
 }
 
 /** The album button shows the last shot, so guests see the look they captured. */

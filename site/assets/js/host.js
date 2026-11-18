@@ -9,6 +9,7 @@ import { voicePlayer } from './guestbook.js';
 import { mediaBlob } from './crypto.js';
 import { applyBrand, logoEl, logoBlob, prepareLogo, FONTS } from './brand.js';
 import { ownStudio, blobToBase64 } from './util.js';
+import { installButton, rememberPlace } from './install.js';
 
 frameGuard();
 const root = $('#app');
@@ -43,6 +44,7 @@ async function boot() {
   }
   applyBrand(ev);
   setTitle(ev.name + ' host');
+  if (!key.startsWith('admin:')) rememberPlace('host', studio, eventId);
   await loadItems();
   render();
   pollT = setInterval(() => { if (!document.hidden) loadItems(true); }, 15000);
@@ -567,6 +569,8 @@ function securityTab() {
     h('p', null, 'Anyone with the host link can moderate, change settings and download originals. Share it only with people you trust, like your planner or a co-host.'),
     key.startsWith('admin:') ? h('p', { class: 'muted' }, 'You opened this dashboard from the studio admin page, using your admin key.') : h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: remembered, onchange: (e) => { if (e.target.checked) store.set(keyName(), key); else store.del(keyName()); toast(e.target.checked ? 'This device will stay signed in' : 'You’ll need the host link next time'); } }),
       h('span', null, 'Remember me on this device', h('small', null, 'Leave off on shared computers.'))),
+    key.startsWith('admin:') ? null : h('div', { class: 'stack' }, h('h3', null, 'Open it from your phone’s home screen'),
+      h('p', null, 'Tick “Remember me on this device” first, then add the icon. Only do this on your own phone.'), installButton('host')),
     h('hr', { class: 'divider' }),
     h('h3', null, 'Make a new host link'),
     h('p', null, 'Turns off the old host link and the TV wall link immediately. Use it if a link was shared by mistake.'),

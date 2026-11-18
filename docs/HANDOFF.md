@@ -1,6 +1,6 @@
 # AfterFlash: handoff for the next chat
 
-Last updated: Nov 18, 2026. Read this first, then docs/CHECKLIST.md (the owner's to-dos).
+Last updated: Nov 18, 2026 (home screen + repo rename). Read this first, then docs/CHECKLIST.md (the owner's to-dos).
 
 ## About the owner (how to work with them)
 
@@ -8,7 +8,7 @@ Last updated: Nov 18, 2026. Read this first, then docs/CHECKLIST.md (the owner's
 - Has given permission to **read, write, push PRs and merge**, in as few PRs as possible.
 - Top priority is **security**. Never ship anything that could expose users, guests, the repo or links to malware or abuse.
 - Their wife is a wedding planner: a likely first customer and sales channel.
-- The repo is **private** (since Nov 18), so GitHub Pages is off. See docs/CHECKLIST.md for the options.
+- The repo is **public** again and renamed **bawcejawn/AfterFlash** (Nov 18). The free site is at https://bawcejawn.github.io/AfterFlash/.
 
 ## What AfterFlash is
 
@@ -19,7 +19,7 @@ Two ways to run it, from one codebase:
 1. **Free self-hosted:** the static site in `site/` on GitHub Pages, with a Google Apps Script backend (`backend/Code.gs`, version 1.10.0) in the host's own Google account. Friends can self-host through `setup.html`.
 2. **AfterFlash Cloud (paid):** a Cloudflare Worker in `cloud/` that serves `site/` plus `/api`, with a D1 database (SQLite), the Google Drive API (`drive.file` scope only) and Stripe Checkout (no webhooks; the thank-you page verifies the session). The site switches to cloud mode via `config.cloud`.
 
-The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live US trademark (Switchmate Home LLC, reg. 6720657, classes 9/42). Only display text changed. Internal ids stay `photoshare` on purpose: worker name, D1 names `photoshare` and `photoshare-shard-N`, `ps:` localStorage keys, health id `app: 'photoshare'`, the repo name. Before the owner recruits partners or prints anything, "AfterFlash" still needs a USPTO search and an attorney clearance; a logo.com profile shows an "afterflash" photo booth, possibly inactive.
+The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live US trademark (Switchmate Home LLC, reg. 6720657, classes 9/42). Only display text changed. Internal ids stay `photoshare` on purpose: worker name, D1 names `photoshare` and `photoshare-shard-N`, `ps:` localStorage keys, health id `app: 'photoshare'`. The repo itself was renamed to `AfterFlash`. Before the owner recruits partners or prints anything, "AfterFlash" still needs a USPTO search and an attorney clearance; a logo.com profile shows an "afterflash" photo booth, possibly inactive.
 
 ## Business model (as decided with the owner)
 
@@ -44,6 +44,7 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
 
 - `site/`: static site, no build step, vanilla ES modules with a strict CSP (no inline scripts or styles).
   - Pages: `index` (sales + join), `cam` (guest camera), `album`, `tv`, `host` (event dashboard), `admin`, `welcome` (after paying), `partner` (join a team), `help` (FAQ with search), `terms`, `privacy` (`legal.js`), `setup` (self-host).
+  - Home screen (PWA): `manifest.webmanifest` (SVG + PNG + maskable icons), `apple-touch-icon.png`, `sw.js` (offline shell; bump VERSION when adding files the camera needs). `install.js` has the shared "Add to home screen" dialog and remembers the last dashboard used (`ps:last`: page, studio, event code, never a key). `home.js` sends the icon there once per launch; a host place counts only if the host ticked "Remember me".
   - Key JS: `cam.js` (full-res ImageCapture on Android, HD native camera on iOS, in-app browser warning), `film.js` (looks, encodeBest/encodePreview), `cloud-admin.js` (plan, partner, owner, partners, health panels), `home.js` (pricing, referral codes), `help.js`.
 - `cloud/src/`: `index.js` (routes, config.js, OAuth, the `scheduled` cron), `actions.js` (all API actions, plans, referrals, tiers, payouts, nightly cleanup, health), `stripe.js`, `google.js`, `lib.js`.
 - `cloud/migrations/` (0001–0005, main DB) and `cloud/migrations-shard/` (guests, media and notes tables for extra DBs).
@@ -60,7 +61,7 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
 
 ## How to work in this repo
 
-- Clone with `gh` or git. The repo is `bawcejawn/PhotoShare` (private).
+- Clone with `gh` or git. The repo is `bawcejawn/AfterFlash` (public; GitHub forwards the old PhotoShare name).
 - **Tests (run all before every PR):**
   - `cd cloud && npm test`: API tests on node:sqlite with fake Google and Stripe (16 tests).
   - `cd cloud && bash test/run-e2e.sh`: Playwright browser test of the whole cloud flow, including referrals, tiers and help.
@@ -69,7 +70,7 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
   - `node test/server.mjs 8787 &` then `python3 test/e2e.py`: self-host browser test.
 - **Commits:** `git -c user.name="bawcejawn" -c user.email="bawcejawn@users.noreply.github.com" commit`, ending with the Co-Authored-By / Claude-Session lines the session gives you.
 - **Push:** `git -c push.negotiate=true push -u origin BRANCH`. Always branch from a **fresh** `origin/main`: `git fetch origin '+refs/heads/main:refs/remotes/origin/main'`. A plain `git fetch` once returned a stale main.
-- **PRs:** `gh api repos/bawcejawn/PhotoShare/pulls -f title=… -f head=… -f base=main -F body=@file`. Wait for CI to pass, then `gh api -X PUT …/pulls/N/merge -f merge_method=squash`. Then check that **Deploy AfterFlash Cloud** and **Deploy site to GitHub Pages** succeed. Pages will fail until the owner re-enables it.
+- **PRs:** `gh api repos/bawcejawn/AfterFlash/pulls -f title=… -f head=… -f base=main -F body=@file`. Wait for CI to pass, then `gh api -X PUT …/pulls/N/merge -f merge_method=squash`. Then check that **Deploy AfterFlash Cloud** and **Deploy site to GitHub Pages** succeed.
 - **Never reuse a branch that was already squash-merged** (it causes conflicts). Make a new one.
 - **The proxy blocks:** deleting branches, changing repo settings and reading Pages settings. Ask the owner to do those.
 - **Security habits already in place:**
@@ -95,12 +96,11 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
 
 - Final name: AfterFlash, pending clearance. "Shared Now" was considered and rejected as too descriptive and crowded (Shared. App, the Shared photo app, ShareNow).
 - Legal business name for `BUSINESS_NAME`, once the LLC is formed.
-- Free website: GitHub Pro, Cloudflare only, or public again.
 
 ---
 
 ## First prompt for the new chat (copy and paste this)
 
-> I'm continuing my AfterFlash project (an event camera app, formerly PhotoShare) in my private GitHub repo **bawcejawn/PhotoShare**. Please add the repo, clone it, and read **docs/HANDOFF.md** first, then **docs/CHECKLIST.md**. They explain the whole project, how I like to work (beginner, simple step-by-step instructions, security first, you may push PRs and merge, as few PRs as possible), what's built, and what's next.
+> I'm continuing my AfterFlash project (an event camera app, formerly PhotoShare) in my GitHub repo **bawcejawn/AfterFlash**. Please add the repo, clone it, and read **docs/HANDOFF.md** first, then **docs/CHECKLIST.md**. They explain the whole project, how I like to work (beginner, simple step-by-step instructions, security first, you may push PRs and merge, as few PRs as possible), what's built, and what's next.
 >
 > After reading, give me: (1) a 5-line summary of where things stand, (2) my next 3 to-dos from the checklist with exact click-by-click steps, and (3) the top item from "Next in line" that you'd build next and why. Don't start building until I say go.

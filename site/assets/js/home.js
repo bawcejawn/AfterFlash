@@ -1,5 +1,6 @@
 import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config, knownStudio, myStudios } from './util.js';
 import { api } from './api.js';
+import { isStandalone, lastPlace } from './install.js';
 
 frameGuard();
 
@@ -17,19 +18,35 @@ function myEvents() {
 }
 
 const events = myEvents();
-const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-// Opened from the home-screen icon: go straight to the camera of the event used in the last 3 days.
-if (standalone && events[0] && Date.now() - events[0].lastUsed < 3 * 864e5) {
-  location.replace(link('cam.html', { e: events[0].id, s: events[0].studio }));
+// Opened from the home-screen icon: go straight to whatever this phone used last, once per
+// launch. Tapping the logo later shows this page (all your events), so you can switch.
+// Guest cameras count for 3 days; a dashboard for 30. Never more than an event code in a link.
+function launchTarget() {
+  const cam = events[0] && Date.now() - events[0].lastUsed < 3 * 864e5 ? events[0] : null;
+  const place = lastPlace();
+  const dash = place && Date.now() - place.t < 30 * 864e5 ? place : null;
+  if (dash && (!cam || dash.t >= cam.lastUsed)) {
+    return dash.p === 'host' ? link('host.html', { e: dash.e, s: dash.s }) : link('admin.html', { s: dash.s });
+  }
+  return cam ? link('cam.html', { e: cam.id, s: cam.studio }) : null;
+}
+let launched = false;
+try { launched = sessionStorage.getItem('ps:launched') === '1'; sessionStorage.setItem('ps:launched', '1'); } catch { /* private mode */ }
+if (isStandalone() && !launched) {
+  const to = launchTarget();
+  if (to) location.replace(to);
 }
 
 const box = $('#my-events');
 function renderMine() {
   const list = myEvents();
-  if (!list.length) { box.hidden = true; return; }
+  const place = lastPlace();
+  if (!list.length && !place) { box.hidden = true; return; }
   box.hidden = false;
   clear(box).append(
     h('h2', null, 'Your events'),
+    place ? h('p', { class: 'row' }, h('a', { class: 'btn small primary', href: place.p === 'host' ? link('host.html', { e: place.e, s: place.s }) : link('admin.html', { s: place.s }) },
+      place.p === 'host' ? 'Open my host dashboard' : 'Open my studio admin')) : null,
     h('ul', { class: 'my-events' }, list.map((ev) => h('li', null,
       h('div', null, h('b', null, ev.name), ev.lastUsed ? h('div', { class: 'small muted' }, `Last used ${fmtWhen(ev.lastUsed)}`) : null),
       h('div', { class: 'row' },

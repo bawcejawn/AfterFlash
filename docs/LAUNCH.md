@@ -34,7 +34,7 @@ This is *your* admin key. It shows the owner tools (all accounts, free keys for 
 
 ## Part 3: Put the settings in GitHub and deploy
 
-1. Open **github.com/bawcejawn/PhotoShare** → **Settings** → **Secrets and variables** → **Actions**.
+1. Open **github.com/bawcejawn/AfterFlash** → **Settings** → **Secrets and variables** → **Actions**.
 2. On the **Secrets** tab, click **New repository secret** for each:
 
    | Name | Value |
