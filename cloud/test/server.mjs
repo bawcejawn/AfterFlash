@@ -6,12 +6,17 @@ import { makeEnv } from './harness.mjs';
 
 const port = Number(process.argv[2] || 8788);
 const origin = `http://localhost:${port}`;
-const { env, fk, worker } = makeEnv({ SITE_ORIGIN: origin, IMAGE_BASE: origin + '/mock-lh3', DRIVE_BASE: origin + '/mock-drive' });
+const { env, fk, worker } = makeEnv({ GOOGLE_AUTH_BASE: origin + '/__google-auth', SITE_ORIGIN: origin, IMAGE_BASE: origin + '/mock-lh3', DRIVE_BASE: origin + '/mock-drive' });
 fs.writeFileSync('/tmp/photoshare-owner-key', env.OWNER_KEY);
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, origin);
   // ---- test hooks: what Google/Stripe would do in the browser
+  if (url.pathname === '/__google-auth') { // stands in for accounts.google.com's sign-in page
+    const q = url.searchParams;
+    const purpose = q.get('access_type') === 'offline' ? 'connect' : 'recover';
+    res.writeHead(302, { location: `${origin}/__google-consent?state=${encodeURIComponent(q.get('state'))}&purpose=${purpose}&sub=google-sub-1` }); res.end(); return;
+  }
   if (url.pathname === '/__google-consent') { // Google's consent screen: the user clicks "Allow"
     const sub = url.searchParams.get('sub') || 'google-sub-1';
     const scope = url.searchParams.get('noscope') ? 'openid email' : undefined;

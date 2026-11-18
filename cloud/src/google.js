@@ -9,7 +9,7 @@ const DRIVE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 
 export function authUrl(env, state, { consent = true } = {}) {
-  const u = new URL(OAUTH);
+  const u = new URL(env.GOOGLE_AUTH_BASE || OAUTH); // GOOGLE_AUTH_BASE: test servers only
   u.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
   u.searchParams.set('redirect_uri', redirectUri(env));
   u.searchParams.set('response_type', 'code');

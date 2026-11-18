@@ -46,7 +46,6 @@ with sync_playwright() as p:
         "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
     host = browser.new_context(viewport={"width": 1200, "height": 900}, permissions=["clipboard-read", "clipboard-write"])
     host.route("https://checkout.stripe.com/**", fake_stripe)
-    host.route("https://accounts.google.com/**", fake_google())
 
     # ---- the sales page
     page = host.new_page(); watch(page, "home")
