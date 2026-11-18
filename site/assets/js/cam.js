@@ -82,6 +82,9 @@ function statusLine() {
   return '';
 }
 
+/** Instagram, Facebook, TikTok, Snapchat, LINE… open links in their own browser, which often blocks the camera. */
+const IN_APP = /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|BytedanceWebview|Snapchat|\bLine\/|LinkedInApp|Pinterest/i.test(navigator.userAgent || '');
+
 function welcome(errMsg) {
   const st = statusLine();
   if (st === 'closed') return closedScreen();
@@ -99,6 +102,7 @@ function welcome(errMsg) {
     ev.approval ? h('p', { class: 'muted' }, 'The hosts approve photos before they appear in the album.') : null,
     ev.reveal === 'after' ? h('p', { class: 'muted' }, ev.revealAt ? `Everyone’s photos develop ${fmtWhen(Date.parse(ev.revealAt))}.` : 'Everyone’s photos develop after the event.') : null,
     st ? h('p', { class: 'callout' }, st) : null,
+    IN_APP ? h('p', { class: 'callout warn' }, 'You opened this inside an app (like Instagram or Facebook), where the camera often doesn’t work. Tap the ••• or share menu and choose “Open in browser” (Safari or Chrome).') : null,
     h('label', { class: 'field' }, h('span', null, 'Your name'), name, h('small', null, 'Shown next to your photos. Leave blank to stay anonymous.')),
     pin ? h('label', { class: 'field' }, h('span', null, 'Event code'), pin, h('small', null, 'It’s printed on the sign at the event.')) : null,
     errMsg ? h('p', { class: 'callout warn', role: 'alert' }, errMsg) : null,
@@ -315,7 +319,8 @@ function cameraUnavailable(err) {
       : 'This browser can’t open the camera here. Use your phone’s camera instead.', false);
   els.msg.querySelector('.stack').append(
     h('button', { class: 'btn flash', onclick: () => els.fallbackInput.click() }, 'Use phone camera'),
-    h('button', { class: 'btn', onclick: () => { els.msg.remove(); openStream(); } }, 'Try again'));
+    h('button', { class: 'btn', onclick: () => { els.msg.remove(); openStream(); } }, 'Try again'),
+    h('a', { class: 'small', href: 'help.html#camera', target: '_blank', rel: 'noopener' }, 'How to fix this'));
 }
 
 function setMode(m) {

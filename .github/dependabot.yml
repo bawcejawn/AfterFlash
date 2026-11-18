@@ -1,19 +1,24 @@
 # Keeps the build tools and GitHub Actions patched. The website itself has no npm dependencies
 # at runtime (its few libraries are vendored and reviewed), so these PRs only touch tooling.
+# Updates are grouped: at most one PR per folder each month.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+    groups: { actions: { patterns: ['*'] } }   # one PR for all action updates
   - package-ecosystem: npm
     directory: /scripts
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    groups: { scripts: { patterns: ['*'] } }
   - package-ecosystem: npm
     directory: /contract
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    groups: { contract: { patterns: ['*'] } }
   - package-ecosystem: npm
     directory: /cloud
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    groups: { cloud: { patterns: ['*'] } }
