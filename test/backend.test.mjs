@@ -434,7 +434,7 @@ t('text inputs are sanitised (formula injection, html, length)', () => {
   const g = env.post({ a: 'join', e: ev.id, label: '+cmd|calc' });
   assert.ok(!g.guest.label.startsWith('+'));
   const s = env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { accent: 'red;}</style>', shotsPerGuest: 99999, look: 'evil' } }).event.settings;
-  assert.equal(s.accent, '#0f7c7a'); assert.equal(s.shotsPerGuest, 500); assert.equal(s.look, 'classic');
+  assert.equal(s.accent, '#0f7c7a'); assert.equal(s.shotsPerGuest, 500); assert.equal(s.look, 'none');
 });
 
 t('bad event ids never hit storage', () => {

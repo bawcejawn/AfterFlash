@@ -1174,7 +1174,7 @@ function sanitizeSettings_(s) {
     encrypted: s.encrypted === true,
     guestbook: s.guestbook !== false,
     paused: s.paused === true,
-    look: looks.indexOf(s.look) >= 0 ? s.look : 'classic',
+    look: looks.indexOf(s.look) >= 0 ? s.look : 'none',
     guestLooks: s.guestLooks !== false,
     beauty: s.beauty !== false,
     dateStamp: s.dateStamp === true,

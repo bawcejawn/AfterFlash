@@ -1,0 +1,115 @@
+/* Front page only. A pile of party prints on a cobalt table: the one bold thing.
+   Everything below the hero stays calm so the prints carry the mood. */
+.home {
+  --cobalt: #2c45c9;
+  --cobalt-deep: #1f33a3;
+  --gum: #ff8fb1;
+  --mint: #7fd8be;
+  --mist: #eef1fb;
+  background: #fff;
+}
+
+/* ---------- hero band */
+.hero-band { background: var(--cobalt); color: #fff; overflow: hidden; }
+.home .topbar a { color: #fff; }
+.home .topbar .btn.flash { color: var(--flash-ink); border-color: var(--flash); }
+.home .brand-mark { background: #fff; }
+.home .brand-mark::after { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--cobalt); background: var(--cobalt); }
+
+.home .hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 3rem; align-items: center; padding: 2rem 0 4.5rem; }
+.home .hero h1 { font-size: clamp(2.6rem, 5.6vw, 4.6rem); line-height: 0.98; letter-spacing: -0.025em; margin-bottom: 0.45em; }
+.home .hero h1 span { display: block; }
+.home .hero .lede { font-size: var(--step-1); line-height: 1.45; color: #dfe5ff; max-width: 32ch; }
+
+/* The join box is a ticket stub: punched corners, a dashed tear line. */
+.ticket {
+  position: relative; display: grid; gap: 0.6rem; max-width: 27rem; margin-top: 1.8rem;
+  background: #fff; color: var(--ink); padding: 1.1rem 1.25rem 1rem; border-radius: 10px;
+  -webkit-mask: radial-gradient(circle 11px at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+                radial-gradient(circle 11px at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+          mask: radial-gradient(circle 11px at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+                radial-gradient(circle 11px at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+}
+.ticket label { font: 700 var(--step-0) var(--display); }
+.ticket-row { display: flex; gap: 0.5rem; }
+.ticket-row input { flex: 1; min-width: 0; letter-spacing: 0.08em; }
+.ticket #join-msg { color: var(--danger); }
+.ticket #join-msg:empty { display: none; }
+.hero-host { margin-top: 1.4rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; color: #dfe5ff; }
+.home .host-btn { background: transparent; color: #fff; border-color: #fff; }
+.home .host-btn:hover { background: var(--cobalt-deep); }
+
+/* ---------- the pile of prints */
+.pile { position: relative; aspect-ratio: 1 / 1.07; width: 100%; max-width: 560px; justify-self: end; }
+.print {
+  position: absolute; width: 47%; margin: 0; background: #fff; padding: 3.2% 3.2% 0;
+  border-radius: 3px; box-shadow: 0 14px 30px rgba(9, 16, 70, 0.4), 0 2px 4px rgba(9, 16, 70, 0.3);
+}
+.print .shot { position: relative; display: block; }
+.print img { width: 100%; height: auto; }
+.print figcaption { font: 700 clamp(0.72rem, 1.3vw, 0.95rem) / 1 var(--display); color: var(--ink-2); padding: 0.75em 0.15em 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stamp { position: absolute; right: 7%; bottom: 6%; font: 700 clamp(0.62rem, 1.1vw, 0.8rem) var(--display); letter-spacing: 0.06em; color: #ff9a3c; text-shadow: 0 0 5px rgba(255, 140, 40, 0.85); }
+.p1 { left: 1%; top: 0; rotate: -7deg; }
+.p2 { right: 1%; top: 1%; rotate: 5deg; }
+.p3 { left: 6%; bottom: 0; rotate: 4deg; z-index: 2; }
+.p4 { right: 3%; bottom: 0; rotate: -4deg; z-index: 3; }
+.p1 .stamp { bottom: auto; top: 6%; }
+/* a strip of tape holding the top print down */
+.p2::before { content: ""; position: absolute; top: -10px; left: 36%; width: 30%; height: 20px; background: rgba(255, 143, 177, 0.75); rotate: -4deg; }
+
+/* One load moment: the prints land on the table one by one and develop. */
+@media (prefers-reduced-motion: no-preference) {
+  .print { animation: land 0.7s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+  .print img { animation: develop 2.4s ease-out both; }
+  .p2, .p2 img { animation-delay: 0.25s; }
+  .p3, .p3 img { animation-delay: 0.5s; }
+  .p4, .p4 img { animation-delay: 0.75s; }
+  @keyframes land { from { opacity: 0; translate: 0 -40px; scale: 1.08; } to { opacity: 1; translate: 0 0; scale: 1; } }
+}
+
+@media (max-width: 820px) {
+  .home .hero { grid-template-columns: 1fr; gap: 2.5rem; padding: 0.5rem 0 3rem; }
+  .pile { justify-self: center; max-width: 420px; }
+}
+@media (max-width: 480px) {
+  .home .topbar .row { gap: 0.8rem; flex-wrap: nowrap; }
+  .home .topbar a[href="help.html"] { display: none; }
+  .home .topbar .btn.small { padding-inline: 0.6rem; }
+}
+
+/* ---------- calmer sections below */
+.home main .section, .home .wrap > .section { padding: 3.5rem 0 1rem; }
+.home h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800; letter-spacing: -0.02em; }
+
+/* How it works really is a sequence: numbered like frames on a roll. */
+.home .steps { gap: 2rem; }
+.home .steps li { border-top: 0; padding-top: 0; }
+.home .steps li::before {
+  content: counter(s); display: grid; place-items: center; width: 2.6rem; height: 2.6rem; margin-bottom: 0.9rem;
+  border-radius: 50%; background: var(--flash); color: var(--flash-ink); font: 800 var(--step-1) var(--display);
+}
+
+.home .features { gap: 2rem 3rem; }
+.home .features h3 { font-size: 1.15rem; }
+.home .features p { color: var(--ink-2); }
+
+/* ---------- pricing on a pale band */
+.price-band { background: var(--mist); margin-top: 3rem; padding-bottom: 2.5rem; }
+.home #pricing { padding-top: 3.5rem; }
+.home #pricing .lede { color: var(--ink-2); }
+.home .plan { background: #fff; border: 2px solid #d7ddf3; border-radius: 16px; padding: 1.5rem; }
+.home .plan.best { outline: 0; border-color: var(--cobalt); background: var(--cobalt); color: #fff; }
+.home .plan.best .muted, .home .plan.best .price-tag small, .home .plan.best .was { color: #dfe5ff; }
+.home .plan-badge { background: var(--gum); color: var(--ink); top: -0.85rem; }
+.home .plan .btn.primary { background: var(--ink); }
+.home .plan.best .btn.flash { border-color: var(--flash); }
+.home .price-card { background: #fff; border: 0; border-radius: 16px; }
+.home .ticks li::before { color: var(--cobalt); }
+
+/* ---------- questions + last call */
+.home .faq summary { font-weight: 700; cursor: pointer; }
+.home .faq details[open] summary { color: var(--cobalt); }
+.last-call { background: var(--gum); margin-top: 3.5rem; padding: 3.5rem 0; text-align: center; }
+.last-call h2 { font-size: clamp(2rem, 5vw, 3.2rem); margin-bottom: 0.3em; }
+.last-call p { margin-inline: auto; font-size: var(--step-1); }
+.home .footer { padding-top: 1.5rem; }

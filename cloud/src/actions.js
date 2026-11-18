@@ -87,7 +87,7 @@ function sanitizeSettings(s) {
     encrypted: s.encrypted === true,
     guestbook: s.guestbook !== false,
     paused: s.paused === true,
-    look: looks.includes(s.look) ? s.look : 'classic',
+    look: looks.includes(s.look) ? s.look : 'none',
     guestLooks: s.guestLooks !== false,
     beauty: s.beauty !== false,
     dateStamp: s.dateStamp === true,
