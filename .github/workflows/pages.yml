@@ -19,7 +19,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       # Friends copy the backend from the site itself when they set up their own PhotoShare.
       - run: mkdir -p site/backend && cp backend/Code.gs site/backend/Code.gs.txt
       - uses: actions/upload-pages-artifact@v3
