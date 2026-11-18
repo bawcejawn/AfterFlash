@@ -16,6 +16,7 @@ const LIMITS = {
   BAD_KEY_PER_10MIN: 30, REPORTS_PER_GUEST: 15, NOTES_PER_GUEST: 5, NOTE_TEXT: 500, BLUR_THRESHOLD: 40,
   READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60, REF_LOOKUPS_PER_10MIN: 300,
   HOLD_MS: 365 * 86400000, PAYOUT_WAIT_MS: 14 * 86400000, MAX_PCT: 50, MAX_CASH_CENTS: 100000,
+  MAX_TIER: 3, MIN_PAYOUT: 2500, MAX_TEAM: 100, MAX_OPEN_INVITES: 20, INVITE_MS: 14 * 86400000, JOINS_PER_10MIN: 60,
 };
 
 // ----------------------------------------------------------------- context
@@ -122,10 +123,11 @@ async function accountOf(c, ev) {
   return a;
 }
 const drive = async (c, ev) => driveFor(c.env, c.db, await accountOf(c, ev));
-const expired = (a) => a.kind !== 'owner' && Number(a.expires) > 0 && Number(a.expires) < Date.now();
+// Partner-only accounts (plan 'partner') can sign in to see earnings but can't host until they buy a plan.
+const expired = (a) => a.kind !== 'owner' && (a.plan === 'partner' || (Number(a.expires) > 0 && Number(a.expires) < Date.now()));
 const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 /** Albums stay online for 12 months after a plan ends; after that only the host's Drive has the photos. */
-const archived = (a) => a.kind !== 'owner' && Number(a.expires) > 0 && Number(a.expires) + LIMITS.HOLD_MS < Date.now();
+const archived = (a) => a.kind !== 'owner' && a.plan !== 'partner' && Number(a.expires) > 0 && Number(a.expires) + LIMITS.HOLD_MS < Date.now();
 async function loadPublicEvent(c, id) {
   const ev = await loadEvent(c, id);
   const a = await accountOf(c, ev);
@@ -165,7 +167,7 @@ async function authAccount(c, req, { allowExpired = false } = {}) {
     const a = await c.one('SELECT * FROM accounts WHERE key_hash = ?', hash);
     if (a) {
       if (a.status !== 'active') throw err('forbidden', 'This account is turned off. Contact support.');
-      if (!allowExpired && expired(a)) throw err('plan_expired', `Your PhotoShare plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
+      if (!allowExpired && expired(a)) throw err('plan_expired', a.plan === 'partner' ? 'This is a partner account. Buy a plan to host your own events.' : `Your PhotoShare plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
       return a;
     }
   }
@@ -690,7 +692,7 @@ A.adminCheck = async (c, req) => {
     drive: !!a.refresh_enc, googleEmail: a.google_email || '',
     plan: a.kind === 'owner' ? 'lifetime' : (a.plan || 'lifetime'), expires: a.kind === 'owner' ? 0 : Number(a.expires) || 0, expired: expired(a),
     maxEvents: Number(a.max_events) || 0, eventsUsed: (await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id)).n,
-    holdUntil: Number(a.expires) > 0 && a.kind !== 'owner' ? Number(a.expires) + LIMITS.HOLD_MS : 0,
+    holdUntil: Number(a.expires) > 0 && a.kind !== 'owner' && a.plan !== 'partner' ? Number(a.expires) + LIMITS.HOLD_MS : 0,
     partner: await partnerView(c, a) } };
 };
 
@@ -813,25 +815,45 @@ async function activeCode(c, code) {
   if (code.length < 3) return null;
   return c.one('SELECT * FROM ref_codes WHERE code = ? AND active = 1', code);
 }
-/** Earnings for one code, in cents. "ready" = earned on sales older than 14 days (past the refund window), minus payouts. */
+const overridePct = (env) => { const n = Math.round(Number(env.OVERRIDE_PCT == null || env.OVERRIDE_PCT === '' ? 5 : env.OVERRIDE_PCT)); return Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 5; };
+export const PAYOUT_METHODS = ['Venmo', 'PayPal', 'Zelle', 'Cash App', 'Check'];
+
+/** Earnings for one code, in cents. "ready" = earned on sales older than 14 days (past the dispute window), minus payouts. */
 async function codeStats(c, code) {
   const cut = c.now() - LIMITS.PAYOUT_WAIT_MS;
-  const r = await c.one("SELECT COUNT(*) AS sales, COALESCE(SUM(paid), 0) AS revenue, COALESCE(SUM(amount), 0) AS earned, COALESCE(SUM(CASE WHEN created < ? THEN amount ELSE 0 END), 0) AS settled FROM commissions WHERE code = ? AND status = 'ok'", cut, code);
+  const r = await c.one("SELECT COUNT(CASE WHEN kind = 'sale' THEN 1 END) AS sales, COALESCE(SUM(CASE WHEN kind = 'sale' THEN paid ELSE 0 END), 0) AS revenue, COALESCE(SUM(amount), 0) AS earned, COALESCE(SUM(CASE WHEN kind = 'override' THEN amount ELSE 0 END), 0) AS teamEarned, COALESCE(SUM(CASE WHEN created < ? THEN amount ELSE 0 END), 0) AS settled FROM commissions WHERE code = ? AND status = 'ok'", cut, code);
   const yr = Date.UTC(new Date(c.now()).getUTCFullYear(), 0, 1);
   const p = await c.one('SELECT COALESCE(SUM(amount), 0) AS paid, COALESCE(SUM(CASE WHEN created >= ? THEN amount ELSE 0 END), 0) AS year FROM payouts WHERE code = ?', yr, code);
-  return { sales: r.sales, revenue: r.revenue, earned: r.earned, paid: p.paid, paidThisYear: p.year, owed: r.earned - p.paid, ready: Math.max(0, r.settled - p.paid) };
+  const q = await c.one("SELECT COALESCE(SUM(amount), 0) AS n FROM payout_requests WHERE code = ? AND status = 'pending'", code);
+  return { sales: r.sales, revenue: r.revenue, earned: r.earned, teamEarned: r.teamEarned, paid: p.paid, paidThisYear: p.year, owed: r.earned - p.paid, ready: Math.max(0, r.settled - p.paid), requested: q.n };
 }
-/** What a partner sees on their own admin page: their code, link and earnings (never customers' details). */
+const salesOf = async (c, code) => (await c.one("SELECT COUNT(*) AS n FROM commissions WHERE code = ? AND kind = 'sale' AND status = 'ok'", code)).n;
+/** The partners below a code (up to two levels), with their sale counts. */
+async function teamOf(c, code) {
+  const out = [];
+  const kids = await c.all('SELECT code, name, tier, parent, active, created FROM ref_codes WHERE parent = ? ORDER BY created', code);
+  for (const k of kids) {
+    out.push({ code: k.code, name: k.name, tier: k.tier, under: '', active: !!k.active, sales: await salesOf(c, k.code) });
+    for (const g of await c.all('SELECT code, name, tier, active FROM ref_codes WHERE parent = ? ORDER BY created', k.code)) {
+      out.push({ code: g.code, name: g.name, tier: g.tier, under: k.code, active: !!g.active, sales: await salesOf(c, g.code) });
+    }
+  }
+  return out;
+}
+/** What a partner sees on their own admin page: code, link, earnings, team and payout requests (never customers' details). */
 async function partnerView(c, a) {
   if (a.kind === 'owner') return null;
   const rows = await c.all('SELECT * FROM ref_codes WHERE account = ? ORDER BY created', a.id);
   if (!rows.length) return null;
   const codes = [];
   for (const r of rows) {
-    const recent = await c.all('SELECT created, plan, paid, amount, status FROM commissions WHERE code = ? ORDER BY id DESC LIMIT 25', r.code);
-    codes.push({ code: r.code, discount: r.discount, commission: r.commission, active: !!r.active, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`, ...(await codeStats(c, r.code)), recent });
+    const recent = await c.all('SELECT created, plan, paid, amount, status, kind FROM commissions WHERE code = ? ORDER BY id DESC LIMIT 25', r.code);
+    const requests = await c.all('SELECT id, amount, method, created, status, done FROM payout_requests WHERE code = ? ORDER BY id DESC LIMIT 10', r.code);
+    codes.push({ code: r.code, tier: r.tier, discount: r.discount, commission: r.commission, override: overridePct(c.env), active: !!r.active,
+      canInvite: !!r.active && r.tier < LIMITS.MAX_TIER, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`,
+      ...(await codeStats(c, r.code)), recent, requests, team: await teamOf(c, r.code) });
   }
-  return { codes };
+  return { codes, minPayout: LIMITS.MIN_PAYOUT, methods: PAYOUT_METHODS };
 }
 /** Public: is this code valid, and how much does it take off? */
 A.refLookup = async (c, req) => {
@@ -860,7 +882,7 @@ A.checkoutStart = async (c, req) => {
     ref = await activeCode(c, req.ref);
     if (!ref) throw err('bad_code', 'That code isn’t valid. Remove it to pay full price.');
   } else if (a && a.ref) ref = await activeCode(c, a.ref); // renewals keep the code the customer first used
-  if (ref && a && ref.account === a.id) ref = null; // partners can't earn on their own purchases
+  if (ref && a && (await c.one('SELECT code FROM ref_codes WHERE account = ? LIMIT 1', a.id))) ref = null; // partners' own purchases never earn anyone anything
   return { url: await createCheckout(c.env, { plan, account: a ? a.id : '', ref }) };
 };
 
@@ -876,14 +898,32 @@ function extend(a, plan, now, eventsUsed = 0) {
   return { plan: 'event', expires, max_events: Math.max(had, eventsUsed) + 1 };
 }
 
-/** Records a partner's commission for a sale (once per sale; never for their own purchases). */
-async function recordCommission(c, { code, session, customer, plan, paid, rate, method }) {
+/**
+ * Pays a sale out to partners: the seller earns their commission, and the partners above them
+ * (up to 2 tiers, never the owner) split the team override evenly. Only real customers' purchases
+ * count: a purchase by any partner account, or with the partner's own email, earns nobody anything.
+ * Each sale counts once (UNIQUE(session, code)).
+ */
+async function recordCommission(c, { code, session, customer, plan, paid, rate, method, email = '' }) {
   if (!code || !paid) return;
   const r = await c.one('SELECT * FROM ref_codes WHERE code = ?', code);
-  if (!r || (r.account && r.account === customer)) return;
-  const amount = Math.round(paid * (rate == null ? r.commission : rate) / 100);
-  await c.run('INSERT OR IGNORE INTO commissions (code, session, customer, plan, paid, amount, created, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    code, session, customer, plan, paid, amount, c.now(), method);
+  if (!r) return;
+  if (customer && (await c.one('SELECT code FROM ref_codes WHERE account = ? LIMIT 1', customer))) return;
+  if (email && r.email && email.toLowerCase() === String(r.email).toLowerCase()) return;
+  const now = c.now();
+  const add = (who, amount, kind) => c.run('INSERT OR IGNORE INTO commissions (code, session, customer, plan, paid, amount, created, method, kind, seller) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    who, session, customer, plan, paid, amount, now, method, kind, code);
+  await add(code, Math.round(paid * (rate == null ? r.commission : rate) / 100), 'sale');
+  const up = [];
+  for (let p = r.parent, i = 0; p && i < LIMITS.MAX_TIER - 1; i++) {
+    const u = await c.one('SELECT code, parent, active FROM ref_codes WHERE code = ?', p);
+    if (!u) break;
+    up.push(u);
+    p = u.parent;
+  }
+  if (!up.length) return;
+  const each = Math.floor(paid * overridePct(c.env) / 100 / up.length); // a turned-off partner's share stays with the owner
+  if (each > 0) for (const u of up) if (u.active) await add(u.code, each, 'override');
 }
 
 /** After paying: turn the Stripe Checkout Session into an account and show its admin key. */
@@ -901,7 +941,7 @@ A.claimPurchase = async (c, req) => {
       const n = extend(a, p.plan, c.now(), used);
       await c.run('INSERT INTO purchases (session, account, plan, amount, created, ref) VALUES (?, ?, ?, ?, ?, ?)', sid, a.id, p.plan, p.amount, c.now(), p.ref);
       await c.run('UPDATE accounts SET plan = ?, expires = ?, max_events = ?, ref = CASE WHEN ref = \'\' OR ref IS NULL THEN ? ELSE ref END WHERE id = ?', n.plan, n.expires, n.max_events, p.ref, a.id);
-      await recordCommission(c, { code: p.ref, session: sid, customer: a.id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card' });
+      await recordCommission(c, { code: p.ref, session: sid, customer: a.id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card', email: p.email });
     }
     const now = await c.one('SELECT plan, expires FROM accounts WHERE id = ?', a.id);
     return { renewed: true, plan: now.plan, expires: Number(now.expires) || 0, email: p.email };
@@ -920,7 +960,7 @@ A.claimPurchase = async (c, req) => {
   await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until, plan, expires, max_events, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000, n.plan, n.expires, n.max_events, p.ref);
   await c.run('INSERT OR IGNORE INTO purchases (session, account, plan, amount, created, ref) VALUES (?, ?, ?, ?, ?, ?)', sid, id, p.plan, p.amount, c.now(), p.ref);
-  await recordCommission(c, { code: p.ref, session: sid, customer: id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card' });
+  await recordCommission(c, { code: p.ref, session: sid, customer: id, plan: p.plan, paid: p.amount, rate: p.commission, method: 'card', email: p.email });
   return { adminKey: key, email: p.email, plan: n.plan, expires: n.expires };
 };
 
@@ -928,7 +968,7 @@ A.claimPurchase = async (c, req) => {
 async function newAccount(c, { plan, kind, email = '', note = '', ref = '' }) {
   const key = randomKey(32);
   const id = randomId(12);
-  const n = extend(null, plan, c.now());
+  const n = plan === 'partner' ? { plan: 'partner', expires: 0, max_events: 0 } : extend(null, plan, c.now());
   await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note, plan, expires, max_events, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, await sha256Hex(key), kind, email, c.now(), note, n.plan, n.expires, n.max_events, ref);
   return { id, adminKey: key, plan: n.plan, expires: n.expires };
@@ -959,11 +999,21 @@ A.ownerCodes = async (c, req) => {
   requireOwner(await authAccount(c, req));
   const rows = await c.all('SELECT * FROM ref_codes ORDER BY created DESC LIMIT 500');
   const codes = [];
-  for (const r of rows) codes.push({ code: r.code, name: r.name, email: r.email, discount: r.discount, commission: r.commission, active: !!r.active, created: r.created, note: r.note, hasKey: !!r.account, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`, ...(await codeStats(c, r.code)) });
-  const sales = await c.all('SELECT id, code, plan, paid, amount, created, status, method FROM commissions ORDER BY id DESC LIMIT 200');
+  for (const r of rows) codes.push({ code: r.code, name: r.name, email: r.email, discount: r.discount, commission: r.commission, active: !!r.active, created: r.created, note: r.note, tier: r.tier, parent: r.parent, agreed: r.agreed, hasKey: !!r.account, link: `${c.env.SITE_ORIGIN || ''}/?ref=${r.code}`, ...(await codeStats(c, r.code)) });
+  const sales = await c.all('SELECT id, code, seller, kind, plan, paid, amount, created, status, method FROM commissions ORDER BY id DESC LIMIT 300');
   const payouts = await c.all('SELECT id, code, amount, created, method, note FROM payouts ORDER BY id DESC LIMIT 500');
-  return { codes, sales, payouts };
+  const requests = await c.all("SELECT q.id, q.code, q.amount, q.method, q.handle, q.created, r.name, r.email FROM payout_requests q LEFT JOIN ref_codes r ON r.code = q.code WHERE q.status = 'pending' ORDER BY q.id");
+  return { codes, sales, payouts, requests, override: overridePct(c.env) };
 };
+/** A free code made from a name, e.g. "Mike Smith" → MIKESMIT47. */
+async function freshCode(c, name) {
+  const base = normCode(name).replace(/[0-9]/g, '').slice(0, 8) || 'PS';
+  for (let i = 0; i < 40; i++) {
+    const t = base + String(10 + Math.floor(Math.random() * (i < 20 ? 90 : 9990)));
+    if (!(await c.one('SELECT code FROM ref_codes WHERE code = ?', t))) return t;
+  }
+  throw err('busy', 'Couldn’t make a code. Try again.');
+}
 /** New partner code. With withKey, also makes the partner a free lifetime admin key linked to the code. */
 A.ownerCodeCreate = async (c, req) => {
   requireOwner(await authAccount(c, req));
@@ -971,19 +1021,14 @@ A.ownerCodeCreate = async (c, req) => {
   if (!name) throw err('bad_request', 'Enter the partner’s name.');
   let code = normCode(req.code);
   if (code && code.length < 3) throw err('bad_request', 'Codes need 3 to 16 letters or numbers.');
-  if (!code) {
-    const base = normCode(name).replace(/[0-9]/g, '').slice(0, 8) || 'PS';
-    for (let i = 0; i < 20 && !code; i++) {
-      const t = base + String(10 + Math.floor(Math.random() * 90));
-      if (!(await c.one('SELECT code FROM ref_codes WHERE code = ?', t))) code = t;
-    }
-  } else if (await c.one('SELECT code FROM ref_codes WHERE code = ?', code)) throw err('bad_request', 'That code is taken. Pick another.');
-  if (!code) throw err('bad_request', 'Pick a code.');
-  let acct = null;
-  if (req.withKey) acct = await newAccount(c, { plan: 'lifetime', kind: 'comp', email: cleanEmail(req.email), note: ('Partner ' + name).slice(0, 60) });
-  await c.run('INSERT INTO ref_codes (code, account, name, email, discount, commission, created, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    code, acct ? acct.id : '', name, cleanEmail(req.email), pct(req.discount, 10), pct(req.commission, 20), c.now(), cleanText(req.note, 120));
-  return { code, link: `${c.env.SITE_ORIGIN || ''}/?ref=${code}`, adminKey: acct ? acct.adminKey : undefined };
+  if (!code) code = await freshCode(c, name);
+  else if (await c.one('SELECT code FROM ref_codes WHERE code = ?', code)) throw err('bad_request', 'That code is taken. Pick another.');
+  // Every partner gets a sign-in key to see their earnings; only the owner can make it a free lifetime hosting key.
+  const acct = req.withKey ? await newAccount(c, { plan: 'lifetime', kind: 'comp', email: cleanEmail(req.email), note: ('Partner ' + name).slice(0, 60) })
+    : await newAccount(c, { plan: 'partner', kind: 'partner', email: cleanEmail(req.email), note: ('Partner ' + name).slice(0, 60) });
+  await c.run('INSERT INTO ref_codes (code, account, name, email, discount, commission, created, note, tier, parent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
+    code, acct.id, name, cleanEmail(req.email), pct(req.discount, 10), pct(req.commission, 20), c.now(), cleanText(req.note, 120), '');
+  return { code, link: `${c.env.SITE_ORIGIN || ''}/?ref=${code}`, adminKey: acct.adminKey, lifetime: !!req.withKey };
 };
 A.ownerCodeUpdate = async (c, req) => {
   requireOwner(await authAccount(c, req));
@@ -1006,13 +1051,109 @@ A.ownerPayout = async (c, req) => {
   await c.run('INSERT INTO payouts (code, amount, created, method, note) VALUES (?, ?, ?, ?, ?)', r.code, cents, c.now(), cleanText(req.method, 30), cleanText(req.note, 120));
   return { owed: st.owed - cents };
 };
-/** Voids (or restores) a commission, e.g. after refunding that sale in Stripe. */
+/** Voids (or restores) a sale's commissions (the seller's and the team overrides), e.g. after a chargeback. */
 A.ownerVoidSale = async (c, req) => {
   requireOwner(await authAccount(c, req));
-  const r = await c.run('UPDATE commissions SET status = ? WHERE id = ?', req.restore ? 'ok' : 'void', int(req.id, 0, 1e12, 0));
-  if (!r.meta.changes) throw err('not_found', 'Sale not found');
+  const row = await c.one('SELECT session FROM commissions WHERE id = ?', int(req.id, 0, 1e12, 0));
+  if (!row) throw err('not_found', 'Sale not found');
+  await c.run('UPDATE commissions SET status = ? WHERE session = ?', req.restore ? 'ok' : 'void', row.session);
   return {};
 };
+/** Pays (or declines) a partner's payout request. Paying records a payout of the requested amount. */
+A.ownerPayRequest = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const q = await c.one("SELECT * FROM payout_requests WHERE id = ? AND status = 'pending'", int(req.id, 0, 1e12, 0));
+  if (!q) throw err('not_found', 'That request was already handled.');
+  if (!req.paid) {
+    await c.run("UPDATE payout_requests SET status = 'declined', done = ?, note = ? WHERE id = ?", c.now(), cleanText(req.note, 120), q.id);
+    return {};
+  }
+  const st = await codeStats(c, q.code);
+  if (q.amount > st.owed) throw err('bad_request', `That’s more than they’re owed now ($${(st.owed / 100).toFixed(2)}), probably because a sale was voided. Decline it and ask them to request again.`);
+  await c.run('INSERT INTO payouts (code, amount, created, method, note) VALUES (?, ?, ?, ?, ?)', q.code, q.amount, c.now(), q.method, cleanText(req.note, 120) || `Request #${q.id}`);
+  await c.run("UPDATE payout_requests SET status = 'paid', done = ? WHERE id = ?", c.now(), q.id);
+  return {};
+};
+/** Adds days to a customer's plan (goodwill when something went wrong). */
+A.ownerAddDays = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const a = await c.one("SELECT * FROM accounts WHERE id = ? AND kind != 'owner'", str(req.id, 20));
+  if (!a) throw err('not_found', 'Account not found');
+  if (a.plan === 'partner' || ((a.plan || 'lifetime') === 'lifetime' && !Number(a.expires))) throw err('bad_request', 'That account has no end date to extend.');
+  const days = int(req.days, 1, 365, 0);
+  if (!days) throw err('bad_request', 'Enter 1 to 365 days.');
+  const expires = Math.max(c.now(), Number(a.expires) || 0) + days * 86400000;
+  await c.run('UPDATE accounts SET expires = ? WHERE id = ?', expires, a.id);
+  return { expires };
+};
+
+// ---- partners: invite links, joining, payout requests
+async function myCode(c, a, code) {
+  const r = code ? await c.one('SELECT * FROM ref_codes WHERE account = ? AND code = ?', a.id, normCode(code))
+    : await c.one('SELECT * FROM ref_codes WHERE account = ? ORDER BY created LIMIT 1', a.id);
+  if (!r) throw err('forbidden', 'This account isn’t a partner.');
+  return r;
+}
+/** A partner makes a single-use link for someone joining their team (tiers 1 and 2 only). */
+A.partnerInvite = async (c, req) => {
+  const a = await authAccount(c, req, { allowExpired: true });
+  const r = await myCode(c, a, req.code);
+  if (!r.active) throw err('forbidden', 'Your code is turned off.');
+  if (r.tier >= LIMITS.MAX_TIER) throw err('forbidden', 'Tier 3 partners can sell but can’t add partners.');
+  const team = await c.one('SELECT COUNT(*) AS n FROM ref_codes WHERE parent = ?', r.code);
+  if (team.n >= LIMITS.MAX_TEAM) throw err('full', 'Your team is full. Contact support.');
+  const open = await c.one('SELECT COUNT(*) AS n FROM invites WHERE code = ? AND used = 0 AND exp > ?', r.code, c.now());
+  if (open.n >= LIMITS.MAX_OPEN_INVITES) throw err('rate_limited', 'You have 20 unused invite links. Wait until some are used or expire.');
+  const token = randomKey(24);
+  const exp = c.now() + LIMITS.INVITE_MS;
+  await c.run('INSERT INTO invites (token_hash, code, created, exp) VALUES (?, ?, ?, ?)', await sha256Hex(token), r.code, c.now(), exp);
+  return { link: `${c.env.SITE_ORIGIN || ''}/partner.html#invite=${token}`, expires: exp };
+};
+async function openInvite(c, token) {
+  if (!(await rateOk(c, 'badinvite', 60, 600, true))) throw err('rate_limited', 'Too many tries. Wait 10 minutes.');
+  const t = str(token, 80);
+  const inv = /^[A-Za-z0-9_-]{20,80}$/.test(t) ? await c.one('SELECT * FROM invites WHERE token_hash = ?', await sha256Hex(t)) : null;
+  const r = inv && !inv.used && inv.exp > c.now() ? await c.one('SELECT * FROM ref_codes WHERE code = ? AND active = 1', inv.code) : null;
+  if (!r || r.tier >= LIMITS.MAX_TIER) { await rateHit(c, 'badinvite', 600); throw err('bad_invite', 'This invite link has expired or was already used. Ask for a new one.'); }
+  return { inv, r };
+}
+const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'A partner';
+/** Public: what joining through this invite means (shown before they agree). */
+A.partnerInviteInfo = async (c, req) => {
+  const { r } = await openInvite(c, req.invite);
+  return { inviter: firstName(r.name), tier: r.tier + 1, discount: r.discount, commission: r.commission, override: overridePct(c.env), canRecruit: r.tier + 1 < LIMITS.MAX_TIER, minPayout: LIMITS.MIN_PAYOUT };
+};
+/** Public: accept an invite. Makes a partner sign-in key and code. Joining is free and never earns anyone money. */
+A.partnerJoin = async (c, req) => {
+  if (!(await rateOk(c, 'joins', LIMITS.JOINS_PER_10MIN, 600))) throw err('rate_limited', 'Busy, try again in a few minutes.');
+  const { inv, r } = await openInvite(c, req.invite);
+  if (req.agree !== true) throw err('bad_request', 'Please read and accept the partner agreement.');
+  const name = cleanText(req.name, 60);
+  if (!name) throw err('bad_request', 'Enter your name.');
+  const email = cleanEmail(req.email);
+  if (!email) throw err('bad_request', 'Enter your email, so we can reach you about payouts.');
+  const used = await c.run('UPDATE invites SET used = ? WHERE token_hash = ? AND used = 0', c.now(), inv.token_hash);
+  if (!used.meta.changes) throw err('bad_invite', 'This invite link was already used. Ask for a new one.');
+  const code = await freshCode(c, name);
+  const acct = await newAccount(c, { plan: 'partner', kind: 'partner', email, note: ('Partner ' + name).slice(0, 60) });
+  await c.run('INSERT INTO ref_codes (code, account, name, email, discount, commission, created, tier, parent, agreed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    code, acct.id, name, email, r.discount, r.commission, c.now(), r.tier + 1, r.code, c.now());
+  return { adminKey: acct.adminKey, code, link: `${c.env.SITE_ORIGIN || ''}/?ref=${code}`, tier: r.tier + 1 };
+};
+/** A partner asks to be paid everything that's ready (at least $25). */
+A.partnerRequestPayout = async (c, req) => {
+  const a = await authAccount(c, req, { allowExpired: true });
+  const r = await myCode(c, a, req.code);
+  if (!PAYOUT_METHODS.includes(req.method)) throw err('bad_request', 'Pick how you want to be paid.');
+  const handle = String(req.handle == null ? '' : req.handle).replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80); // keeps @handles
+  if (handle.length < 3) throw err('bad_request', 'Enter your username, email or phone for that payment app (or a mailing address for a check).');
+  if (await c.one("SELECT id FROM payout_requests WHERE code = ? AND status = 'pending'", r.code)) throw err('bad_request', 'You already have a payout request waiting.');
+  const st = await codeStats(c, r.code);
+  if (st.ready < LIMITS.MIN_PAYOUT) throw err('bad_request', `You can request a payout once $${(LIMITS.MIN_PAYOUT / 100).toFixed(2)} is ready. Ready now: $${(st.ready / 100).toFixed(2)}.`);
+  await c.run('INSERT INTO payout_requests (code, amount, method, handle, created) VALUES (?, ?, ?, ?, ?)', r.code, st.ready, req.method, handle, c.now());
+  return { amount: st.ready };
+};
+
 /** A sale paid in cash (or any way outside Stripe): makes a new admin key and credits the partner's code. */
 A.ownerCashSale = async (c, req) => {
   requireOwner(await authAccount(c, req));

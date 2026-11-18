@@ -85,7 +85,7 @@ async function dashboard(created) {
       h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     CLOUD ? cloudBanner() : null,
     CLOUD ? planPanel({ studio, adminKey, me }) : null,
-    CLOUD ? partnerPanel({ me }) : null,
+    CLOUD ? partnerPanel({ studio, adminKey, me }) : null,
     CLOUD && !ended ? drivePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
     needsDrive || ended ? null : createForm(),

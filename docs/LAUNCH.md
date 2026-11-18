@@ -124,7 +124,7 @@ You don't need to create products in Stripe: PhotoShare sets the prices itself, 
 ## Part 8: Go live
 
 1. Stripe: **Activate payments** (business details, bank account for payouts). Switch the toggle to **Live mode**. Repeat Part 6 steps 2–4 in Live mode (`sk_live_` key), update the `STRIPE_SECRET_KEY` secret, and run the workflow again. The yellow bar disappears.
-2. Read your **Terms** and **Privacy** pages (`/terms.html`, `/privacy.html`). They include a 14-day refund promise; change it if you want a different policy. To edit, tell me or change `site/assets/js/legal.js`. Have a lawyer glance at both when you can.
+2. Read your **Terms** and **Privacy** pages (`/terms.html`, `/privacy.html`). They say **all sales are final** (no refunds), and that you'll fix problems on your side and may add time as goodwill (owner panel → **Add days**). Buyers can still dispute a charge with their bank; a clear no-refund policy shown at checkout helps you win those. To edit, tell me or change `site/assets/js/legal.js`. Have a lawyer glance at both when you can.
 3. Business basics (ask an accountant for your state):
    - an LLC
    - a separate bank account for Stripe payouts

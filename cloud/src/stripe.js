@@ -64,7 +64,7 @@ export async function createCheckout(env, { plan, account = '', ref = null }) {
       success_url: `${env.SITE_ORIGIN}/welcome.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${env.SITE_ORIGIN}/index.html#pricing`,
       'consent_collection[terms_of_service]': env.STRIPE_TOS === 'required' ? 'required' : 'none',
-      'custom_text[submit][message]': 'You’ll get your admin key right after paying.',
+      'custom_text[submit][message]': 'All sales are final. You’ll get your admin key right after paying.',
     },
   });
   return s.url;
