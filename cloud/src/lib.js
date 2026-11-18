@@ -1,4 +1,4 @@
-// Small helpers shared by the PhotoShare Cloud worker. Web-platform APIs only (runs on
+// Small helpers shared by the Afterflash Cloud worker. Web-platform APIs only (runs on
 // Cloudflare Workers and, for tests, on Node).
 
 export class ApiErr extends Error {

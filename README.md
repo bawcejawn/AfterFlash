@@ -1,4 +1,4 @@
-# PhotoShare
+# Afterflash
 
 A shared disposable camera for weddings, parties and other events. Guests scan a QR code, take photos from their phone's browser, and every photo lands in one album stored in **your** Google Drive. There's no app to install, guests don't need accounts, and it costs nothing to run.
 
@@ -9,7 +9,7 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 
 ## Two ways to run it
 
-- **PhotoShare Cloud (the paid product):** hosts buy an admin key, connect their Google Drive with one click, and run unlimited events. Photos go to each host's own Drive. It runs on Cloudflare (code in `cloud/`). **To launch it, follow [docs/LAUNCH.md](docs/LAUNCH.md)**: Cloudflare, Google sign-in and Stripe, plus a plan for your first sale.
+- **Afterflash Cloud (the paid product):** hosts buy an admin key, connect their Google Drive with one click, and run unlimited events. Photos go to each host's own Drive. It runs on Cloudflare (code in `cloud/`). **To launch it, follow [docs/LAUNCH.md](docs/LAUNCH.md)**: Cloudflare, Google sign-in and Stripe, plus a plan for your first sale.
 - **Self-hosted (this guide):** the free version on GitHub Pages with your own Google Apps Script backend, for your own events.
 
 ## Contents
@@ -49,7 +49,7 @@ You need a Google account (personal Gmail or a Workspace business account). Do t
 ### Step 1: Create the backend in Google
 
 1. Go to **https://script.google.com** and sign in with the Google account whose Drive should hold the photos.
-2. Click **New project**. Click **Untitled project** at the top and rename it **PhotoShare**.
+2. Click **New project**. Click **Untitled project** at the top and rename it **Afterflash**.
 3. On the left, click the **gear icon** (Project Settings). Tick **Show "appsscript.json" manifest file in editor**.
 4. On the left, click the **`< >` icon** (Editor).
 5. Click **Code.gs**. Select everything (**Ctrl+A**, Mac **Cmd+A**) and delete it.
@@ -60,7 +60,7 @@ You need a Google account (personal Gmail or a Workspace business account). Do t
 ### Step 2: Run setup and save your admin key
 
 1. At the top, in the dropdown next to **Run**, choose **setup**, then click **Run**.
-2. Google asks for permission: **Review permissions** → pick your account → **Advanced** → **Go to PhotoShare (unsafe)** → **Allow**.
+2. Google asks for permission: **Review permissions** → pick your account → **Advanced** → **Go to Afterflash (unsafe)** → **Allow**.
    - "Unsafe" only means it's your own private script, not a published app. It asks for access to Drive and Sheets only.
 3. The **Execution log** at the bottom shows `NEW ADMIN KEY: …`.
    **Copy that key into a password manager now.** It's shown only once.
@@ -142,7 +142,7 @@ Open the **Google Drive folder** (link on the Share tab) and download it. Google
 
 Send friends this link: **https://bawcejawn.github.io/PhotoShare/setup.html**
 
-They set up their own PhotoShare in about 5 minutes with their own Google account. Their photos go to **their** Google Drive, they're the admin of their own events, and nothing touches your Drive or your storage. The setup page walks them through it:
+They set up their own Afterflash in about 5 minutes with their own Google account. Their photos go to **their** Google Drive, they're the admin of their own events, and nothing touches your Drive or your storage. The setup page walks them through it:
 
 1. Copy the code (one button).
 2. Paste it into a new Apps Script project at script.google.com/create and save.
@@ -174,7 +174,7 @@ Admins can create events and manage the events they created. Only the owner can 
 Do this whenever `backend/Code.gs` changes:
 
 1. Open [backend/Code.gs](backend/Code.gs) and click **copy raw file**.
-2. Go to **script.google.com** → **PhotoShare** → **Code.gs**.
+2. Go to **script.google.com** → **Afterflash** → **Code.gs**.
 3. **Ctrl+A** → **Delete** → **Ctrl+V** → **Ctrl+S** (Mac: use **Cmd**).
 4. **Deploy** → **Manage deployments** → **pencil icon** → **Version: New version** → **Deploy** → **Done**.
 
@@ -193,7 +193,7 @@ The web address stays the same, so there's nothing to change in `config.js`.
 | Uploads fail with a sharing error (Workspace) | A Google Workspace admin must allow "Anyone with the link" sharing. |
 | Site looks out of date after a change | Wait for the green check in **Actions**, then reload the page twice. |
 | Photos are in the Drive folder but not in the album | Dashboard → **Photos** → **Find missing photos**. It adds them once and skips duplicate copies. |
-| Photos won't open in Google Drive (but download fine) | You're signed into several Google accounts. Open Drive in a private window, or a Chrome profile with only the PhotoShare account. |
+| Photos won't open in Google Drive (but download fine) | You're signed into several Google accounts. Open Drive in a private window, or a Chrome profile with only the Afterflash account. |
 | A guest's photos aren't uploading | They're saved on the phone and upload automatically when there's signal. Ask them to keep the page open for a moment. |
 
 ---

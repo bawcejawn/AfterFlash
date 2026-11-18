@@ -27,7 +27,7 @@ const walk = (dir) => {
     if (!ent.name.endsWith('.enc')) continue;
     const data = fs.readFileSync(p);
     try {
-      if (data.subarray(0, 4).toString('latin1') !== 'PSE1' || data.length < 32) throw new Error('not a PhotoShare locked file');
+      if (data.subarray(0, 4).toString('latin1') !== 'PSE1' || data.length < 32) throw new Error('not an Afterflash locked file');
       const iv = data.subarray(4, 16), tag = data.subarray(data.length - 16), ct = data.subarray(16, data.length - 16);
       const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
       d.setAuthTag(tag);

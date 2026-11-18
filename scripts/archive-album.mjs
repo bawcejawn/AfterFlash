@@ -1,7 +1,7 @@
 // Unattended archiver: copies every approved photo of an event to Koinos as a ~40 KB keepsake,
 // then (optionally) anchors the album fingerprint. Resumable: already-archived photos are skipped.
 //
-//   HOST_LINK='https://you.github.io/PhotoShare/host.html?e=...#k=...' \
+//   HOST_LINK='https://you.github.io/Afterflash/host.html?e=...#k=...' \
 //   OWNER_WIF=...  [PAYER_WIF=...]  node archive-album.mjs [--anchor] [--batch 5] [--dry-run]
 //
 // OWNER_WIF must be the key of the address that registered the event (or will register it).

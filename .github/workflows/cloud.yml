@@ -1,6 +1,6 @@
-name: Deploy PhotoShare Cloud
+name: Deploy Afterflash Cloud
 # Publishes the paid version (website + API) to Cloudflare. Runs when you start it by hand
-# (Actions → Deploy PhotoShare Cloud → Run workflow) and after each change once it's set up.
+# (Actions → Deploy Afterflash Cloud → Run workflow) and after each change once it's set up.
 on:
   workflow_dispatch:
   push:

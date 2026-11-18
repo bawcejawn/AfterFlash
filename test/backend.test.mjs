@@ -190,7 +190,7 @@ t('private storage: key kept out of Drive, files stay encrypted and private', ()
   const plain = makeEvent(env, { name: 'Plain' });
   const key = env.gas.props.get('EK:' + ev.id);
   assert.ok(key && key.length >= 40);
-  const indexSheet = [...env.gas.sheets.values()].find((x) => x.name === 'PhotoShare index');
+  const indexSheet = [...env.gas.sheets.values()].find((x) => x.name === 'Afterflash index');
   assert.ok(!JSON.stringify(indexSheet.sheets[0].rows).includes(key), 'key is not in the Drive spreadsheet');
   const g = joinGuest(env, ev.id);
   assert.equal(g.r.key, key);
@@ -454,7 +454,7 @@ t('markArchived validates tx ids; manifest reflects archive index', () => {
   env.post({ a: 'hostMarkArchived', e: ev.id, k: ev.hostKey, items: [{ id: up.id, index: 4, tx: '0x1220abcdef' }] });
   m = env.post({ a: 'hostManifest', e: ev.id, k: ev.hostKey });
   assert.equal(m.items[0].archIndex, 4);
-  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'PhotoShare ' + ev.id).getSheetByName('media');
+  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'Afterflash ' + ev.id).getSheetByName('media');
   assert.ok(!String(sh.rows[1][16]).startsWith('='));
 });
 
@@ -490,7 +490,7 @@ t('per-event storage cap stops someone filling the Drive', () => {
   const g = joinGuest(env, ev.id);
   assert.equal(upload(env, ev.id, g).ok, true);
   // pretend 100 MB is already used
-  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'PhotoShare ' + ev.id).getSheetByName('media');
+  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'Afterflash ' + ev.id).getSheetByName('media');
   sh.rows[1][6] = 100 * 1024 * 1024;
   assert.equal(upload(env, ev.id, g).error, 'full');
 });

@@ -140,7 +140,7 @@ function shareTab() {
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
       ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them. ',
         h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : h('p', null, h('button', { class: 'btn small', onclick: downloadAll }, 'Download all photos and videos'), ' ', h('span', { class: 'small muted' }, 'Zipped in your browser; works for co-hosts too.')),
-      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs PhotoShare can open it.)'),
+      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs Afterflash can open it.)'),
       h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts a fresh local PhotoShare Cloud and runs the browser test against it.
+# Starts a fresh local Afterflash Cloud and runs the browser test against it.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 node --no-warnings cloud/test/server.mjs 8788 > /tmp/ps-cloud-server.log 2>&1 &

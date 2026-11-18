@@ -1,4 +1,4 @@
-"""Browser test of PhotoShare Cloud: buy a key, connect Google Drive, run an event, recover a key,
+"""Browser test of Afterflash Cloud: buy a key, connect Google Drive, run an event, recover a key,
 owner tools. Google and Stripe pages are simulated by cloud/test/server.mjs.
 Run: node cloud/test/server.mjs 8788 & python3 cloud/test/e2e.py
 """
@@ -234,7 +234,7 @@ with sync_playwright() as p:
     for name in ("terms", "privacy", "help"):
         lp = host.new_page(); watch(lp, name)
         lp.goto(f"{BASE}/{name}.html")
-        expect(lp.locator("h1")).to_contain_text("PhotoShare")
+        expect(lp.locator("h1")).to_contain_text("Afterflash")
         if name == "help":
             lp.goto(f"{BASE}/help.html#camera")
             expect(lp.locator("#camera")).to_have_attribute("open", "")
