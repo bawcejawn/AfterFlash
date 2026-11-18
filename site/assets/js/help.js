@@ -5,7 +5,7 @@ import { $, h, frameGuard, config } from './util.js';
 frameGuard();
 const cloud = !!config.cloud;
 const support = cloud && config.cloud.support;
-const app = config.appName || 'PhotoShare';
+const app = config.appName || 'Afterflash';
 
 // cloud: only on the paid site; self: only on self-hosted sites
 const GUESTS = [
@@ -39,7 +39,7 @@ const HOSTS = [
     'Use the same Google account you connected for photos. You’ll get a new key straight away (the old one stops working).'] },
   { id: 'drive-connect', q: 'Connecting Google Drive didn’t work', cloud: true, steps: [
     'Click “Connect Google Drive” again.',
-    'On Google’s screen, tick the box that lets PhotoShare save files to your Drive. If you skip it, nothing can be saved.',
+    'On Google’s screen, tick the box that lets Afterflash save files to your Drive. If you skip it, nothing can be saved.',
     'No Google account? Make a free one at accounts.google.com, then connect it.'] },
   { id: 'drive-full', q: 'My Google Drive is full', steps: [
     'Your admin page shows how much space is used.',
@@ -67,7 +67,7 @@ const HOSTS = [
     'Album links stay online for 12 months after a plan ends.'] },
   { id: 'problems', q: 'Something else went wrong', steps: [
     'If something failed, your admin page shows a “Recent problems” list with what went wrong and when. It often says exactly what to fix.',
-    support ? `Still stuck? Email ${support} with your event name and what happened.` : 'Still stuck? Contact whoever set up your PhotoShare.'] },
+    support ? `Still stuck? Email ${support} with your event name and what happened.` : 'Still stuck? Contact whoever set up your Afterflash.'] },
 ];
 
 const PARTNERS = [

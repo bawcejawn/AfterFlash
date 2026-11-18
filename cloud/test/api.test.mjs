@@ -1,4 +1,4 @@
-// PhotoShare Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
+// Afterflash Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { makeEnv } from './harness.mjs';
@@ -106,7 +106,7 @@ t('creating events needs Google Drive connected; connect stores an encrypted tok
   const ev = await s.call({ a: 'adminCreate', k: adminKey, settings: { name: 'Sam & Alex' } });
   assert.equal(ev.ok, true);
   const folders = [...s.fk.drive.values()].filter((f) => f.mime === 'application/vnd.google-apps.folder').map((f) => f.name);
-  assert.deepEqual(folders.sort(), ['PhotoShare', `Sam & Alex (${ev.id})`].sort());
+  assert.deepEqual(folders.sort(), ['Afterflash', `Sam & Alex (${ev.id})`].sort());
 });
 
 t('guest flow: join, upload to the host’s Drive (metadata stripped, shared), list, thumb, report', async () => {

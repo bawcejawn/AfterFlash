@@ -79,7 +79,7 @@ For big albums:
 
 ```bash
 cd scripts && npm install
-export HOST_LINK='https://you.github.io/PhotoShare/host.html?e=Ab12Cd34Ef#k=…'
+export HOST_LINK='https://you.github.io/Afterflash/host.html?e=Ab12Cd34Ef#k=…'
 export OWNER_WIF='…key of the owner/payer address…'
 # optional: export PAYER_WIF='…' if a different address should pay the mana
 node archive-album.mjs --dry-run      # shows what would be archived and the mana estimate

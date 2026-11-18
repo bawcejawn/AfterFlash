@@ -1,5 +1,5 @@
 /**
- * PhotoShare backend — Google Apps Script web app.
+ * Afterflash backend — Google Apps Script web app.
  *
  * Stores event photos/videos in the deploying account's Google Drive and
  * keeps per-event indexes in Google Sheets. Costs nothing on a personal
@@ -144,15 +144,15 @@ function setup() {
   }
 }
 
-/** Creates the PhotoShare folder and the events index sheet in this Google account's Drive (once). */
+/** Creates the Afterflash folder and the events index sheet in this Google account's Drive (once). */
 function ensureStorage_() {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ROOT_FOLDER_ID')) {
-    var folder = DriveApp.createFolder('PhotoShare');
+    var folder = DriveApp.createFolder('Afterflash');
     props.setProperty('ROOT_FOLDER_ID', folder.getId());
   }
   if (!props.getProperty('INDEX_SHEET_ID')) {
-    var ss = SpreadsheetApp.create('PhotoShare index');
+    var ss = SpreadsheetApp.create('Afterflash index');
     DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(props.getProperty('ROOT_FOLDER_ID')));
     var sh = ss.getSheets()[0];
     sh.setName('events');
@@ -171,7 +171,7 @@ function aClaim(req) {
   var key = randomKey_(32);
   withLock_(function () {
     var props = PropertiesService.getScriptProperties();
-    if (props.getProperty('ADMIN_KEY_HASH')) throw err_('already_set_up', 'This PhotoShare is already set up. Sign in with its admin key.');
+    if (props.getProperty('ADMIN_KEY_HASH')) throw err_('already_set_up', 'This Afterflash is already set up. Sign in with its admin key.');
     ensureStorage_();
     props.setProperty('ADMIN_KEY_HASH', sha256Hex_(key));
   });
@@ -1000,7 +1000,7 @@ function aAdminCreate(req) {
   var hostKey = randomKey_(32);
   var root = DriveApp.getFolderById(prop_('ROOT_FOLDER_ID'));
   var folder = root.createFolder(settings.name.replace(/[\\/:*?"<>|]/g, ' ') + ' (' + id + ')');
-  var ss = SpreadsheetApp.create('PhotoShare ' + id);
+  var ss = SpreadsheetApp.create('Afterflash ' + id);
   DriveApp.getFileById(ss.getId()).moveTo(folder);
   var media = ss.getSheets()[0];
   media.setName('media');
@@ -1459,7 +1459,7 @@ function decodeB64_(s) {
 
 function u8_(b) { return b < 0 ? b + 256 : b; }
 
-/** Identify content by magic bytes. Only formats PhotoShare accepts are recognised. */
+/** Identify content by magic bytes. Only formats Afterflash accepts are recognised. */
 function sniffMime_(bytes) {
   if (bytes.length < 12) return '';
   var b = [];

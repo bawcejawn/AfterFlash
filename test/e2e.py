@@ -311,7 +311,7 @@ with sync_playwright() as p:
     dl.value.save_as(f"{SHOTS}/highlight.{dl.value.suggested_filename.rsplit('.', 1)[-1]}")
     host.screenshot(path=f"{SHOTS}/16-highlight.png", full_page=True)
 
-    # ---- a friend sets up their own PhotoShare (their own backend, their own Drive)
+    # ---- a friend sets up their own Afterflash (their own backend, their own Drive)
     friend = browser.new_context(viewport={"width": 1100, "height": 900}, permissions=["clipboard-read", "clipboard-write"])
     friend.route(re.compile(r"^https://script\.google\.com/macros/s/AKfy[A-Za-z0-9_-]+/exec"), lambda route: route.fulfill(response=route.fetch(url=BASE + "/mock-byo")))
     fp = friend.new_page(); watch(fp, "setup")
@@ -337,7 +337,7 @@ with sync_playwright() as p:
     fh_url = fp.locator(".keybox").first.inner_text().strip()
     assert "b=AKfyFRIEND" in fh_url, fh_url
     f_id = re.search(r"e=([A-Za-z0-9]+)", fh_url).group(1)
-    # the owner's admin key is useless on the friend's PhotoShare and vice versa
+    # the owner's admin key is useless on the friend's Afterflash and vice versa
     assert '"unauthorized"' in fp.evaluate(f"fetch('{BASE}/mock-byo', {{method: 'POST', body: JSON.stringify({{a: 'adminCheck', k: '{ADMIN_KEY}'}})}}).then(r => r.text())")
     # a guest of the friend's event uploads to the friend's backend
     gctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, permissions=["camera", "microphone"])
@@ -353,7 +353,7 @@ with sync_playwright() as p:
     ev2 = desk.new_page(); watch(ev2, "phish")
     ev2.goto(BASE + "/admin.html?b=AKfyEVIL00000000000000000000000000000")
     expect(ev2.locator(".callout")).to_contain_text("isn’t set up on this device")
-    # the friend's home page lists their PhotoShare
+    # the friend's home page lists their Afterflash
     fp.goto(BASE + "/index.html")
     expect(fp.locator("#my-studios")).to_contain_text("Jordan's parties")
 

@@ -1,6 +1,6 @@
 {
-  "name": "PhotoShare",
-  "short_name": "PhotoShare",
+  "name": "Afterflash",
+  "short_name": "Afterflash",
   "start_url": "./index.html",
   "scope": "./",
   "id": "./",

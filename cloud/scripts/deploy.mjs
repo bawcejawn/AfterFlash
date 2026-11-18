@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Deploys PhotoShare Cloud to Cloudflare (run by .github/workflows/cloud.yml, or locally).
+// Deploys Afterflash Cloud to Cloudflare (run by .github/workflows/cloud.yml, or locally).
 // Reads settings from environment variables (GitHub repository secrets/variables):
 //   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID                       (required)
 //   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY       (secrets; DATA_KEY optional)
@@ -46,7 +46,7 @@ if (!/^https:\/\/[a-z0-9.-]+$/i.test(origin)) fail('SITE_ORIGIN must look like h
 
 // 3. Config for this deployment
 const vars = {
-  APP_NAME: env.APP_NAME || 'PhotoShare',
+  APP_NAME: env.APP_NAME || 'Afterflash',
   SITE_ORIGIN: origin,
   GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID || '',
   SUPPORT_EMAIL: env.SUPPORT_EMAIL || '',
@@ -86,6 +86,6 @@ try { run(['secret', 'bulk', tmp, '-c', cfg]); } finally { fs.rmSync(tmp, { forc
 const missing = [];
 if (!vars.GOOGLE_CLIENT_ID || !(secrets.GOOGLE_CLIENT_SECRET || existing.includes('GOOGLE_CLIENT_SECRET'))) missing.push('Google sign-in (GOOGLE_CLIENT_ID variable + GOOGLE_CLIENT_SECRET secret)');
 if (!(secrets.STRIPE_SECRET_KEY || existing.includes('STRIPE_SECRET_KEY'))) missing.push('payments (STRIPE_SECRET_KEY secret)');
-console.log(`\n✔ PhotoShare Cloud is live at ${origin}`);
+console.log(`\n✔ Afterflash Cloud is live at ${origin}`);
 console.log(`  Google sign-in redirect URI to register: ${origin}/oauth/callback`);
 if (missing.length) console.log('  Still to set up: ' + missing.join('; ') + '. See docs/LAUNCH.md.');

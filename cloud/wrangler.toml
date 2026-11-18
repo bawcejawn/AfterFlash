@@ -1,4 +1,4 @@
-# PhotoShare Cloud on Cloudflare Workers. The deploy workflow (.github/workflows/cloud.yml)
+# Afterflash Cloud on Cloudflare Workers. The deploy workflow (.github/workflows/cloud.yml)
 # fills in the database id and the site address; you normally don't edit this by hand.
 name = "photoshare"
 main = "src/index.js"
@@ -17,7 +17,7 @@ database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [vars]
-APP_NAME = "PhotoShare"
+APP_NAME = "Afterflash"
 PRICE_EVENT = "5"
 PRICE_MONTH = "10"
 PRICE_YEAR = "30"
