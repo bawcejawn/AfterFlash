@@ -17,7 +17,7 @@
 .home .brand-mark::after { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--cobalt); background: var(--cobalt); }
 
 .home .hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 3rem; align-items: center; padding: 2rem 0 4.5rem; }
-.home .hero h1 { font-size: clamp(2.6rem, 5.6vw, 4.6rem); line-height: 0.98; letter-spacing: -0.025em; margin-bottom: 0.45em; }
+.home .hero h1 { font-size: clamp(2.6rem, 5.6vw, 4.6rem); line-height: 1.02; letter-spacing: -0.015em; margin-bottom: 0.45em; }
 .home .hero h1 span { display: block; }
 .home .hero .lede { font-size: var(--step-1); line-height: 1.45; color: #dfe5ff; max-width: 32ch; }
 
@@ -79,7 +79,7 @@
 
 /* ---------- calmer sections below */
 .home main .section, .home .wrap > .section { padding: 3.5rem 0 1rem; }
-.home h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800; letter-spacing: -0.02em; }
+.home h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800; letter-spacing: -0.01em; }
 
 /* How it works really is a sequence: numbered like frames on a roll. */
 .home .steps { gap: 2rem; }
