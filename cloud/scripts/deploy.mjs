@@ -3,7 +3,7 @@
 // Reads settings from environment variables (GitHub repository secrets/variables):
 //   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID                       (required)
 //   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY       (secrets; DATA_KEY optional)
-//   GOOGLE_CLIENT_ID, STRIPE_PRICE_ID, PRICE_LABEL, SUPPORT_EMAIL,
+//   GOOGLE_CLIENT_ID, STRIPE_PRICE_MONTH/_YEAR/_LIFETIME, PRICE_MONTH/_YEAR/_LIFETIME, SUPPORT_EMAIL,
 //   BUSINESS_NAME, APP_NAME, SITE_ORIGIN, GOOGLE_SITE_VERIFICATION                              (plain settings; all optional)
 // Never prints secret values (this repository's Actions logs are public).
 import { execFileSync } from 'node:child_process';
@@ -47,7 +47,13 @@ if (!/^https:\/\/[a-z0-9.-]+$/i.test(origin)) fail('SITE_ORIGIN must look like h
 // 3. Config for this deployment
 const vars = {
   APP_NAME: env.APP_NAME || 'PhotoShare',
-  PRICE_LABEL: env.PRICE_LABEL || '$39',
+  PRICE_LABEL: env.PRICE_LABEL || '',
+  PRICE_MONTH: env.PRICE_MONTH || '$5',
+  PRICE_YEAR: env.PRICE_YEAR || '$20',
+  PRICE_LIFETIME: env.PRICE_LIFETIME || '$50',
+  STRIPE_PRICE_MONTH: env.STRIPE_PRICE_MONTH || '',
+  STRIPE_PRICE_YEAR: env.STRIPE_PRICE_YEAR || '',
+  STRIPE_PRICE_LIFETIME: env.STRIPE_PRICE_LIFETIME || '',
   SITE_ORIGIN: origin,
   GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID || '',
   STRIPE_PRICE_ID: env.STRIPE_PRICE_ID || '',
@@ -83,7 +89,7 @@ try { run(['secret', 'bulk', tmp, '-c', cfg]); } finally { fs.rmSync(tmp, { forc
 // 6. What's still missing
 const missing = [];
 if (!vars.GOOGLE_CLIENT_ID || !(secrets.GOOGLE_CLIENT_SECRET || existing.includes('GOOGLE_CLIENT_SECRET'))) missing.push('Google sign-in (GOOGLE_CLIENT_ID variable + GOOGLE_CLIENT_SECRET secret)');
-if (!vars.STRIPE_PRICE_ID || !(secrets.STRIPE_SECRET_KEY || existing.includes('STRIPE_SECRET_KEY'))) missing.push('payments (STRIPE_PRICE_ID variable + STRIPE_SECRET_KEY secret)');
+if (!(vars.STRIPE_PRICE_MONTH || vars.STRIPE_PRICE_YEAR || vars.STRIPE_PRICE_LIFETIME || vars.STRIPE_PRICE_ID) || !(secrets.STRIPE_SECRET_KEY || existing.includes('STRIPE_SECRET_KEY'))) missing.push('payments (STRIPE_PRICE_MONTH / _YEAR / _LIFETIME variables + STRIPE_SECRET_KEY secret)');
 console.log(`\n✔ PhotoShare Cloud is live at ${origin}`);
 console.log(`  Google sign-in redirect URI to register: ${origin}/oauth/callback`);
 if (missing.length) console.log('  Still to set up: ' + missing.join('; ') + '. See docs/LAUNCH.md.');

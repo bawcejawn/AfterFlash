@@ -1,7 +1,7 @@
 // Guest camera: join → shoot → photos saved locally → uploaded by the offline queue.
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, setTitle, fmtDate, fmtWhen, randomId, link, registerSW, frameGuard, config } from './util.js';
 import { api, ApiError } from './api.js';
-import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore } from './film.js';
+import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore, encodeBest, encodePreview } from './film.js';
 import { openComposer } from './guestbook.js';
 import { applyBrand, logoEl } from './brand.js';
 import { queue, createUploader } from './queue.js';
@@ -131,6 +131,9 @@ function closedScreen() {
 let stream = null, facing = 'environment', mode = 'photo', look, flashOn = false, recorder = null, recTimer = null;
 let beautyOn = true;
 const BEAUTY = 0.5;
+// Photos are kept at up to 12 MP (4032 px), like a phone's own camera.
+const MAX_EDGE = 4032;
+let hdOn = false, hdChosen = false;
 let els = {};
 
 function shotsLeft() { return Math.max(0, shotsLeftServer - pending); }
@@ -187,6 +190,12 @@ async function startCamera() {
   const fallbackInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden', onchange: (e) => fromFiles(e.target.files) });
   els.fallbackInput = fallbackInput;
   const libChip = ev.allowLibrary ? h('button', { class: 'chip', onclick: () => libInput.click() }, 'From library') : null;
+  // HD: on phones whose browser can't take full-resolution stills (iPhone), the shutter opens the
+  // phone's own camera app for full quality; looks and Beauty are applied afterwards.
+  els.hdInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden', onchange: (e) => { fromCameraApp(e.target.files[0]); e.target.value = ''; } });
+  els.hdChip = h('button', { class: 'chip', 'aria-pressed': 'false', hidden: true, onclick: () => setHd(!hdOn, true) }, 'HD');
+  els.hdChip.setAttribute('aria-label', 'HD photos with your phone’s camera');
+  { const saved = store.get('ps:hd'); if (saved === 'on' || saved === 'off') { hdChosen = true; hdOn = saved === 'on'; } }
 
   clear(root).append(h('div', { class: 'cam-shell' },
     h('header', { class: 'cam-top' },
@@ -194,14 +203,14 @@ async function startCamera() {
       h('div', { class: 'counter' }, els.counter, h('span', null, 'left'))),
     els.vf,
     h('footer', { class: 'cam-bottom' },
-      h('div', { class: 'chips' }, ...modeChips, els.flashChip, els.beautyChip, libChip, ...lookChips),
+      h('div', { class: 'chips' }, ...modeChips, els.hdChip, els.flashChip, els.beautyChip, libChip, ...lookChips),
       h('div', { class: 'controls' }, els.albumBtn, els.shutter, flip),
       els.queue,
       h('div', { class: 'cam-links' },
         h('a', { href: link('album.html', { e: eventId, s: studio, extra: { view: 'mine' } }) }, 'My photos'),
         ev.guestbook ? h('button', { class: 'linkbtn', onclick: () => openComposer({ studio, eventId, auth, dark: true }) }, 'Sign the guestbook') : null,
         isStandalone() ? null : h('button', { class: 'linkbtn', onclick: showInstall }, 'Add to home screen')),
-      libInput, fallbackInput)));
+      libInput, fallbackInput, els.hdInput)));
   renderCounter();
   applyLookPreview();
 
@@ -248,7 +257,10 @@ async function openStream() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return cameraUnavailable();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facing }, width: { ideal: 2560 }, height: { ideal: 1440 } },
+      // Photos: ask for the sensor's full 4:3 resolution. Videos: 1080p, the best that fits the upload limit.
+      video: mode === 'video'
+        ? { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
+        : { facingMode: { ideal: facing }, width: { ideal: 4032 }, height: { ideal: 3024 } },
       audio: mode === 'video',
     });
   } catch (e) {
@@ -259,9 +271,36 @@ async function openStream() {
   els.video.classList.toggle('mirror', facing === 'user');
   els.preview.classList.toggle('mirror', facing === 'user');
   try { await els.video.play(); } catch { /* autoplay will resume on gesture */ }
+  if (!els.video.videoWidth) await new Promise((r) => { els.video.onloadedmetadata = r; setTimeout(r, 1500); });
   const track = stream.getVideoTracks()[0];
   const caps = track && track.getCapabilities ? track.getCapabilities() : {};
   els.torch = !!caps.torch;
+  // Full-resolution stills through the camera's photo pipeline where the browser supports it (Android Chrome).
+  els.capture = null;
+  if (track && window.ImageCapture) {
+    try { els.capture = new ImageCapture(track); els.photoCaps = await els.capture.getPhotoCapabilities(); } catch { els.capture = null; }
+  }
+  updateHd();
+}
+
+/** HD is offered when the in-browser camera can't do full-quality stills. */
+function updateHd() {
+  const v = els.video;
+  const lowRes = v.videoWidth * v.videoHeight < 5e6;
+  const offer = mode === 'photo' && !els.capture && lowRes;
+  els.hdChip.hidden = !offer;
+  if (!offer) { hdOn = false; return; }
+  if (!hdChosen) setHd(true, false);
+  else els.hdChip.setAttribute('aria-pressed', String(hdOn));
+}
+function setHd(on, byUser) {
+  hdOn = on;
+  if (byUser) { hdChosen = true; store.set('ps:hd', on ? 'on' : 'off'); }
+  els.hdChip.setAttribute('aria-pressed', String(on));
+  if (byUser && els.lookName) {
+    els.lookName.textContent = on ? 'HD: uses your phone’s camera' : 'HD off: in-app camera';
+    els.lookName.classList.remove('show'); void els.lookName.offsetWidth; els.lookName.classList.add('show');
+  }
 }
 
 function stopStream() {
@@ -398,12 +437,14 @@ async function onShutter() {
   if (mode === 'video') return recorder ? stopRecording() : startRecording();
   if (shotsLeft() <= 0) return;
   const v = els.video;
+  if (hdOn) { els.hdInput.setAttribute('capture', facing === 'user' ? 'user' : 'environment'); els.hdInput.click(); return; }
   if (!v.videoWidth) { toast('Camera is still starting…'); return; }
   els.shutter.disabled = true;
   try {
-    if (flashOn && facing === 'environment' && els.torch) { await torch(true); await new Promise((r) => setTimeout(r, 300)); }
+    const realFlash = flashOn && facing === 'environment' && els.capture && els.photoCaps && (els.photoCaps.fillLightMode || []).includes('flash');
+    if (flashOn && facing === 'environment' && els.torch && !realFlash) { await torch(true); await new Promise((r) => setTimeout(r, 300)); }
     if (flashOn && facing === 'user') { els.flashFx.style.opacity = '1'; await new Promise((r) => setTimeout(r, 250)); }
-    const canvas = drawScaled(v, v.videoWidth, v.videoHeight, 2560);
+    const canvas = (await fullResStill(realFlash)) || drawScaled(v, v.videoWidth, v.videoHeight, MAX_EDGE);
     let blur = -1;
     try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
     if (flashOn) { torch(false); els.flashFx.style.opacity = ''; }
@@ -412,8 +453,8 @@ async function onShutter() {
     await new Promise((r) => requestAnimationFrame(r));
     await processPhoto(canvas, look, { beauty: beautyOn ? BEAUTY : 0 });
     if (ev.dateStamp) stampDate(canvas);
-    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88);
-    const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
+    const blob = await encodeBest(canvas);
+    const thumb = await encodePreview(canvas);
     await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
     showLastShot(thumb);
     if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
@@ -421,6 +462,60 @@ async function onShutter() {
     toast('Couldn’t take that photo. Try again.', 'error');
   } finally {
     els.shutter.disabled = shotsLeft() <= 0;
+  }
+}
+
+/** A still from the camera's photo pipeline (full sensor resolution, proper processing), or null. */
+async function fullResStill(useFlash) {
+  if (!els.capture) return null;
+  try {
+    const caps = els.photoCaps || {};
+    const opts = {};
+    if (caps.imageWidth && caps.imageWidth.max) opts.imageWidth = Math.min(caps.imageWidth.max, MAX_EDGE * 2);
+    if (caps.imageHeight && caps.imageHeight.max) opts.imageHeight = Math.min(caps.imageHeight.max, MAX_EDGE * 2);
+    if ((caps.fillLightMode || []).length) opts.fillLightMode = useFlash ? 'flash' : 'off';
+    const blob = await Promise.race([els.capture.takePhoto(opts), new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 6000))]);
+    const src = await decodeImage(blob);
+    const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
+    src.done();
+    return canvas;
+  } catch {
+    els.capture = null; // this phone can't: use the viewfinder frame from now on
+    updateHd();
+    return null;
+  }
+}
+
+/** HD: a photo just taken with the phone's own camera app. Gets the look, Beauty and date stamp. */
+async function fromCameraApp(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  if (shotsLeft() <= 0) { toast('Your roll is finished!'); return; }
+  // Only fresh shots count as camera photos (unless the host allows the photo library)
+  if (!ev.allowLibrary && file.lastModified && Date.now() - file.lastModified > 5 * 60 * 1000) {
+    toast('Take a new photo with the camera (photos from your library aren’t allowed at this event).', 'error');
+    return;
+  }
+  els.shutter.disabled = true;
+  try {
+    const src = await decodeImage(file);
+    const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
+    src.done();
+    let blur = -1;
+    try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
+    els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
+    await processPhoto(canvas, look, { beauty: beautyOn ? BEAUTY : 0 });
+    if (ev.dateStamp) stampDate(canvas);
+    const blob = await encodeBest(canvas);
+    const thumb = await encodePreview(canvas);
+    await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
+    showLastShot(thumb);
+  } catch {
+    toast('Couldn’t read that photo. Try again.', 'error');
+  } finally {
+    els.shutter.disabled = shotsLeft() <= 0;
+    // Some phones stop the in-page camera while the camera app is open: restart it.
+    const t = stream && stream.getVideoTracks()[0];
+    if (!t || t.readyState === 'ended') openStream();
   }
 }
 
@@ -476,10 +571,12 @@ async function startRecording() {
   const mime = pickMime();
   if (!mime) { toast('Video recording isn’t supported in this browser.', 'error'); return; }
   const v = els.video;
-  const poster = drawScaled(v, v.videoWidth, v.videoHeight, 1024);
+  const poster = drawScaled(v, v.videoWidth, v.videoHeight, 1600);
   const chunks = [];
   const started = Date.now();
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 96_000 });
+  // As sharp as the 20 MB upload limit allows for this event's longest clip (up to 8 Mbps).
+  const vbps = Math.max(2_000_000, Math.min(8_000_000, Math.floor((19 * 1024 * 1024 * 8) / Math.max(3, ev.maxVideoSec)) - 128_000));
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: vbps, audioBitsPerSecond: 128_000 });
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = async () => {
     const type = mime.split(';')[0];
@@ -490,7 +587,7 @@ async function startRecording() {
     els.shutter.setAttribute('aria-label', 'Start recording');
     if (els.rec) els.rec.remove();
     if (blob.size > 20 * 1024 * 1024) { toast('That video is too long to upload. Try a shorter one.', 'error'); renderCounter(); return; }
-    const thumb = await canvasToBlob(poster, 'image/jpeg', 0.78);
+    const thumb = await encodePreview(poster);
     await enqueue({ kind: 'video', blob, thumb, w: v.videoWidth, h: v.videoHeight, dur });
   };
   recorder.start(1000);
@@ -519,10 +616,10 @@ async function fromFiles(files) {
     if (file.size > 60 * 1024 * 1024) { toast('That photo is too big to add.', 'error'); continue; }
     try {
       const src = await decodeImage(file);
-      const canvas = drawScaled(src.img, src.w, src.h, 2560);
+      const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
       src.done();
-      const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88); // re-encode: strips location data
-      const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
+      const blob = await encodeBest(canvas); // re-encode: strips location data
+      const thumb = await encodePreview(canvas);
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
     } catch {
       toast('That file couldn’t be read as a photo.', 'error');

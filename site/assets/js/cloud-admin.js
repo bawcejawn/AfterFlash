@@ -1,6 +1,6 @@
 // PhotoShare Cloud parts of the admin page: sign in with a bought admin key, "Lost your key?"
 // via Google, connect Google Drive (where every photo is saved), storage meter, owner tools.
-import { h, clear, toast, copy, fmtBytes, fmtWhen, config, params } from './util.js';
+import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params } from './util.js';
 import { api } from './api.js';
 
 export const CLOUD = !!config.cloud;
@@ -122,12 +122,13 @@ export function drivePanel({ studio, adminKey, me }) {
 export function ownerPanel({ studio, adminKey }) {
   const list = h('div', null, h('p', { class: 'muted' }, 'Loading accounts…'));
   const note = h('input', { type: 'text', maxlength: 60, placeholder: 'Who it’s for (only you see this)' });
+  const plan = h('select', { 'aria-label': 'Plan' }, h('option', { value: 'lifetime' }, 'Lifetime'), h('option', { value: 'year' }, '1 year'), h('option', { value: 'month' }, '1 month'));
   const result = h('div');
-  const make = h('form', { class: 'row' }, note, h('button', { class: 'btn primary', type: 'submit' }, 'Create a free key'));
+  const make = h('form', { class: 'row' }, note, plan, h('button', { class: 'btn primary', type: 'submit' }, 'Create a free key'));
   make.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const r = await api(studio, 'ownerCreateAccount', { k: adminKey, note: note.value.trim() });
+      const r = await api(studio, 'ownerCreateAccount', { k: adminKey, note: note.value.trim(), plan: plan.value });
       note.value = '';
       clear(result).append(h('div', { class: 'panel stack' }, h('h3', null, 'Free admin key'),
         h('p', null, 'Send it privately. It works like a bought key and is shown once.'),
@@ -139,13 +140,14 @@ export function ownerPanel({ studio, adminKey }) {
     try {
       const { accounts } = await api(studio, 'ownerAccounts', { k: adminKey });
       const paid = accounts.filter((a) => a.kind === 'paid').length;
+      const revenue = accounts.reduce((sum, a) => sum + (Number(a.paid) || 0), 0) / 100;
       clear(list).append(
-        h('p', null, `${accounts.length} accounts: ${paid} paid, ${accounts.length - paid} free.`),
+        h('p', null, `${accounts.length} accounts: ${paid} paid, ${accounts.length - paid} free. Sales so far: $${revenue.toFixed(2)} (before Stripe fees).`),
         accounts.length ? h('table', { class: 'list' },
-          h('thead', null, h('tr', null, h('th', null, 'Account'), h('th', null, 'Type'), h('th', null, 'Drive'), h('th', null, 'Events'), h('th', null, 'Since'), h('th', null, ''))),
+          h('thead', null, h('tr', null, h('th', null, 'Account'), h('th', null, 'Type'), h('th', null, 'Plan'), h('th', null, 'Drive'), h('th', null, 'Events'), h('th', null, 'Since'), h('th', null, ''))),
           h('tbody', null, accounts.map((a) => h('tr', null,
             h('td', null, h('b', null, a.email || a.note || a.id), h('div', { class: 'small muted' }, a.google_email || '')),
-            h('td', null, a.kind), h('td', null, a.drive ? 'Connected' : 'Not yet'), h('td', null, String(a.events)), h('td', null, fmtWhen(a.created)),
+            h('td', null, a.kind), h('td', null, a.plan === 'lifetime' && !a.expires ? 'Lifetime' : `${a.plan}, ${a.expires < Date.now() ? 'ended' : 'until'} ${day(a.expires)}`), h('td', null, a.drive ? 'Connected' : 'Not yet'), h('td', null, String(a.events)), h('td', null, fmtWhen(a.created)),
             h('td', null, h('button', { class: 'btn small' + (a.status === 'active' ? ' danger' : ''), onclick: () => setStatus(a) }, a.status === 'active' ? 'Turn off' : 'Turn on')))))) : null);
     } catch (err) { clear(list).append(h('p', null, err.message)); }
   }
@@ -156,4 +158,32 @@ export function ownerPanel({ studio, adminKey }) {
   }
   load();
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: accounts'), make, result, list);
+}
+
+const PLAN_NAMES = { month: '1-month plan', year: '1-year plan', lifetime: 'Lifetime' };
+const day = (t) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+/** Plan status and renewals. Renewing adds time to the same admin key. */
+export function planPanel({ studio, adminKey, me }) {
+  if (me.role === 'owner' || (me.plan === 'lifetime' && !me.expires)) {
+    return me.role === 'owner' ? null : h('p', { class: 'small muted' }, 'Plan: Lifetime. Thank you!');
+  }
+  const left = Math.ceil((me.expires - Date.now()) / 86400000);
+  const plans = ((config.cloud && config.cloud.plans) || []).filter((p) => p.on);
+  const buy = async (plan, btn) => {
+    btn.disabled = true;
+    try {
+      const { url } = await api(studio, 'checkoutStart', { plan, k: adminKey }, { retries: 1 });
+      if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.');
+      location.href = url;
+    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  };
+  const soon = me.expired || left <= 7;
+  return h('section', { class: 'panel stack plan-status' + (soon ? ' warn' : '') },
+    h('h2', null, me.expired ? 'Your plan has ended' : `${PLAN_NAMES[me.plan] || 'Plan'}: ${left} day${left === 1 ? '' : 's'} left`),
+    h('p', null, me.expired
+      ? `It ended on ${day(me.expires)}. Your photos are safe in your Google Drive and your albums stay online. Renew to create events, open dashboards and take new photos again (guests’ waiting photos upload once you renew).`
+      : `Active until ${day(me.expires)}. Renewing adds time to this same admin key.`),
+    plans.length ? h('div', { class: 'row' }, plans.map((p) => h('button', { class: 'btn small' + (p.best ? ' flash' : ''), onclick: (e) => buy(p.id, e.currentTarget) },
+      p.id === 'lifetime' ? `Go lifetime (${p.price})` : `Add ${p.name} (${p.price})`))) : null);
 }

@@ -33,8 +33,8 @@ async function boot(extra) {
 }
 
 /** Buy → claim key → connect Drive. Returns the host's admin key. */
-async function hostWithDrive(s, { sub = 'google-sub-1' } = {}) {
-  const { url } = await s.call({ a: 'checkoutStart' });
+async function hostWithDrive(s, { sub = 'google-sub-1', plan = 'lifetime' } = {}) {
+  const { url } = await s.call({ a: 'checkoutStart', plan });
   const sid = url.split('/').pop();
   s.fk.pay(sid);
   const { adminKey } = await s.call({ a: 'claimPurchase', session_id: sid });
@@ -49,7 +49,7 @@ t('health, config and unknown actions', async () => {
   const h = await (await s.get('/api')).json();
   assert.equal(h.app, 'photoshare'); assert.equal(h.cloud, true);
   const cfg = await (await s.get('/config.js')).text();
-  assert.match(cfg, /"main":"\/api"/); assert.match(cfg, /"price":"\$39"/); assert.match(cfg, /"testMode":true/);
+  assert.match(cfg, /"main":"\/api"/); assert.match(cfg, /"price":"\$5"/); assert.match(cfg, /"price":"\$50"/); assert.match(cfg, /"testMode":true/);
   assert.doesNotMatch(cfg, /sk_test|test-secret|DATA_KEY|owner-key/);
   for (const a of ['constructor', '__proto__', 'toString', 'nope']) assert.equal((await s.call({ a })).error, 'bad_request');
   const res = await s.worker.fetch(new Request('http://localhost:8788/api', { method: 'POST', headers: { origin: 'https://evil.example' }, body: '{"a":"event"}' }), s.env);
@@ -262,6 +262,52 @@ t('a full Drive or a revoked Google connection gives clear errors and refunds th
   assert.equal(r2.error, 'drive_not_connected');
   assert.equal((await s.call({ a: 'adminCheck', k })).me.drive, false);
   void driveFor;
+});
+
+t('plans: 1 month and 1 year keys expire, renewals add time once, lifetime never ends', async () => {
+  const s = await boot();
+  const day = 86400000;
+  const k = await hostWithDrive(s, { plan: 'month' });
+  let me = (await s.call({ a: 'adminCheck', k })).me;
+  assert.equal(me.plan, 'month'); assert.ok(Math.abs(me.expires - (Date.now() + 30 * day)) < 60000);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Month party' } });
+  const g = await s.call({ a: 'join', e: ev.id });
+  // time passes: the plan ends
+  s.env.DB.raw.prepare('UPDATE accounts SET expires = ?').run(Date.now() - 1000);
+  me = (await s.call({ a: 'adminCheck', k })).me;
+  assert.equal(me.expired, true, 'can still sign in to renew');
+  assert.equal((await s.call({ a: 'adminCreate', k, settings: { name: 'Nope' } })).error, 'plan_expired');
+  assert.equal((await s.call({ a: 'adminList', k })).events.length, 1, 'can still see events and back up keys');
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: 'admin:' + k })).error, 'plan_expired');
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: ev.hostKey })).error, 'plan_expired');
+  const up = await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid() });
+  assert.equal(up.error, 'paused', 'guest photos wait (and retry) instead of failing');
+  assert.equal((await s.call({ a: 'event', e: ev.id })).ok, true, 'event page still opens');
+  assert.equal((await s.call({ a: 'list', e: ev.id })).ok, true, 'album still viewable');
+  // renew for a year while signed in: same key, time added once
+  const { url } = await s.call({ a: 'checkoutStart', plan: 'year', k });
+  const sid = url.split('/').pop(); s.fk.pay(sid);
+  const r = await s.call({ a: 'claimPurchase', session_id: sid });
+  assert.equal(r.renewed, true); assert.equal(r.adminKey, undefined, 'renewals never issue a new key');
+  assert.ok(Math.abs(r.expires - (Date.now() + 365 * day)) < 60000);
+  const again = await s.call({ a: 'claimPurchase', session_id: sid });
+  assert.equal(again.expires, r.expires, 'the same payment never counts twice');
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: ev.hostKey })).ok, true);
+  assert.equal((await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid() })).ok, true);
+  // early renewal adds to the time left
+  const u2 = (await s.call({ a: 'checkoutStart', plan: 'month', k })).url.split('/').pop(); s.fk.pay(u2);
+  assert.ok(Math.abs((await s.call({ a: 'claimPurchase', session_id: u2 })).expires - (r.expires + 30 * day)) < 60000);
+  // upgrade to lifetime
+  const u3 = (await s.call({ a: 'checkoutStart', plan: 'lifetime', k })).url.split('/').pop(); s.fk.pay(u3);
+  const life = await s.call({ a: 'claimPurchase', session_id: u3 });
+  assert.equal(life.plan, 'lifetime'); assert.equal(life.expires, 0);
+  assert.equal((await s.call({ a: 'checkoutStart', plan: 'month', k })).error, 'bad_request', 'nothing to renew on lifetime');
+  const owner = s.env.OWNER_KEY;
+  const comp = await s.call({ a: 'ownerCreateAccount', k: owner, plan: 'month', note: 'trial' });
+  assert.equal(comp.plan, 'month');
+  const accts = (await s.call({ a: 'ownerAccounts', k: owner })).accounts;
+  assert.equal(accts.find((a) => a.kind === 'paid').paid, 500 + 2000 + 500 + 5000);
+  assert.equal(s.env.DB.raw.prepare('SELECT COUNT(*) n FROM accounts').get().n, 3, 'renewals reuse the account (+ owner row + comp)');
 });
 
 let passed = 0;

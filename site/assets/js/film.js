@@ -143,7 +143,7 @@ export function beautifyPixels(d, w, h, strength = 0.5) {
   // work on a copy no larger than ~900px on the long edge for the smooth layers (fast guided filter)
   const f = Math.max(1, Math.round(Math.max(w, h) / 900));
   const sw = Math.ceil(w / f), sh = Math.ceil(h / f), SN = sw * sh;
-  const Y = new Float32Array(N);
+  const Y = new Uint8ClampedArray(N); // 1 byte/pixel: keeps 12 MP photos within phone memory
   const sY = new Float32Array(SN), sCr = new Float32Array(SN), sSkin = new Float32Array(SN), cnt = new Float32Array(SN);
   let skinTotal = 0;
   for (let y = 0, i = 0, p = 0; y < h; y++) {
@@ -183,7 +183,6 @@ export function beautifyPixels(d, w, h, strength = 0.5) {
     spot[q] = Math.max(ramp(-crDelta[q], 1.5, 6), 0.6 * ramp(mI[q] - sY[q], 4, 14) * ramp(sY[q], 60, 90)) * Math.min(1, mask[q] * 1.5);
   }
   const spotB = boxBlur(spot, sw, sh, 1);
-  const fine = boxBlur(Y, w, h, 1); // finest texture (pores) is kept partly
   const k = Math.min(1, strength) * 0.9;
   for (let y = 0, i = 0, p = 0; y < h; y++) {
     const fy = Math.min(sh - 1, Math.max(0, (y + 0.5) / f - 0.5)), y0 = fy | 0, y1 = Math.min(sh - 1, y0 + 1), ty = fy - y0;
@@ -195,8 +194,11 @@ export function beautifyPixels(d, w, h, strength = 0.5) {
       const m = Math.max((mask[a] * w00 + mask[b2] * w01 + mask[c2] * w10 + mask[e] * w11) * k, sp);
       if (m < 0.01) continue;
       const yv = Y[p];
+      // 3×3 local mean (computed here instead of a full-size buffer): the finest texture is kept partly
+      const up = y > 0 ? p - w : p, dn = y < h - 1 ? p + w : p, l = x > 0 ? -1 : 0, r = x < w - 1 ? 1 : 0;
+      const fine = (Y[up + l] + Y[up] + Y[up + r] + Y[p + l] + yv + Y[p + r] + Y[dn + l] + Y[dn] + Y[dn + r]) / 9;
       const smooth = (mA[a] * w00 + mA[b2] * w01 + mA[c2] * w10 + mA[e] * w11) * yv + (mB[a] * w00 + mB[b2] * w01 + mB[c2] * w10 + mB[e] * w11);
-      const target = smooth + (yv - fine[p]) * 0.45 * (1 - sp) + 2.5; // keep pores, lift skin a touch
+      const target = smooth + (yv - fine) * 0.45 * (1 - sp) + 2.5; // keep pores, lift skin a touch
       const dy = (target - yv) * m;
       const dcr = (crDelta[a] * w00 + crDelta[b2] * w01 + crDelta[c2] * w10 + crDelta[e] * w11) * Math.min(1, m * 0.8 + sp * 0.4); // even out redness and spots
       // apply in YCbCr: luminance change + red-difference change
@@ -345,4 +347,27 @@ export function blurScore(source, sw, sh) {
   if (!cnt) return 0;
   const mean = sum / cnt;
   return Math.round(sum2 / cnt - mean * mean);
+}
+
+/**
+ * JPEG at the best quality that fits the upload limit: starts at 0.92 and only steps down
+ * (quality first, then size) for very detailed or very large photos.
+ */
+export async function encodeBest(canvas, maxBytes = 7.6 * 1024 * 1024) {
+  for (const q of [0.92, 0.88, 0.84]) {
+    const b = await canvasToBlob(canvas, 'image/jpeg', q);
+    if (b.size <= maxBytes) return b;
+  }
+  const smaller = drawScaled(canvas, canvas.width, canvas.height, Math.round(Math.max(canvas.width, canvas.height) * 0.8));
+  return canvasToBlob(smaller, 'image/jpeg', 0.86);
+}
+
+/** Album/TV preview: sharp enough for full-screen phones and TVs, small enough to load fast. */
+export async function encodePreview(canvas) {
+  const c = drawScaled(canvas, canvas.width, canvas.height, 1600);
+  for (const q of [0.82, 0.74, 0.66]) {
+    const b = await canvasToBlob(c, 'image/jpeg', q);
+    if (b.size <= 380 * 1024) return b;
+  }
+  return canvasToBlob(drawScaled(c, c.width, c.height, 1080), 'image/jpeg', 0.7);
 }

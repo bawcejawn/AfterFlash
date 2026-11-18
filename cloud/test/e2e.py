@@ -51,14 +51,17 @@ with sync_playwright() as p:
     page = host.new_page(); watch(page, "home")
     page.goto(BASE + "/index.html")
     expect(page.locator("#pricing")).to_be_visible()
-    expect(page.locator(".price-tag")).to_contain_text("$39")
+    expect(page.locator(".plan")).to_have_count(3)
+    expect(page.locator(".plans")).to_contain_text("$5")
+    expect(page.locator(".plans")).to_contain_text("$20")
+    expect(page.locator(".plans")).to_contain_text("$50")
     expect(page.locator(".test-banner")).to_contain_text("Test mode")
     expect(page.locator("a[href='setup.html']")).to_have_count(2)  # present but hidden (self-host only)
     assert not page.locator("a[href='setup.html']").first.is_visible()
     page.screenshot(path=f"{SHOTS}/01-home.png", full_page=True)
 
     # ---- buy → admin key
-    page.click("#buy")
+    page.click("button[data-plan=year]")
     expect(page.locator("h1")).to_contain_text("Here’s your admin key", timeout=20000)
     assert "session_id" not in page.url, "purchase id removed from the address bar"
     key = page.locator("#admin-key").inner_text().strip()
@@ -70,6 +73,7 @@ with sync_playwright() as p:
 
     # ---- connect Google Drive
     expect(page.locator("h2", has_text="Step 1: Connect your Google Drive")).to_be_visible(timeout=15000)
+    expect(page.locator(".plan-status")).to_contain_text("1-year plan: 365 days left")
     expect(page.locator("text=New event")).to_have_count(0)
     page.screenshot(path=f"{SHOTS}/03-connect.png", full_page=True)
     page.click("button:has-text('Connect Google Drive')")

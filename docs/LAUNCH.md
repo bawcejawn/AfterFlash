@@ -43,9 +43,8 @@ This is *your* admin key. It shows the owner tools (all accounts, free keys for 
    | `CLOUDFLARE_ACCOUNT_ID` | the Account ID from Part 1, step 4 |
    | `OWNER_KEY` | your owner key from Part 2 |
 
-3. On the **Variables** tab, click **New repository variable**: `PRICE_LABEL` = `$39`, or whatever price you choose (it's only the text shown on the site; the real price is set in Stripe).
-4. Go to the repo's **Actions** tab → **Deploy PhotoShare Cloud** (left list) → **Run workflow** → **Run workflow**.
-5. Wait for the green check (2–3 minutes). Click the run → **deploy** → the **Deploy** step. The last lines say:
+3. Go to the repo's **Actions** tab → **Deploy PhotoShare Cloud** (left list) → **Run workflow** → **Run workflow**.
+4. Wait for the green check (2–3 minutes). Click the run → **deploy** → the **Deploy** step. The last lines say:
    `✔ PhotoShare Cloud is live at https://photoshare.<yourname>.workers.dev`
    Open that address: you'll see the sales page with "Sales open soon". That's expected until Part 6.
 
@@ -92,16 +91,28 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 ## Part 6: Stripe (payments)
 
 1. **dashboard.stripe.com** → sign up. Stay in **Test mode** (toggle at the top) for now.
-2. **Product catalog** → **+ Add product**:
-   - Name: `PhotoShare host license`
-   - Description: `Unlimited events. Photos save to your own Google Drive.`
-   - Pricing: **One-off**, **$39.00 USD** (or your price) → **Add product**.
-3. Open the product. Under **Pricing**, click the price → copy its **Price ID** (starts `price_`).
+2. **Product catalog** → **+ Add product**, three times. Each one is **One-off** pricing, not recurring:
+
+   | Name | Price | Description |
+   |---|---|---|
+   | `PhotoShare 1 month` | $5.00 | `Host unlimited events for 30 days.` |
+   | `PhotoShare 1 year` | $20.00 | `Host unlimited events for 365 days.` |
+   | `PhotoShare Lifetime` | $50.00 | `Host unlimited events forever.` |
+
+3. Open each product, click its price and copy the **Price ID** (starts `price_`).
 4. **Developers** → **API keys** → copy the **Secret key** (starts `sk_test_`).
-5. GitHub:
-   - **Variables** → `STRIPE_PRICE_ID` = the price ID; also set `SUPPORT_EMAIL` = the email customers should write to.
-   - **Secrets** → `STRIPE_SECRET_KEY` = the secret key.
-6. Run **Deploy PhotoShare Cloud**. The site now shows a yellow **Test mode** bar and a working **Get your admin key** button.
+5. GitHub → **Settings → Secrets and variables → Actions**:
+   - **Variables**: `STRIPE_PRICE_MONTH`, `STRIPE_PRICE_YEAR` and `STRIPE_PRICE_LIFETIME` = the three price IDs, plus `SUPPORT_EMAIL` = the email customers should write to.
+   - If you change a price in Stripe, also set `PRICE_MONTH` / `PRICE_YEAR` / `PRICE_LIFETIME` (e.g. `$7`). That's only the text on the site; Stripe charges the real price.
+   - **Secrets**: `STRIPE_SECRET_KEY` = the secret key.
+6. Run **Deploy PhotoShare Cloud**. The site shows the yellow **Test mode** bar and three plans.
+
+**How plans work:**
+- 1 month = 30 days and 1 year = 365 days from purchase.
+- Buying again while signed in adds time to the same key. Lifetime never ends.
+- When a plan ends, the host can still sign in, see their events and back up private keys. Albums stay online and photos stay in their Drive.
+- Creating events, host dashboards and new guest photos stop until they renew. Guests' phones keep the photos and upload them after renewal.
+- Nothing renews automatically, and there are no email reminders yet: the admin page warns hosts 7 days before the end.
 
 ## Part 7: Test the whole thing yourself (test mode, no real money)
 
@@ -115,7 +126,7 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 
 ## Part 8: Go live
 
-1. Stripe: **Activate payments** (business details, bank account for payouts). Switch the toggle to **Live mode**. Repeat Part 6 steps 2–4 in Live mode (new price ID, `sk_live_` key), update the two GitHub settings, and run the workflow again. The yellow bar disappears.
+1. Stripe: **Activate payments** (business details, bank account for payouts). Switch the toggle to **Live mode**. Repeat Part 6 steps 2–4 in Live mode (three new price IDs, `sk_live_` key), update those GitHub settings, and run the workflow again. The yellow bar disappears.
 2. Read your **Terms** and **Privacy** pages (`/terms.html`, `/privacy.html`). They include a 14-day refund promise; change it if you want a different policy. To edit, tell me or change `site/assets/js/legal.js`. Have a lawyer glance at both when you can.
 3. Business basics (ask an accountant for your state):
    - an LLC
@@ -138,7 +149,7 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
 3. Write a list of 30 people who'll host something in the next 3 months: engaged couples, people planning a 30th/40th/50th birthday, graduation parties, baby showers, reunions.
 4. Send each one a personal text (not a group blast):
 
-   > "Hey! I built an app for [event]: guests scan a QR code and every photo they take lands in your Google Drive, with a live slideshow on the TV and a highlight video the next morning. No app for guests. Want to try it for yours? It's $39, and I'll set it up with you."
+   > "Hey! I built an app for [event]: guests scan a QR code and every photo they take lands in your Google Drive, with a live slideshow on the TV and a highlight video the next morning. No app for guests. Want to try it for yours? It's $5 for the month, and I'll set it up with you."
 
 5. In Stripe → **Product catalog** → **Coupons** → **+ Create coupon**: 25% off, **Once**, limit 10 redemptions. In the coupon's **Promotion codes** section, add the code `FIRST10`. Buyers type it at checkout ("Add promotion code").
 
