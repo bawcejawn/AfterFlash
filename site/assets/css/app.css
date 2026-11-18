@@ -404,3 +404,6 @@ details summary { cursor: pointer; font-weight: 700; }
 .upper { text-transform: uppercase; }
 input.narrow { width: 5rem; }
 input.mid { width: 10rem; }
+.stats > div { display: grid; gap: 0.1rem; }
+.stats > div > span { font-size: 0.85rem; color: var(--muted); }
+.agreement li { margin-bottom: 0.5rem; }

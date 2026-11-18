@@ -185,10 +185,50 @@ with sync_playwright() as p:
     page.click("text=Sign out")
     page.fill("#ak", partner_key)
     page.click("button:has-text('Sign in')")
-    expect(page.locator("h2", has_text="Your referral code")).to_be_visible(timeout=15000)
+    expect(page.locator("h2", has_text="Your partner page")).to_be_visible(timeout=15000)
     expect(page.locator("text=Plan: Lifetime")).to_be_visible()
-    expect(page.locator("text=/1 sale\\. Earned \\$5\\.40/")).to_be_visible()
+    expect(page.locator(".stats")).to_contain_text("$5.40")
     page.screenshot(path=f"{SHOTS}/07-partner.png", full_page=True)
+
+    # Mike invites Lena to his team; she joins through the link (tier 2)
+    page.click("button:has-text('Make an invite link')")
+    invite = page.locator(".partner-link", has_text="partner.html#invite=").inner_text().strip()
+    friend = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True)
+    fp = friend.new_page(); watch(fp, "join")
+    fp.goto(invite)
+    expect(fp.locator("h1")).to_contain_text("Mike invited you")
+    fp.fill("input[autocomplete=name]", "Lena")
+    fp.fill("input[autocomplete=email]", "lena@example.com")
+    fp.click("button:has-text('Join as a partner')")
+    expect(fp.locator("h1")).to_contain_text("Mike invited you")  # the form won't submit until the agreement is ticked
+    fp.check("text=I’ve read and agree")
+    fp.click("button:has-text('Join as a partner')")
+    expect(fp.locator("h1")).to_contain_text("Here’s your partner key", timeout=15000)
+    assert "invite=" not in fp.url
+    fp.screenshot(path=f"{SHOTS}/08-joined.png", full_page=True)
+    lena_link = fp.locator(".partner-link").inner_text().strip()
+    fp.check("text=I saved my partner key")
+    fp.click("text=Open my partner page")
+    expect(fp.locator("h2", has_text="Your partner page")).to_be_visible(timeout=15000)
+    expect(fp.locator("text=(tier 2)")).to_be_visible()
+    expect(fp.locator("h2", has_text="Partner account")).to_be_visible()
+    # the same invite can't be used twice
+    fp2 = friend.new_page(); fp2.goto(invite)
+    expect(fp2.locator(".callout")).to_contain_text("expired or was already used")
+    fp2.close()
+
+    # one of Lena's customers buys a month: Lena earns 20% of $9, Mike gets the 5% team bonus
+    bp.goto(lena_link)
+    expect(bp.locator("#ref-msg")).to_contain_text("10% off applied")
+    bp.click("button[data-plan=month]")
+    expect(bp.locator("h1")).to_contain_text("Here’s your admin key", timeout=20000)
+    fp.reload()
+    expect(fp.locator(".stats")).to_contain_text("$1.80", timeout=15000)
+    page.reload()
+    expect(page.locator(".stats")).to_contain_text("$5.85", timeout=15000)  # $5.40 own + $0.45 team
+    page.locator("summary", has_text="Your team").click()
+    expect(page.locator("table.list", has_text="Lena")).to_be_visible()
+    page.screenshot(path=f"{SHOTS}/09-team.png", full_page=True)
 
     # ---- legal pages
     for name in ("terms", "privacy"):
