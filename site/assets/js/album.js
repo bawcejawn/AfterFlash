@@ -1,6 +1,6 @@
 // Shared album: masonry grid, hosts' picks, lightbox (enhance, download, report),
 // "My photos" (works before the reveal) and the guestbook.
-import {
+import { urlCache,
   $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown,
   downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
@@ -98,7 +98,7 @@ function render() {
 }
 
 const proxyQueue = pool(3);
-const proxied = new Map();
+const proxied = urlCache(300);
 /**
  * Fetch a preview through the backend: the fallback for Google URLs, the way "My photos"
  * works, and the only way for private-storage events (decrypted here, on the device).
@@ -215,17 +215,20 @@ function openLb(list, i, mine = false) {
 const cur = () => lbList[lbIndex];
 
 let showToken = 0;
+const lbUrls = [];
+const keepUrl = (u) => { lbUrls.push(u); return u; };
 function showLb() {
   const it = cur();
   if (!it) return closeLb();
   const token = ++showToken;
   let media;
-  if (it.k === 'v' && ev.encrypted) {
-    // Private storage (or your own not-yet-public video): fetched and decrypted on this device.
+  for (const u of lbUrls.splice(0)) URL.revokeObjectURL(u);
+  if (it.k === 'v' && (ev.encrypted || lbMine)) {
+    // Private storage, or your own video (it may not be public yet): fetched through the app.
     media = h('video', { controls: true, playsinline: true });
     proxyThumb(it.i).then((u) => { if (u && token === showToken) media.poster = u; }).catch(() => {});
     lb.who.textContent = 'Loading video…';
-    fullMedia(it).then((b) => { if (token === showToken) { media.src = URL.createObjectURL(b); lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', '); } })
+    fullMedia(it).then((b) => { if (token === showToken) { media.src = keepUrl(URL.createObjectURL(b)); lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', '); } })
       .catch((e) => { if (token === showToken) toast(e.message, 'error'); });
   } else if (it.k === 'v') {
     media = h('video', { controls: true, playsinline: true, preload: 'metadata', src: videoUrl(it.i) });
@@ -239,7 +242,7 @@ function showLb() {
     if (lbMine || ev.encrypted) {
       proxyThumb(it.i).then((u) => { if (u && token === showToken && !media.dataset.full) media.src = u; }).catch(() => {});
       if (ev.encrypted && !(enhanceOn && ev.enhance)) {
-        fullMedia(it).then((b) => { if (token === showToken && !media.dataset.enhanced) { media.dataset.full = '1'; media.src = URL.createObjectURL(b); } }).catch(() => {});
+        fullMedia(it).then((b) => { if (token === showToken && !media.dataset.enhanced) { media.dataset.full = '1'; media.src = keepUrl(URL.createObjectURL(b)); } }).catch(() => {});
       }
     } else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
     if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
@@ -302,7 +305,7 @@ function toggleEnhance() {
 async function download() {
   const it = cur();
   if (!it) return;
-  const viaApp = ev.encrypted || (lbMine && it.k !== 'v');
+  const viaApp = ev.encrypted || lbMine;
   if (it.k === 'v' && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
   const wantEnhanced = enhanceOn && ev.enhance && it.k !== 'v';
   if (!wantEnhanced && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
@@ -320,7 +323,9 @@ async function download() {
       blob = await canvasToBlob(enhance(c), 'image/jpeg', 0.92);
     }
     const ext = { 'video/mp4': 'mp4', 'video/webm': 'webm' }[blob.type] || 'jpg';
-    h('a', { href: URL.createObjectURL(blob), download: `${eventId}-${it.i.slice(0, 8)}${wantEnhanced ? '-enhanced' : ''}.${ext}` }).click();
+    const href = URL.createObjectURL(blob);
+    h('a', { href, download: `${eventId}-${it.i.slice(0, 8)}${wantEnhanced ? '-enhanced' : ''}.${ext}` }).click();
+    setTimeout(() => URL.revokeObjectURL(href), 60000);
   } catch (e) { toast(e.message || 'Download failed', 'error'); }
   lb.dl.disabled = false;
   lb.dl.textContent = label;

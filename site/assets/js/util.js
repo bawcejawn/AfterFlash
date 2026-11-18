@@ -40,6 +40,7 @@ export function h(tag, attrs, ...children) {
 /** Only allow http(s), blob:, data:image and relative URLs into href/src. */
 export function safeUrl(u) {
   const s = String(u);
+  if (/^\/\//.test(s)) return 'about:blank'; // protocol-relative: could point off-site
   if (/^(https?:|blob:|data:image\/(png|jpeg|gif|webp);|\.{0,2}\/|[a-z0-9_-]+\.html|#|\?)/i.test(s)) return s;
   if (/^[a-z0-9_./-]+$/i.test(s)) return s;
   return 'about:blank';
@@ -294,4 +295,17 @@ export function whenVisible(el, fn) {
     if (entries.some((e) => e.isIntersecting)) { io.disconnect(); fn(); }
   }, { rootMargin: '400px' });
   io.observe(el);
+}
+
+/** Small LRU of object URLs: frees memory on long-running pages (TV wall, big albums). */
+export function urlCache(max = 150) {
+  const m = new Map();
+  return {
+    has: (k) => m.has(k),
+    get(k) { const v = m.get(k); if (v !== undefined) { m.delete(k); m.set(k, v); } return v; },
+    set(k, v) {
+      m.delete(k); m.set(k, v);
+      while (m.size > max) { const [ok, ov] = m.entries().next().value; m.delete(ok); setTimeout(() => URL.revokeObjectURL(ov), 30000); }
+    },
+  };
 }

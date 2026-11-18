@@ -68,6 +68,14 @@ Dull or dark photos improve clearly, and good photos change very little. Origina
 
 ![Enhance on sample photos: left = before, right = after; odd rows = original, even rows = a dull, dark, warm-cast version](img/enhance-samples.jpg)
 
+## Looks and Beauty
+
+`site/assets/js/film.js` holds every look as a few numbers (exposure, S-curve contrast, lifted blacks, highlight roll-off, warmth, saturation and vibrance, split-toning, glow, grain, vignette). One function, `renderPixels`, runs both the live viewfinder (a ~480 px copy of each frame, dropping to 320 px on slow phones) and the saved photo (in a Web Worker, `film-worker.js`, so the camera never freezes). What guests see is what gets saved.
+
+**Beauty** finds skin by colour (a soft YCbCr range that works across skin tones), then smooths it with an edge-preserving guided filter computed at ≤900 px and applied at full size. Flat skin is smoothed; eyes, lips, hair and outlines keep their edges. Small spots that are redder or darker than the skin around them (blemishes) are evened out more strongly, and a little of the finest texture is added back so faces don't look plastic. Hosts can turn it off per event, and guests can toggle it on the camera. Videos are recorded without looks.
+
+![Looks](img/looks.jpg)
+
 ## Possible next steps
 
 - **IPFS second copy:** pin originals to a free IPFS pinning tier or your own node, and store the CID next to the hash.

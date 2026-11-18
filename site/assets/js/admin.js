@@ -160,7 +160,17 @@ function keyBackupPanel() {
         h('a', { href: URL.createObjectURL(blob), download: `photoshare-private-keys-${new Date().toISOString().slice(0, 10)}.json` }).click();
         toast('Key backup downloaded. Keep it private.', 'ok');
       } catch (e) { toast(e.message, 'error'); }
-    } }, 'Download key backup')));
+    } }, 'Download key backup'),
+    h('label', { class: 'btn' }, 'Restore from backup', h('input', { type: 'file', accept: 'application/json,.json', class: 'hidden', onchange: async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file || file.size > 1024 * 1024) return toast('Choose the key backup file you downloaded.', 'error');
+      try {
+        const data = JSON.parse(await file.text());
+        const r = await api(studio, 'adminImportKeys', { k: adminKey, keys: data && data.keys });
+        toast(r.restored ? `Restored ${r.restored} event key(s).` : 'Nothing to restore: every private event already has its key.', 'ok');
+      } catch (err) { toast(err instanceof SyntaxError ? 'That file isn’t a key backup.' : err.message, 'error'); }
+    } }))));
 }
 
 function adminsPanel() {

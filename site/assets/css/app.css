@@ -330,16 +330,11 @@ img.img-failed { min-height: 120px; background: var(--paper-2); }
 .voice { display: grid; gap: 0.25rem; margin: 0.4rem 0; }
 .voice audio { width: 100%; }
 
-/* ---------- live film-look preview in the viewfinder (CSS approximation of the baked-in look) */
-.viewfinder .vignette { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.3s; background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%); }
-.viewfinder video { transition: filter 0.25s; }
-.viewfinder.look-classic video { filter: sepia(0.18) contrast(1.08) saturate(0.95) brightness(1.03); }
-.viewfinder.look-warm video { filter: sepia(0.35) saturate(1.15) brightness(1.06) hue-rotate(-8deg); }
-.viewfinder.look-mono video { filter: grayscale(1) contrast(1.2); }
-.viewfinder.look-vivid video { filter: saturate(1.45) contrast(1.15); }
-.viewfinder.look-fade video { filter: contrast(0.85) saturate(0.75) brightness(1.08); }
-.viewfinder.look-classic .vignette, .viewfinder.look-warm .vignette, .viewfinder.look-mono .vignette { opacity: 1; }
-.viewfinder.look-vivid .vignette, .viewfinder.look-fade .vignette { opacity: 0.5; }
+/* ---------- live look preview: a canvas running the same code as the saved photo */
+.vf-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; }
+.vf-preview.mirror { transform: scaleX(-1); }
+.viewfinder.previewing .vf-preview { display: block; }
+.viewfinder.previewing video { opacity: 0; }
 .look-name { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); background: rgba(12, 15, 22, 0.75); color: #fff; font-weight: 700; padding: 0.3rem 0.8rem; border-radius: 999px; opacity: 0; pointer-events: none; }
 .look-name.show { animation: lookname 1.4s ease-out; }
 @keyframes lookname { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }

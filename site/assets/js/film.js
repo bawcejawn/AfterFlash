@@ -1,67 +1,216 @@
-// Film looks applied at capture time (baked into the JPEG, like a real disposable camera).
-// Pure pixel math on ImageData — works in every browser (no ctx.filter, which Safari lacks).
+// Looks applied at capture time (baked into the JPEG, like a real camera), plus an optional
+// "Beauty" touch-up that softens skin and blemishes while keeping eyes, hair and edges sharp.
+// Pure pixel math on ImageData: works in every browser (no ctx.filter, which Safari lacks),
+// and the same code drives the live viewfinder preview, so what you see is what you get.
 
+/*
+ * Look parameters (all optional):
+ *  exp      exposure multiplier            con   contrast (1 = none)       lift  black level (0-255)
+ *  roll     highlight roll-off (0-1)       gamma midtone gamma             sat   saturation (1 = none)
+ *  vib      vibrance (boost muted colours) warm  warm/cool shift (+warm)   tint  green/magenta (+green)
+ *  sh / hi  split-tone colour added to shadows / highlights [r,g,b] in levels
+ *  mono     black & white                  glow  soft dreamy bloom (0-1)   beauty extra skin softening (0-1)
+ *  grain    film grain amount              vig   vignette strength
+ */
 export const LOOKS = {
   none: { label: 'Natural' },
-  classic: { label: 'Classic film', curve: [14, 0.92, 1.14], tint: [1.07, 1.01, 0.9], sat: 0.9, grain: 12, vignette: 0.32 },
-  warm: { label: 'Golden hour', curve: [10, 0.93, 1.08], tint: [1.14, 1.03, 0.8], sat: 1.1, grain: 8, vignette: 0.26 },
-  mono: { label: 'Black & white', curve: [6, 0.9, 1.22], tint: [1, 1, 1], sat: 0, grain: 14, vignette: 0.32 },
-  vivid: { label: 'Vivid', curve: [0, 1.0, 1.15], tint: [1.02, 1.0, 1.0], sat: 1.3, grain: 5, vignette: 0.15 },
-  fade: { label: 'Faded', curve: [34, 0.86, 0.92], tint: [0.98, 1.0, 1.04], sat: 0.78, grain: 9, vignette: 0.18 },
+  glow: { label: 'Glow', exp: 1.05, con: 0.96, lift: 6, roll: 0.25, sat: 0.96, vib: 0.12, warm: 0.035, hi: [6, 3, 0], glow: 0.22, beauty: 0.35, grain: 0, vig: 0.1 },
+  vivid: { label: 'Bright', exp: 1.06, con: 1.12, gamma: 0.96, sat: 1.12, vib: 0.22, warm: 0.01, sh: [-4, 0, 7], hi: [6, 3, -2], grain: 0, vig: 0.08 },
+  classic: { label: 'Classic film', exp: 1.02, con: 1.06, lift: 16, roll: 0.2, gamma: 0.97, sat: 0.9, warm: 0.045, tint: 0.01, sh: [-3, 4, 4], hi: [8, 4, -6], grain: 10, vig: 0.26 },
+  warm: { label: 'Golden hour', exp: 1.04, con: 1.04, lift: 8, roll: 0.15, sat: 1.06, vib: 0.1, warm: 0.09, hi: [12, 5, -8], glow: 0.08, grain: 5, vig: 0.22 },
+  fade: { label: 'Soft pastel', exp: 1.06, con: 0.86, lift: 30, roll: 0.3, sat: 0.8, warm: -0.01, sh: [2, 2, 8], hi: [4, 2, 4], grain: 4, vig: 0.08 },
+  moody: { label: 'Moody', exp: 0.98, con: 1.1, lift: 18, gamma: 1.04, sat: 0.82, warm: 0.02, sh: [-6, 2, 10], hi: [10, 4, -6], grain: 8, vig: 0.32 },
+  mono: { label: 'Black & white', mono: true, exp: 1.02, con: 1.24, lift: 8, gamma: 0.98, grain: 12, vig: 0.26 },
 };
 
-// curve = [lift, gamma, contrast]
-function buildLut([lift, gamma, contrast], tint) {
-  const lut = new Uint8ClampedArray(256);
+const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+
+function toneLut(L) {
+  const lut = new Float32Array(256);
+  const exp = L.exp || 1, con = L.con || 1, lift = (L.lift || 0) / 255, roll = L.roll || 0, gamma = L.gamma || 1;
   for (let i = 0; i < 256; i++) {
-    let x = i / 255;
+    let x = Math.min(1, (i / 255) * exp);
+    if (roll > 0 && x > 0.75) { const t = (x - 0.75) / 0.25; x = 0.75 + 0.25 * (t - roll * t * t * 0.5); } // soft highlight shoulder
     x = Math.pow(x, gamma);
-    x = (x - 0.5) * contrast + 0.5; // contrast around mid grey
-    x = lift / 255 + x * (1 - lift / 255); // lifted blacks
-    lut[i] = Math.round(x * 255 * tint);
+    // contrast as a gentle S-curve (smoothstep blend) so skin tones don't clip
+    const s = x * x * (3 - 2 * x);
+    x = con >= 1 ? x + (s - x) * (con - 1) * 2 : 0.5 + (x - 0.5) * con;
+    x = lift + Math.min(1, Math.max(0, x)) * (1 - lift);
+    lut[i] = x * 255;
   }
   return lut;
 }
+const lutCache = new Map();
+const lutFor = (name) => { if (!lutCache.has(name)) lutCache.set(name, toneLut(LOOKS[name])); return lutCache.get(name); };
 
-const cache = new Map();
-function luts(name) {
-  if (!cache.has(name)) {
-    const L = LOOKS[name];
-    cache.set(name, [0, 1, 2].map((c) => buildLut(L.curve, L.tint[c])));
+/**
+ * Render a look (and Beauty) on raw RGBA pixels in place.
+ * opts.beauty: 0-1 base skin softening (the look may add more). opts.grain: scale for grain (0 in preview).
+ */
+export function renderPixels(d, w, h, name, opts = {}) {
+  const L = LOOKS[name] || LOOKS.none;
+  const beauty = Math.min(1, (opts.beauty || 0) + (L.beauty || 0) * (opts.beauty ? 0.6 : 1));
+  if (beauty > 0.02) beautifyPixels(d, w, h, beauty);
+  if (name === 'none' || !LOOKS[name]) return;
+  const lut = lutFor(name);
+  const sat = L.sat ?? 1, vib = L.vib || 0, warm = L.warm || 0, tint = L.tint || 0;
+  const sh = L.sh || [0, 0, 0], hi = L.hi || [0, 0, 0];
+  const grain = (L.grain || 0) * (opts.grain ?? 1), vig = L.vig || 0, mono = !!L.mono;
+  const glow = L.glow ? glowLayer(d, w, h) : null, gAmt = L.glow || 0;
+  const cx = w / 2, cy = h / 2, maxR2 = cx * cx + cy * cy;
+  let seed = 0x9e3779b9 ^ (w * 73856093) ^ (h * 19349663);
+  for (let y = 0, i = 0, p = 0; y < h; y++) {
+    const dy2 = (y - cy) * (y - cy);
+    for (let x = 0; x < w; x++, i += 4, p++) {
+      let r = lut[d[i]], g = lut[d[i + 1]], b = lut[d[i + 2]];
+      let l = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (mono) {
+        // panchromatic-style mix: slightly more red keeps skin luminous
+        l = 0.36 * r + 0.54 * g + 0.10 * b; r = g = b = l;
+      } else {
+        r *= 1 + warm; b *= 1 - warm; g *= 1 + tint;
+        const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        const cs = mx > 0 ? (mx - mn) / mx : 0;
+        const k = sat * (1 + vib * (1 - cs));
+        l = 0.299 * r + 0.587 * g + 0.114 * b;
+        r = l + (r - l) * k; g = l + (g - l) * k; b = l + (b - l) * k;
+        const t = l / 255, ws = (1 - t) * (1 - t), wh = t * t;
+        r += sh[0] * ws + hi[0] * wh; g += sh[1] * ws + hi[1] * wh; b += sh[2] * ws + hi[2] * wh;
+      }
+      if (glow) { // screen blend with a soft, blurred copy: dreamy highlights, softer skin
+        const q = p * 3;
+        r = 255 - (255 - r) * (255 - glow[q] * gAmt) / 255;
+        g = 255 - (255 - g) * (255 - glow[q + 1] * gAmt) / 255;
+        b = 255 - (255 - b) * (255 - glow[q + 2] * gAmt) / 255;
+      }
+      let n = 0;
+      if (grain) { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; n = ((seed & 255) / 255 - 0.5) * grain; }
+      const dx = x - cx;
+      const v = 1 - vig * ((dx * dx + dy2) / maxR2) * ((dx * dx + dy2) / maxR2 + 0.6);
+      d[i] = clamp255((r + n) * v); d[i + 1] = clamp255((g + n) * v); d[i + 2] = clamp255((b + n) * v);
+    }
   }
-  return cache.get(name);
 }
 
 /** Apply a look in place to a 2D canvas. */
-export function applyLook(canvas, name) {
-  const L = LOOKS[name];
-  if (!L || name === 'none') return;
+export function applyLook(canvas, name, opts = {}) {
+  if ((!LOOKS[name] || name === 'none') && !(opts.beauty > 0.02)) return;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const { width: w, height: h } = canvas;
-  const img = ctx.getImageData(0, 0, w, h);
-  const d = img.data;
-  const [lr, lg, lb] = luts(name);
-  const sat = L.sat;
-  const grain = L.grain;
-  const vig = L.vignette;
-  const cx = w / 2, cy = h / 2, maxR2 = cx * cx + cy * cy;
-  let seed = 0x9e3779b9 ^ (w * 73856093) ^ (h * 19349663);
-  for (let y = 0; y < h; y++) {
-    const dy2 = (y - cy) * (y - cy);
-    let i = y * w * 4;
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  renderPixels(img.data, canvas.width, canvas.height, name, opts);
+  ctx.putImageData(img, 0, 0);
+}
+
+/** Blurred RGB copy (computed small, upsampled bilinearly) for the glow look. */
+function glowLayer(d, w, h) {
+  const f = Math.max(1, Math.round(Math.max(w, h) / 160));
+  const sw = Math.ceil(w / f), sh = Math.ceil(h / f);
+  const small = [new Float32Array(sw * sh), new Float32Array(sw * sh), new Float32Array(sw * sh)];
+  const cnt = new Float32Array(sw * sh);
+  for (let y = 0, i = 0; y < h; y++) {
+    const row = ((y / f) | 0) * sw;
     for (let x = 0; x < w; x++, i += 4) {
-      let r = lr[d[i]], g = lg[d[i + 1]], b = lb[d[i + 2]];
-      const l = 0.299 * r + 0.587 * g + 0.114 * b;
-      r = l + (r - l) * sat; g = l + (g - l) * sat; b = l + (b - l) * sat;
-      // xorshift noise
-      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
-      const n = ((seed & 255) / 255 - 0.5) * grain;
-      const dx = x - cx;
-      const v = 1 - vig * ((dx * dx + dy2) / maxR2);
-      d[i] = (r + n) * v; d[i + 1] = (g + n) * v; d[i + 2] = (b + n) * v;
+      const q = row + ((x / f) | 0);
+      // emphasise highlights so the glow comes from light sources and skin, not shadows
+      const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255, k = 0.35 + 0.65 * l * l;
+      small[0][q] += d[i] * k; small[1][q] += d[i + 1] * k; small[2][q] += d[i + 2] * k; cnt[q]++;
     }
   }
-  ctx.putImageData(img, 0, 0);
+  const rad = Math.max(1, Math.round(Math.min(sw, sh) / 40));
+  for (let c = 0; c < 3; c++) {
+    for (let q = 0; q < cnt.length; q++) small[c][q] /= cnt[q] || 1;
+    small[c] = boxBlur(boxBlur(small[c], sw, sh, rad), sw, sh, rad);
+  }
+  const out = new Float32Array(w * h * 3);
+  for (let y = 0, p = 0; y < h; y++) {
+    const fy = Math.min(sh - 1, Math.max(0, (y + 0.5) / f - 0.5)), y0 = fy | 0, y1 = Math.min(sh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < w; x++, p++) {
+      const fx = Math.min(sw - 1, Math.max(0, (x + 0.5) / f - 0.5)), x0 = fx | 0, x1 = Math.min(sw - 1, x0 + 1), tx = fx - x0;
+      for (let c = 0; c < 3; c++) {
+        const s = small[c];
+        out[p * 3 + c] = (s[y0 * sw + x0] * (1 - tx) + s[y0 * sw + x1] * tx) * (1 - ty) + (s[y1 * sw + x0] * (1 - tx) + s[y1 * sw + x1] * tx) * ty;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Beauty: smooths skin and softens blemishes and redness, but only where the colour looks like
+ * skin, and only in flat areas (an edge-preserving guided filter keeps eyes, lips, hair and
+ * outlines crisp). Some fine texture is kept so faces never look plastic. strength 0-1.
+ */
+export function beautifyPixels(d, w, h, strength = 0.5) {
+  const N = w * h;
+  // work on a copy no larger than ~900px on the long edge for the smooth layers (fast guided filter)
+  const f = Math.max(1, Math.round(Math.max(w, h) / 900));
+  const sw = Math.ceil(w / f), sh = Math.ceil(h / f), SN = sw * sh;
+  const Y = new Float32Array(N);
+  const sY = new Float32Array(SN), sCr = new Float32Array(SN), sSkin = new Float32Array(SN), cnt = new Float32Array(SN);
+  let skinTotal = 0;
+  for (let y = 0, i = 0, p = 0; y < h; y++) {
+    const row = ((y / f) | 0) * sw;
+    for (let x = 0; x < w; x++, i += 4, p++) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const yy = 0.299 * r + 0.587 * g + 0.114 * b;
+      const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+      const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+      Y[p] = yy;
+      // soft skin likelihood in YCbCr (works across skin tones; brightness-independent)
+      const s = ramp(cr, 132, 140) * ramp(cr, 176, 168) * ramp(cb, 76, 84) * ramp(cb, 130, 124) * ramp(yy, 30, 55) * ramp(yy, 250, 238);
+      const q = row + ((x / f) | 0);
+      sY[q] += yy; sCr[q] += cr; sSkin[q] += s; cnt[q]++;
+      skinTotal += s;
+    }
+  }
+  if (skinTotal < N * 0.004) return; // no faces or skin in the shot
+  for (let q = 0; q < SN; q++) { const c = cnt[q] || 1; sY[q] /= c; sCr[q] /= c; sSkin[q] /= c; }
+  const rad = Math.max(2, Math.round(Math.min(sw, sh) * 0.012));
+  // feathered mask (and closes small gaps like freckles or a blemish inside skin)
+  const mask = boxBlur(boxBlur(sSkin, sw, sh, rad), sw, sh, rad);
+  for (let q = 0; q < SN; q++) mask[q] = Math.min(1, mask[q] * 1.35);
+  // self-guided filter on luminance: flat skin → smoothed, real edges → kept
+  const eps = 18 * 18;
+  const mI = boxBlur(sY, sw, sh, rad);
+  const II = new Float32Array(SN); for (let q = 0; q < SN; q++) II[q] = sY[q] * sY[q];
+  const mII = boxBlur(II, sw, sh, rad);
+  const A = new Float32Array(SN), B = new Float32Array(SN);
+  for (let q = 0; q < SN; q++) { const v = mII[q] - mI[q] * mI[q]; A[q] = v / (v + eps); B[q] = mI[q] - A[q] * mI[q]; }
+  const mA = boxBlur(A, sw, sh, rad), mB = boxBlur(B, sw, sh, rad);
+  const crSmooth = boxBlur(sCr, sw, sh, rad);
+  const crDelta = new Float32Array(SN), spot = new Float32Array(SN);
+  for (let q = 0; q < SN; q++) {
+    crDelta[q] = crSmooth[q] - sCr[q];
+    // blemish: a small patch redder or darker than the skin around it
+    spot[q] = Math.max(ramp(-crDelta[q], 1.5, 6), 0.6 * ramp(mI[q] - sY[q], 4, 14) * ramp(sY[q], 60, 90)) * Math.min(1, mask[q] * 1.5);
+  }
+  const spotB = boxBlur(spot, sw, sh, 1);
+  const fine = boxBlur(Y, w, h, 1); // finest texture (pores) is kept partly
+  const k = Math.min(1, strength) * 0.9;
+  for (let y = 0, i = 0, p = 0; y < h; y++) {
+    const fy = Math.min(sh - 1, Math.max(0, (y + 0.5) / f - 0.5)), y0 = fy | 0, y1 = Math.min(sh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < w; x++, i += 4, p++) {
+      const fx = Math.min(sw - 1, Math.max(0, (x + 0.5) / f - 0.5)), x0 = fx | 0, x1 = Math.min(sw - 1, x0 + 1), tx = fx - x0;
+      const a = y0 * sw + x0, b2 = y0 * sw + x1, c2 = y1 * sw + x0, e = y1 * sw + x1;
+      const w00 = (1 - tx) * (1 - ty), w01 = tx * (1 - ty), w10 = (1 - tx) * ty, w11 = tx * ty;
+      const sp = Math.min(1, (spotB[a] * w00 + spotB[b2] * w01 + spotB[c2] * w10 + spotB[e] * w11) * 1.6) * Math.min(1, strength * 1.8);
+      const m = Math.max((mask[a] * w00 + mask[b2] * w01 + mask[c2] * w10 + mask[e] * w11) * k, sp);
+      if (m < 0.01) continue;
+      const yv = Y[p];
+      const smooth = (mA[a] * w00 + mA[b2] * w01 + mA[c2] * w10 + mA[e] * w11) * yv + (mB[a] * w00 + mB[b2] * w01 + mB[c2] * w10 + mB[e] * w11);
+      const target = smooth + (yv - fine[p]) * 0.45 * (1 - sp) + 2.5; // keep pores, lift skin a touch
+      const dy = (target - yv) * m;
+      const dcr = (crDelta[a] * w00 + crDelta[b2] * w01 + crDelta[c2] * w10 + crDelta[e] * w11) * Math.min(1, m * 0.8 + sp * 0.4); // even out redness and spots
+      // apply in YCbCr: luminance change + red-difference change
+      d[i] = clamp255(d[i] + dy + 1.402 * dcr);
+      d[i + 1] = clamp255(d[i + 1] + dy - 0.714136 * dcr);
+      d[i + 2] = clamp255(d[i + 2] + dy);
+    }
+  }
+}
+function ramp(v, lo, hi) { // 0 at lo, 1 at hi (either direction)
+  const t = (v - lo) / (hi - lo);
+  return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
 }
 
 /** Orange LED date stamp in the corner, like a 90s point-and-shoot. */

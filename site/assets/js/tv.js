@@ -1,5 +1,5 @@
 // TV / projector photo wall. New photos jump the queue; otherwise the wall replays older ones.
-import { $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
+import { urlCache, $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
 import { api } from './api.js';
 import { mediaBlob } from './crypto.js';
 
@@ -107,7 +107,7 @@ function showCenter(title, text) {
 }
 
 const proxyQueue = serial();
-const proxied = new Map();
+const proxied = urlCache(120);
 function proxyThumb(id) {
   if (proxied.has(id)) return Promise.resolve(proxied.get(id));
   return proxyQueue(async () => {
@@ -190,7 +190,7 @@ function hideNote() { if (noteEl) { noteEl.remove(); noteEl = null; } }
 
 // Videos play muted on the wall (poster first, then the clip), then the wall moves on.
 let vid = null;
-function stopVideo() { if (vid) { vid.pause(); vid.remove(); vid = null; } }
+function stopVideo() { if (vid) { vid.pause(); if (vid.src.startsWith('blob:')) URL.revokeObjectURL(vid.src); vid.remove(); vid = null; } }
 function playVideo(it) {
   const v = h('video', { muted: true, playsinline: true, autoplay: true, preload: 'auto', class: 'tv-video' });
   v.muted = true;

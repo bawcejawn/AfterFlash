@@ -196,7 +196,7 @@ t('private storage: key kept out of Drive, files stay encrypted and private', ()
   assert.equal(joinGuest(env, plain.id).r.key, undefined);
   assert.equal(env.post({ a: 'me', e: ev.id, g: g.g, t: g.t }).key, key);
   // plaintext uploads are refused for private events
-  assert.equal(upload(env, ev.id, g).error, 'bad_type');
+  assert.equal(upload(env, ev.id, g).error, 'needs_update');
   const sha = 'a'.repeat(64);
   const up = upload(env, ev.id, g, { data: b64(envelope(5000)), thumb: b64(envelope(800)), mime: 'image/jpeg', sha });
   assert.equal(up.ok, true, JSON.stringify(up));
@@ -224,7 +224,7 @@ t('private storage: key kept out of Drive, files stay encrypted and private', ()
   // voice notes
   const n = env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(envelope(300)), audioMime: 'audio/webm', clientId: 'encnote00001' });
   assert.equal(n.ok, true, JSON.stringify(n));
-  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(webmAudio()), audioMime: 'audio/webm', clientId: 'encnote00002' }).error, 'bad_type');
+  assert.equal(env.post({ a: 'guestbookAdd', e: ev.id, g: g.g, t: g.t, audio: b64(webmAudio()), audioMime: 'audio/webm', clientId: 'encnote00002' }).error, 'needs_update');
   // key backup: owner only
   const sarah = env.post({ a: 'adminAddAdmin', k: env.adminKey, name: 'S' }).key;
   assert.equal(env.post({ a: 'adminExportKeys', k: sarah }).error, 'forbidden');
@@ -674,6 +674,60 @@ t('admins can open dashboards for events they manage with their own key', () => 
   assert.equal(env.post({ a: 'hostGet', e: owners.id, k: 'admin:' + env.adminKey }).ok, true);
   assert.equal(env.post({ a: 'hostGet', e: owners.id, k: 'admin:wrong' }).error, 'unauthorized');
   assert.equal(env.post({ a: 'hostList', e: hers.id, k: 'admin:' + sarah }).ok, true);
+});
+
+t('a stranger spamming wrong keys cannot lock out real admins or hosts', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  for (let i = 0; i < 30; i++) { env.post({ a: 'adminCheck', k: 'wrong' + i }); env.post({ a: 'hostGet', e: ev.id, k: 'bad' + i }); }
+  assert.equal(env.post({ a: 'adminCheck', k: 'wrong-again' }).error, 'rate_limited');
+  assert.equal(env.post({ a: 'adminCheck', k: env.adminKey }).ok, true);
+  assert.equal(env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).ok, true);
+});
+
+t('private event keys can be restored from a backup (owner only, never overwritten)', () => {
+  const env = boot();
+  const ev = makeEvent(env, { encrypted: true });
+  const plain = makeEvent(env);
+  const backup = env.post({ a: 'adminExportKeys', k: env.adminKey }).keys;
+  const original = backup[ev.id];
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(original));
+  env.gas.props.delete('EK:' + ev.id);
+  assert.equal(env.post({ a: 'join', e: ev.id }).error, 'server_error');
+  const sarah = env.post({ a: 'adminAddAdmin', k: env.adminKey, name: 'Sarah' }).key;
+  assert.equal(env.post({ a: 'adminImportKeys', k: sarah, keys: backup }).error, 'forbidden');
+  const forged = 'A'.repeat(43);
+  const r = env.post({ a: 'adminImportKeys', k: env.adminKey, keys: { [ev.id]: original, [plain.id]: forged, bad: 'x' } });
+  assert.deepEqual([r.restored, r.skipped], [1, 2]);
+  assert.equal(env.post({ a: 'adminImportKeys', k: env.adminKey, keys: { [ev.id]: forged } }).restored, 0);
+  assert.equal(env.post({ a: 'join', e: ev.id }).key, original);
+});
+
+t('names and notes that look like numbers or dates stay text', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const g = env.post({ a: 'join', e: ev.id, label: '3/4' });
+  const cell = env.gas.sheets ? [...env.gas.sheets.values()].flatMap((ss) => ss.sheets).find((sh) => sh.name === 'guests').rows.at(-1)[2] : null;
+  assert.equal(g.guest.label, '3/4');
+  if (cell !== null) assert.equal(cell, '3/4');
+});
+
+t('find missing photos also works for private-storage events', () => {
+  const env = boot();
+  const ev = makeEvent(env, { encrypted: true });
+  const g = joinGuest(env, ev.id);
+  const up = env.post({ a: 'upload', e: ev.id, g: g.g, t: g.t, kind: 'photo', data: b64(envelope(500)), thumb: b64(envelope(100)), mime: 'image/jpeg', sha: 'a'.repeat(64), clientId: cid() });
+  assert.equal(up.ok, true);
+  // simulate the sheet row being lost: drop it from the media sheet
+  const media = [...env.gas.sheets.values()].flatMap((ss) => ss.sheets).filter((sh) => sh.name === 'media').find((sh) => sh.rows.some((r) => r[1] === up.id));
+  media.rows = media.rows.filter((r) => r[1] !== up.id);
+  const dry = env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey, dryRun: true });
+  assert.equal(dry.found, 1);
+  const r = env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey });
+  assert.equal(r.added, 1);
+  const items = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items;
+  assert.equal(items.length, 1); assert.ok(items[0].t, 'locked preview re-linked');
+  assert.equal(env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey, dryRun: true }).found, 0);
 });
 
 // tiny helper so the test above can stay sync

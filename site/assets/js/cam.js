@@ -1,7 +1,7 @@
 // Guest camera: join → shoot → photos saved locally → uploaded by the offline queue.
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, setTitle, fmtDate, fmtWhen, randomId, link, registerSW, frameGuard, config } from './util.js';
 import { api, ApiError } from './api.js';
-import { LOOKS, applyLook, stampDate, drawScaled, canvasToBlob, blurScore } from './film.js';
+import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore } from './film.js';
 import { openComposer } from './guestbook.js';
 import { queue, createUploader } from './queue.js';
 
@@ -126,6 +126,8 @@ function closedScreen() {
 // ------------------------------------------------------------------ camera
 
 let stream = null, facing = 'environment', mode = 'photo', look, flashOn = false, recorder = null, recTimer = null;
+let beautyOn = true;
+const BEAUTY = 0.5;
 let els = {};
 
 function shotsLeft() { return Math.max(0, shotsLeftServer - pending); }
@@ -152,6 +154,7 @@ async function startCamera() {
   const st = statusLine();
   if (st === 'closed') return closedScreen();
   look = ev.look in LOOKS ? ev.look : 'classic';
+  beautyOn = ev.beauty !== false && store.get('ps:beauty') !== 'off';
   const evKey = `${studio}:${eventId}`;
   pending = (await queue.list(evKey).catch(() => [])).length;
 
@@ -159,7 +162,8 @@ async function startCamera() {
   els.video.muted = true;
   els.flashFx = h('div', { class: 'flash-overlay' });
   els.lookName = h('div', { class: 'look-name', 'aria-hidden': 'true' });
-  els.vf = h('div', { class: 'viewfinder' }, els.video, h('div', { class: 'vignette' }), els.flashFx, els.lookName);
+  els.preview = h('canvas', { class: 'vf-preview', 'aria-hidden': 'true' });
+  els.vf = h('div', { class: 'viewfinder' }, els.video, els.preview, els.flashFx, els.lookName);
   els.counter = h('span', { class: 'counter-window', 'aria-live': 'polite' }, '');
   els.shutter = h('button', { class: 'shutter', 'aria-label': 'Take photo', onclick: onShutter });
   const flip = h('button', { class: 'ctrl', 'aria-label': 'Switch camera', onclick: flipCamera }, icon('flip'));
@@ -175,6 +179,7 @@ async function startCamera() {
   const lookChips = ev.guestLooks ? Object.entries(LOOKS).map(([k, v]) =>
     h('button', { class: 'chip', 'aria-pressed': String(k === look), dataset: { look: k }, onclick: () => setLook(k) }, v.label)) : [];
   els.lookChips = lookChips;
+  els.beautyChip = ev.beauty !== false ? h('button', { class: 'chip', 'aria-pressed': String(beautyOn), onclick: toggleBeauty }, 'Beauty') : null;
   const libInput = h('input', { type: 'file', accept: 'image/*', multiple: true, class: 'hidden', onchange: (e) => fromFiles(e.target.files) });
   const fallbackInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden', onchange: (e) => fromFiles(e.target.files) });
   els.fallbackInput = fallbackInput;
@@ -186,7 +191,7 @@ async function startCamera() {
       h('div', { class: 'counter' }, els.counter, h('span', null, 'left'))),
     els.vf,
     h('footer', { class: 'cam-bottom' },
-      h('div', { class: 'chips' }, ...modeChips, els.flashChip, libChip, ...lookChips),
+      h('div', { class: 'chips' }, ...modeChips, els.flashChip, els.beautyChip, libChip, ...lookChips),
       h('div', { class: 'controls' }, els.albumBtn, els.shutter, flip),
       els.queue,
       h('div', { class: 'cam-links' },
@@ -220,6 +225,10 @@ async function startCamera() {
         else if (!code || code === 'network') updateQueuePill(`Weak connection. ${n}, retrying…`);
         else if (code === 'busy' || code === 'rate_limited' || code === 'in_progress' || code === 'server_error') updateQueuePill(`Lots of photos arriving. ${n}, retrying shortly…`);
         else updateQueuePill(`${e.error.message || 'Can’t upload yet.'} ${n}, still trying.`);
+      } else if (e.type === 'refresh') {
+        api(studio, 'me', { e: eventId, g: auth.g, t: auth.t }, { retries: 1 }).then((me) => {
+          if (me.key) { auth.key = me.key; store.set(authKey(), auth); uploader.kick(); }
+        }).catch(() => {});
       } else if (e.type === 'auth') {
         store.del(authKey()); auth = null; welcome('Please join again to keep uploading. Your saved photos will upload afterwards.');
       }
@@ -245,6 +254,7 @@ async function openStream() {
   }
   els.video.srcObject = stream;
   els.video.classList.toggle('mirror', facing === 'user');
+  els.preview.classList.toggle('mirror', facing === 'user');
   try { await els.video.play(); } catch { /* autoplay will resume on gesture */ }
   const track = stream.getVideoTracks()[0];
   const caps = track && track.getCapabilities ? track.getCapabilities() : {};
@@ -272,6 +282,7 @@ function setMode(m) {
   els.modeChips.forEach((c) => c.setAttribute('aria-pressed', String(c.textContent.toLowerCase() === m)));
   els.shutter.classList.toggle('video', m === 'video');
   els.shutter.setAttribute('aria-label', m === 'video' ? 'Start recording' : 'Take photo');
+  applyLookPreview();
   openStream();
 }
 
@@ -285,10 +296,83 @@ function setLook(k) {
   }
 }
 
-/** Live preview of the film look on the viewfinder (the photo itself gets the full effect). */
+function toggleBeauty() {
+  beautyOn = !beautyOn;
+  store.set('ps:beauty', beautyOn ? 'on' : 'off');
+  els.beautyChip.setAttribute('aria-pressed', String(beautyOn));
+  applyLookPreview();
+  if (els.lookName) {
+    els.lookName.textContent = beautyOn ? 'Beauty on' : 'Beauty off';
+    els.lookName.classList.remove('show'); void els.lookName.offsetWidth; els.lookName.classList.add('show');
+  }
+}
+
+/**
+ * Live preview: runs the exact same look + Beauty code as the photo, on a small copy of each
+ * camera frame, so the viewfinder shows what will be saved. Videos record without looks, so the
+ * preview is plain in video mode. Drops to a smaller size on slow phones.
+ */
+let previewOn = false, previewEdge = 480, previewBusy = false, frameMs = 0;
 function applyLookPreview() {
-  for (const k of Object.keys(LOOKS)) els.vf.classList.remove('look-' + k);
-  els.vf.classList.add('look-' + look);
+  const want = mode === 'photo' && (look !== 'none' || beautyOn);
+  els.vf.classList.toggle('previewing', want);
+  if (want && !previewOn) { previewOn = true; requestAnimationFrame(previewFrame); }
+  if (!want) previewOn = false;
+}
+function previewFrame() {
+  if (!previewOn || !els.video || !document.body.contains(els.video)) { previewOn = false; return; }
+  requestAnimationFrame(previewFrame);
+  const v = els.video;
+  if (previewBusy || document.hidden || !v.videoWidth) return;
+  previewBusy = true;
+  try {
+    const t0 = performance.now();
+    const scale = Math.min(1, previewEdge / Math.max(v.videoWidth, v.videoHeight));
+    const w = Math.max(1, Math.round(v.videoWidth * scale)), hh = Math.max(1, Math.round(v.videoHeight * scale));
+    const c = els.preview;
+    if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, w, hh);
+    const img = ctx.getImageData(0, 0, w, hh);
+    renderPixels(img.data, w, hh, look, { beauty: beautyOn ? BEAUTY : 0, grain: 0.4 });
+    ctx.putImageData(img, 0, 0);
+    frameMs = frameMs ? frameMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
+    if (frameMs > 55 && previewEdge > 320) { previewEdge = 320; frameMs = 0; }
+  } catch { /* a dropped frame is fine */ }
+  previewBusy = false;
+}
+
+/** Process the full-size photo in a worker so the camera never freezes; falls back to the main thread. */
+let worker = null, workerFailed = false, jobId = 0;
+const jobs = new Map();
+function getWorker() {
+  if (worker || workerFailed) return worker;
+  try {
+    worker = new Worker(new URL('./film-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => { const j = jobs.get(e.data.id); if (j) { jobs.delete(e.data.id); e.data.error ? j.reject(new Error(e.data.error)) : j.resolve(e.data.buf); } };
+    worker.onerror = () => { workerFailed = true; worker = null; for (const j of jobs.values()) j.reject(new Error('worker')); jobs.clear(); };
+  } catch { workerFailed = true; worker = null; }
+  return worker;
+}
+async function processPhoto(canvas, name, opts) {
+  if ((name === 'none' || !LOOKS[name]) && !(opts.beauty > 0)) return;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width: w, height: hh } = canvas;
+  const wk = getWorker();
+  if (wk) {
+    try {
+      const img = ctx.getImageData(0, 0, w, hh);
+      const id = ++jobId;
+      const buf = await new Promise((resolve, reject) => {
+        jobs.set(id, { resolve, reject });
+        wk.postMessage({ id, buf: img.data.buffer, w, h: hh, look: name, opts }, [img.data.buffer]);
+        setTimeout(() => { if (jobs.has(id)) { jobs.delete(id); reject(new Error('timeout')); } }, 20000);
+      });
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(buf), w, hh), 0, 0);
+      return;
+    } catch { /* fall through to main thread */ }
+  }
+  applyLook(canvas, name, opts);
 }
 
 function toggleFlash() {
@@ -323,7 +407,7 @@ async function onShutter() {
     els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
     if (navigator.vibrate) navigator.vibrate(15);
     await new Promise((r) => requestAnimationFrame(r));
-    applyLook(canvas, look);
+    await processPhoto(canvas, look, { beauty: beautyOn ? BEAUTY : 0 });
     if (ev.dateStamp) stampDate(canvas);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.88);
     const thumb = await canvasToBlob(drawScaled(canvas, canvas.width, canvas.height, 960), 'image/jpeg', 0.72);
@@ -429,6 +513,7 @@ async function fromFiles(files) {
   for (const file of Array.from(files || [])) {
     if (shotsLeft() <= 0) { toast('Your roll is finished!'); break; }
     if (!file.type.startsWith('image/')) continue;
+    if (file.size > 60 * 1024 * 1024) { toast('That photo is too big to add.', 'error'); continue; }
     try {
       const src = await decodeImage(file);
       const canvas = drawScaled(src.img, src.w, src.h, 2560);
