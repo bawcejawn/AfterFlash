@@ -206,7 +206,7 @@ More detail: [SECURITY.md](SECURITY.md).
 
 ## Optional: Koinos blockchain archive
 
-You can store a permanent record and a tamper-proof fingerprint of each album, plus phone-quality copies, on the Koinos blockchain. Full-size photos stay in Drive. This is off until you deploy the contract. See [docs/KOINOS.md](docs/KOINOS.md).
+You can store a permanent record and a tamper-proof fingerprint of each album, plus phone-quality copies, on the Koinos blockchain. Full-size photos stay in Drive. This is off, and it isn't shown anywhere in the app. The code is kept in the repo (`contract/`, `archive.html`, `recover.html`) in case you want it later. See [docs/KOINOS.md](docs/KOINOS.md).
 
 ---
 

@@ -66,7 +66,7 @@ If you change `rpc` to another provider, add its origin to the `connect-src` Con
 ### In the browser (Kondor wallet)
 
 1. Install the [Kondor](https://chromewebstore.google.com/search/kondor) extension and import or create the account that holds your KOIN.
-2. Host dashboard → **Keepsakes** → **Open the archive tool**.
+2. Open `archive.html?e=EVENT#k=HOSTKEY` (the host link with `host.html` changed to `archive.html`). The dashboard tab was removed; this tool is optional.
 3. **Connect Kondor**, then **Register on Koinos** (once per event).
 4. **Start archiving**. Kondor asks you to approve each batch of up to 5 photos. You can stop and resume any time; progress is saved.
 5. **Anchor fingerprint** when the album is final (re-anchor if more photos arrive). This saves `manifest-….json` to the event's Drive folder and downloads a copy. **Keep the manifest.** It's what proves each original.

@@ -358,9 +358,9 @@ with sync_playwright() as p:
     expect(fp.locator("#my-studios")).to_contain_text("Jordan's parties")
 
     # ---- Koinos pages load under their CSP (koilib needs eval there) without script errors
-    host.click("role=tab[name='Keepsakes']")
-    host.click("text=Open the archive tool")
-    arch = host
+    assert host.locator("role=tab[name='Keepsakes']").count() == 0
+    arch = desk.new_page(); watch(arch, "archive")
+    arch.goto(host_url.replace("host.html", "archive.html"))
     expect(arch.locator("h1")).to_contain_text("Keep")
     expect(arch.locator("text=Connect Kondor")).to_be_visible()
     assert "#k=" not in arch.url
