@@ -19,12 +19,23 @@ async function claim() {
   try {
     const r = await api('main', 'claimPurchase', { session_id: sid }, { retries: 2 });
     history.replaceState(null, '', location.pathname); // keep the purchase id out of history
+    if (r.renewed) return renewed(r);
     store.set('ps:ak:main', r.adminKey, sessionStorage);
     show(r);
   } catch (e) {
     if (e.code === 'not_paid') return fail(e.message, true);
     fail(e.message, e.code === 'network' || e.code === 'server_error');
   }
+}
+
+const until = (r) => (r.plan === 'lifetime' && !r.expires ? 'for life' : `until ${new Date(r.expires).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`);
+
+function renewed(r) {
+  clear(root).append(h('div', { class: 'narrow section stack' },
+    h('h1', null, 'Thank you! Your plan is extended'),
+    h('p', null, `Your PhotoShare now works ${until(r)}. Same admin key as before.`),
+    r.email ? h('p', { class: 'muted' }, `Receipt sent to ${r.email}.`) : null,
+    h('div', { class: 'row' }, h('a', { class: 'btn flash', href: 'admin.html' }, 'Back to my events'))));
 }
 
 function show(r) {
@@ -35,6 +46,7 @@ function show(r) {
   clear(root).append(h('div', { class: 'narrow section stack' },
     h('h1', null, 'Thank you! Here’s your admin key'),
     r.email ? h('p', { class: 'muted' }, `Receipt sent to ${r.email}.`) : null,
+    r.plan ? h('p', null, h('b', null, `Your plan works ${until(r)}.`)) : null,
     h('p', null, 'This key is the password to your PhotoShare. Save it in your password manager or notes now. It isn’t shown again (if you lose it, you can get a new one by signing in with Google).'),
     h('div', { class: 'keybox', id: 'admin-key' }, r.adminKey),
     h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => copy(r.adminKey) }, 'Copy admin key')),

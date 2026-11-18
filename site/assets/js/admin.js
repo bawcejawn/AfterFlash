@@ -2,7 +2,7 @@
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -75,17 +75,19 @@ async function dashboard(created) {
   let events = [];
   try { events = (await api(studio, 'adminList', { k: adminKey })).events; } catch (e) {
     if (e.code === 'unauthorized') { store.del(KEY(), sessionStorage); return login('Please sign in again.'); }
-    toast(e.message, 'error');
+    if (e.code !== 'plan_expired') toast(e.message, 'error');
   }
   if (!me.role || CLOUD) { try { const c = await api(studio, 'adminCheck', { k: adminKey }); me = { ...(c.me || me), version: c.version }; } catch { /* handled below */ } }
   const needsDrive = CLOUD && !me.drive;
+  const ended = CLOUD && me.expired;
   clear(root).append(
     h('div', { class: 'row spread' }, h('h1', null, 'Events'),
       h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     CLOUD ? cloudBanner() : null,
-    CLOUD ? drivePanel({ studio, adminKey, me }) : null,
+    CLOUD ? planPanel({ studio, adminKey, me }) : null,
+    CLOUD && !ended ? drivePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
-    needsDrive ? null : createForm(),
+    needsDrive || ended ? null : createForm(),
     h('h2', { class: 'section' }, `Your events (${events.length})`),
     events.length ? h('table', { class: 'list' },
       h('thead', null, h('tr', null, h('th', null, 'Event'), h('th', null, 'Date'), h('th', null, 'Created'), h('th', null, ''))),

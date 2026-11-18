@@ -29,7 +29,7 @@
           <button class="btn flash" type="submit">Join</button>
         </form>
         <p class="small muted" id="join-msg" role="alert"></p>
-        <p data-only="cloud" hidden><a class="btn primary" href="#pricing">Host your own event</a> <span class="small muted">One payment of <span data-price></span>. Unlimited events.</span></p>
+        <p data-only="cloud" hidden><a class="btn primary" href="#pricing">Host your own event</a> <span class="small muted">From <span data-price></span>. No subscription.</span></p>
       </div>
       <div class="filmstrip" aria-hidden="true">
         <div class="frames">
@@ -65,11 +65,14 @@
       </div>
     </section>
     <section class="section" id="pricing" data-only="cloud" hidden>
-      <h2>One price. Every event you’ll ever host.</h2>
+      <h2>Pay once for the time you need</h2>
+      <p class="lede">No subscriptions, nothing renews by itself. Your photos always stay in your own Google Drive.</p>
+      <div class="plans" id="plans"></div>
+      <p class="small muted" id="buy-msg" role="status"></p>
       <div class="panel price-card">
-        <div class="price-tag"><span data-price></span><small>one time, no subscription</small></div>
+        <h3>Every plan includes</h3>
         <ul class="ticks">
-          <li>Unlimited events and guests</li>
+          <li>Unlimited events and guests while your plan is active</li>
           <li>Photos and videos save to your own Google Drive</li>
           <li>Live TV photo wall, guestbook with voice messages</li>
           <li>Film looks and a gentle beauty filter</li>
@@ -77,8 +80,7 @@
           <li>Next-morning highlight video, ready to share</li>
           <li>Private storage option: files locked even in your Drive</li>
         </ul>
-        <div class="row"><button class="btn flash" id="buy" type="button">Get your admin key</button> <span class="small muted" id="buy-msg" role="status"></span></div>
-        <p class="small muted">Secure checkout by Stripe. Your admin key appears right after you pay. Then connect your Google Drive with one click and create your first event.</p>
+        <p class="small muted">Secure checkout by Stripe. Your admin key appears right after you pay. When a plan ends, your photos stay in your Drive and your albums stay online; renew any time to host again.</p>
       </div>
     </section>
 
@@ -94,7 +96,8 @@
     <section class="section faq" data-only="cloud" hidden>
       <h2>Questions</h2>
       <details><summary>Do guests need an app or an account?</summary><p>No. They scan the QR code and the camera opens in their phone’s browser. No downloads, no sign-ups.</p></details>
-      <details><summary>Is it a subscription?</summary><p>No. You pay once and keep using it for every event. Storage is your own Google Drive, so there’s nothing else to pay us.</p></details>
+      <details><summary>Is it a subscription?</summary><p>No. You pay once for 1 month, 1 year or for life. Nothing renews automatically. Storage is your own Google Drive, so there’s nothing else to pay us.</p></details>
+      <details><summary>What happens when my plan ends?</summary><p>Your photos stay in your Google Drive and your albums stay online. You just can’t create events, open dashboards or take new photos until you renew. Renewing adds time to the same admin key.</p></details>
       <details><summary>Can I use it for clients?</summary><p>Yes. Planners, venues and photographers use one key for all their clients’ events and charge whatever they like. Each event gets its own host link to hand to the couple.</p></details>
       <details><summary>What can PhotoShare see in my Google Drive?</summary><p>Only the files it creates for you. Google enforces this: PhotoShare can’t open anything else in your Drive.</p></details>
       <details><summary>I don’t have a Gmail account.</summary><p>Making one is free and takes two minutes. The admin page walks you through it.</p></details>

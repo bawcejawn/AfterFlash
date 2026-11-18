@@ -66,18 +66,30 @@ if (studioBox) {
 const cloud = config.cloud;
 for (const el of document.querySelectorAll('[data-only]')) el.hidden = (el.dataset.only === 'cloud') !== !!cloud;
 if (cloud) {
-  for (const el of document.querySelectorAll('[data-price]')) el.textContent = cloud.price;
+  const plans = (cloud.plans || []).filter((p) => p.on);
+  const cheapest = plans.length ? plans[0].price : cloud.price;
+  for (const el of document.querySelectorAll('[data-price]')) el.textContent = cheapest;
   const sup = $('#support');
   if (sup && cloud.support) sup.append(h('a', { href: 'mailto:' + cloud.support }, cloud.support));
   if (cloud.testMode) document.body.prepend(h('div', { class: 'test-banner' }, 'Test mode: no real charges. Pay with card 4242 4242 4242 4242, any future date, any CVC.'));
-  const buy = $('#buy'), msg = $('#buy-msg');
-  if (!cloud.payments) { buy.disabled = true; msg.textContent = 'Sales open soon.'; }
-  buy.addEventListener('click', async () => {
-    buy.disabled = true; msg.textContent = 'Opening secure checkout…';
-    try {
-      const { url } = await api('main', 'checkoutStart', {}, { retries: 1 });
-      if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.');
-      location.href = url;
-    } catch (e) { msg.textContent = e.message; buy.disabled = false; }
-  });
+  const msg = $('#buy-msg');
+  const box = $('#plans');
+  if (!plans.length) msg.textContent = 'Sales open soon.';
+  for (const p of plans) {
+    const btn = h('button', { class: 'btn ' + (p.best ? 'flash' : 'primary'), type: 'button', dataset: { plan: p.id } }, `Get ${p.name.toLowerCase()}`);
+    btn.addEventListener('click', async () => {
+      for (const b of box.querySelectorAll('button')) b.disabled = true;
+      msg.textContent = 'Opening secure checkout…';
+      try {
+        const { url } = await api('main', 'checkoutStart', { plan: p.id }, { retries: 1 });
+        if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.');
+        location.href = url;
+      } catch (e) { msg.textContent = e.message; for (const b of box.querySelectorAll('button')) b.disabled = false; }
+    });
+    box.append(h('div', { class: 'panel plan' + (p.best ? ' best' : '') },
+      p.best ? h('span', { class: 'plan-badge' }, 'Best value') : null,
+      h('h3', null, p.name),
+      h('div', { class: 'price-tag' }, p.price, h('small', null, 'one time')),
+      h('p', { class: 'muted' }, p.note), btn));
+  }
 }

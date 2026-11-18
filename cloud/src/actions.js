@@ -5,7 +5,7 @@ import {
   sniffMime, sniffAudio, sniffImage, isEnc, ENC_OVERHEAD, stripJpegMeta, cleanText, str, int, parseJson,
 } from './lib.js';
 import { driveFor } from './google.js';
-import { createCheckout, readCheckout } from './stripe.js';
+import { createCheckout, readCheckout, PLAN_DAYS } from './stripe.js';
 
 export const VERSION = '1.10.0';
 
@@ -121,6 +121,17 @@ async function accountOf(c, ev) {
   return a;
 }
 const drive = async (c, ev) => driveFor(c.env, c.db, await accountOf(c, ev));
+const expired = (a) => a.kind !== 'owner' && Number(a.expires) > 0 && Number(a.expires) < Date.now();
+const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+/** Hosting (dashboards, new photos) needs the event's account to have an active plan. Viewing albums doesn't. */
+async function requireActivePlan(c, ev, forGuests) {
+  const a = await accountOf(c, ev);
+  if (expired(a)) {
+    throw forGuests ? err('paused', 'The host’s PhotoShare plan has ended, so new photos are paused for now. They’ll upload once it’s renewed.')
+      : err('plan_expired', `This PhotoShare plan ended on ${fmtDay(a.expires)}. Renew it on the admin page to keep hosting.`);
+  }
+  return a;
+}
 
 async function checkPin(c, ev, pin) {
   if (!ev.pin_hash) return;
@@ -130,7 +141,7 @@ async function checkPin(c, ev, pin) {
 }
 
 /** Host account from an admin key. The site owner's key (OWNER_KEY secret) has extra powers. */
-async function authAccount(c, req) {
+async function authAccount(c, req, { allowExpired = false } = {}) {
   const k = req.k ? String(req.k).slice(0, 200) : '';
   if (k) {
     const hash = await sha256Hex(k);
@@ -145,6 +156,7 @@ async function authAccount(c, req) {
     const a = await c.one('SELECT * FROM accounts WHERE key_hash = ?', hash);
     if (a) {
       if (a.status !== 'active') throw err('forbidden', 'This account is turned off. Contact support.');
+      if (!allowExpired && expired(a)) throw err('plan_expired', `Your PhotoShare plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
       return a;
     }
   }
@@ -161,7 +173,7 @@ async function authHost(c, req) {
     if (a.id !== ev.account) throw err('forbidden', 'Only the account that created this event can open its dashboard.');
     return ev;
   }
-  if (req.k && safeEq(await sha256Hex(String(req.k).slice(0, 200)), ev.host_hash)) return ev;
+  if (req.k && safeEq(await sha256Hex(String(req.k).slice(0, 200)), ev.host_hash)) { await requireActivePlan(c, ev, false); return ev; }
   const bucket = 'badhost:' + ev.id;
   if (!(await rateOk(c, bucket, LIMITS.BAD_KEY_PER_10MIN, 600, true))) throw err('rate_limited', 'Too many attempts. Wait 10 minutes.');
   await rateHit(c, bucket, 600);
@@ -246,6 +258,7 @@ A.upload = async (c, req) => {
   const g = await authGuest(c, ev, req);
   const now = c.now();
   if (s.paused) throw err('paused', 'The host has paused uploads.');
+  await requireActivePlan(c, ev, true);
   if (s.opensAt && now < Date.parse(s.opensAt)) throw err('not_open', 'Uploads have not opened yet.');
   if (s.closesAt && now > Date.parse(s.closesAt)) throw err('closed', 'This album is closed.');
   if (g.blocked) throw err('blocked', 'Uploads are turned off for this guest.');
@@ -420,6 +433,7 @@ A.guestbookAdd = async (c, req) => {
   if (!s.guestbook) throw err('disabled', 'The guestbook is turned off.');
   const g = await authGuest(c, ev, req);
   if (g.blocked) throw err('blocked', 'Posting is turned off for this guest.');
+  await requireActivePlan(c, ev, true);
   if (s.closesAt && c.now() > Date.parse(s.closesAt)) throw err('closed', 'This album is closed.');
   const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
   if (clientId) {
@@ -661,8 +675,11 @@ A.hostRecover = async (c, req) => {
 
 // ================================================================= accounts (admin key)
 A.adminCheck = async (c, req) => {
-  const a = await authAccount(c, req);
-  return { version: VERSION, me: { name: a.kind === 'owner' ? 'Owner' : (a.email || 'Host'), role: a.kind === 'owner' ? 'owner' : 'host', cloud: true, drive: !!a.refresh_enc, googleEmail: a.google_email || '' } };
+  const a = await authAccount(c, req, { allowExpired: true });
+  return { version: VERSION, me: {
+    name: a.kind === 'owner' ? 'Owner' : (a.email || 'Host'), role: a.kind === 'owner' ? 'owner' : 'host', cloud: true,
+    drive: !!a.refresh_enc, googleEmail: a.google_email || '',
+    plan: a.kind === 'owner' ? 'lifetime' : (a.plan || 'lifetime'), expires: a.kind === 'owner' ? 0 : Number(a.expires) || 0, expired: expired(a) } };
 };
 
 A.driveStatus = async (c, req) => {
@@ -708,7 +725,7 @@ A.recoverFinish = async (c, req) => {
 };
 
 A.adminList = async (c, req) => {
-  const a = await authAccount(c, req);
+  const a = await authAccount(c, req, { allowExpired: true });
   const rows = await c.all('SELECT id, name, created, folder, settings FROM events WHERE account = ? AND deleted = 0 ORDER BY created DESC LIMIT ?', a.id, LIMITS.MAX_EVENTS_LIST);
   return { events: rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created, date: parseJson(r.settings).date || '', folderUrl: 'https://drive.google.com/drive/folders/' + r.folder, createdBy: '', canManage: true })) };
 };
@@ -759,13 +776,13 @@ A.adminDelete = async (c, req) => {
   return {};
 };
 A.adminProblems = async (c, req) => {
-  const a = await authAccount(c, req);
+  const a = await authAccount(c, req, { allowExpired: true });
   const rows = await c.all('SELECT t, w, e, m FROM problems WHERE account = ? ORDER BY id DESC LIMIT 50', a.id);
   return { problems: rows };
 };
 A.adminClearProblems = async (c, req) => { const a = await authAccount(c, req); await c.run('DELETE FROM problems WHERE account = ?', a.id); return {}; };
 A.adminExportKeys = async (c, req) => {
-  const a = await authAccount(c, req);
+  const a = await authAccount(c, req, { allowExpired: true });
   const rows = await c.all("SELECT id, ek_enc FROM events WHERE account = ? AND ek_enc != ''", a.id);
   const keys = {};
   for (const r of rows) keys[r.id] = await unseal(c.env, r.ek_enc);
@@ -773,10 +790,26 @@ A.adminExportKeys = async (c, req) => {
 };
 
 // ---- buying a key
-A.checkoutStart = async (c) => {
+A.checkoutStart = async (c, req) => {
   if (!(await rateOk(c, 'checkout', LIMITS.CHECKOUTS_PER_10MIN, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
-  return { url: await createCheckout(c.env) };
+  const plan = Object.prototype.hasOwnProperty.call(PLAN_DAYS, req.plan) ? req.plan : 'lifetime';
+  let account = '';
+  if (req.k) { // renewing or upgrading a signed-in account
+    const a = await authAccount(c, req, { allowExpired: true });
+    if (a.kind === 'owner') throw err('bad_request', 'The owner account doesn’t need a plan.');
+    if ((a.plan || 'lifetime') === 'lifetime' && !Number(a.expires)) throw err('bad_request', 'You already have lifetime access.');
+    account = a.id;
+  }
+  return { url: await createCheckout(c.env, plan, account) };
 };
+
+/** New end date after buying `plan` (time is added to what's left; lifetime never ends). */
+function extend(a, plan, now) {
+  if (plan === 'lifetime') return { plan: 'lifetime', expires: 0 };
+  if (a && (a.plan || 'lifetime') === 'lifetime' && !Number(a.expires)) return { plan: 'lifetime', expires: 0 };
+  const base = Math.max(now, (a && Number(a.expires)) || 0);
+  return { plan, expires: base + PLAN_DAYS[plan] * 86400000 };
+}
 
 /** After paying: turn the Stripe Checkout Session into an account and show its admin key. */
 A.claimPurchase = async (c, req) => {
@@ -784,6 +817,18 @@ A.claimPurchase = async (c, req) => {
   const sid = str(req.session_id, 260);
   const p = await readCheckout(c.env, sid);
   if (!p.paid) throw err('not_paid', 'This payment hasn’t gone through yet. If you just paid, wait a moment and refresh.');
+  if (p.account) { // a renewal: extend the account once, never issue a new key
+    const a = await c.one('SELECT * FROM accounts WHERE id = ?', p.account);
+    if (!a) throw err('not_found', 'That account wasn’t found. Contact support with your receipt.');
+    const done = await c.one('SELECT session FROM purchases WHERE session = ?', sid);
+    if (!done) {
+      const n = extend(a, p.plan, c.now());
+      await c.run('INSERT INTO purchases (session, account, plan, amount, created) VALUES (?, ?, ?, ?, ?)', sid, a.id, p.plan, p.amount, c.now());
+      await c.run('UPDATE accounts SET plan = ?, expires = ? WHERE id = ?', n.plan, n.expires, a.id);
+    }
+    const now = await c.one('SELECT plan, expires FROM accounts WHERE id = ?', a.id);
+    return { renewed: true, plan: now.plan, expires: Number(now.expires) || 0, email: p.email };
+  }
   const key = randomKey(32);
   const hash = await sha256Hex(key);
   const existing = await c.one('SELECT * FROM accounts WHERE stripe_session = ?', sid);
@@ -791,12 +836,14 @@ A.claimPurchase = async (c, req) => {
     // The thank-you page can show a fresh key for a short while (e.g. it was closed by mistake).
     if (existing.claim_until < c.now()) throw err('already_claimed', 'This purchase was already set up. Sign in with your admin key, or use “Lost your key?” on the sign-in page.');
     await c.run('UPDATE accounts SET key_hash = ? WHERE id = ?', hash, existing.id);
-    return { adminKey: key, email: existing.email, again: true };
+    return { adminKey: key, email: existing.email, again: true, plan: existing.plan, expires: Number(existing.expires) || 0 };
   }
   const id = randomId(12);
-  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000);
-  return { adminKey: key, email: p.email };
+  const n = extend(null, p.plan, c.now());
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until, plan, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000, n.plan, n.expires);
+  await c.run('INSERT OR IGNORE INTO purchases (session, account, plan, amount, created) VALUES (?, ?, ?, ?, ?)', sid, id, p.plan, p.amount, c.now());
+  return { adminKey: key, email: p.email, plan: n.plan, expires: n.expires };
 };
 
 // ---- owner tools
@@ -804,12 +851,14 @@ A.ownerCreateAccount = async (c, req) => {
   requireOwner(await authAccount(c, req));
   const key = randomKey(32);
   const id = randomId(12);
-  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note) VALUES (?, ?, ?, ?, ?, ?)', id, await sha256Hex(key), 'comp', '', c.now(), cleanText(req.note, 60));
-  return { id, adminKey: key };
+  const plan = Object.prototype.hasOwnProperty.call(PLAN_DAYS, req.plan) ? req.plan : 'lifetime';
+  const n = extend(null, plan, c.now());
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note, plan, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, await sha256Hex(key), 'comp', '', c.now(), cleanText(req.note, 60), n.plan, n.expires);
+  return { id, adminKey: key, plan: n.plan, expires: n.expires };
 };
 A.ownerAccounts = async (c, req) => {
   requireOwner(await authAccount(c, req));
-  const rows = await c.all("SELECT a.id, a.kind, a.status, a.email, a.created, a.google_email, a.note, a.refresh_enc != '' AS drive, (SELECT COUNT(*) FROM events e WHERE e.account = a.id AND e.deleted = 0) AS events FROM accounts a WHERE a.kind != 'owner' ORDER BY a.created DESC LIMIT 1000");
+  const rows = await c.all("SELECT a.id, a.kind, a.status, a.email, a.created, a.google_email, a.note, a.plan, a.expires, (SELECT COALESCE(SUM(amount), 0) FROM purchases p WHERE p.account = a.id) AS paid, a.refresh_enc != '' AS drive, (SELECT COUNT(*) FROM events e WHERE e.account = a.id AND e.deleted = 0) AS events FROM accounts a WHERE a.kind != 'owner' ORDER BY a.created DESC LIMIT 1000");
   return { accounts: rows.map((r) => ({ ...r, drive: !!r.drive })) };
 };
 A.ownerSetStatus = async (c, req) => {

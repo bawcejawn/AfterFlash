@@ -389,3 +389,10 @@ details summary { cursor: pointer; font-weight: 700; }
 .legal { max-width: 46rem; }
 .legal h2 { margin-top: 2rem; }
 .btn.disabled { opacity: 0.45; pointer-events: auto; cursor: not-allowed; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; margin: 1.2rem 0; }
+.plan { display: grid; gap: 0.6rem; align-content: start; position: relative; }
+.plan h3 { margin: 0; }
+.plan.best { outline: 3px solid var(--accent, #0f7c7a); }
+.plan-badge { position: absolute; top: -0.8rem; right: 1rem; background: var(--accent, #0f7c7a); color: #fff; font-size: 0.8rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; }
+.plan-status.warn { border-left: 4px solid #c0392b; }
+.plans > .panel { margin: 0; }
