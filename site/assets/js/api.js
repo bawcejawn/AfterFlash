@@ -15,6 +15,8 @@ export class ApiError extends Error {
 
 export function backendUrl(studio) {
   if (ownStudio(studio)) return `https://script.google.com/macros/s/${studio.slice(2)}/exec`;
+  // PhotoShare Cloud: the API lives on this same site.
+  if (config.cloud && (config.backends || {})[studio] === '/api') return '/api';
   // Chrome inserts /u/<n>/ when several Google accounts are signed in; the clean URL is what works for guests.
   const url = String((config.backends || {})[studio] || '').trim().replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
   if (!url || url.includes('REPLACE_WITH')) throw new ApiError('not_configured', 'This site is not connected to a backend yet. Add your Apps Script URL to config.js.');

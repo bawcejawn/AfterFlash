@@ -1,0 +1,823 @@
+// PhotoShare Cloud: every API action. Same request/response shapes as the Apps Script backend
+// (backend/Code.gs), so the website works with either. Hosts' photos go to THEIR Google Drive.
+import {
+  err, b64encode, b64decode, randomKey, randomId, sha256Hex, safeEq, seal, unseal,
+  sniffMime, sniffAudio, sniffImage, isEnc, ENC_OVERHEAD, stripJpegMeta, cleanText, str, int, parseJson,
+} from './lib.js';
+import { driveFor } from './google.js';
+import { createCheckout, readCheckout } from './stripe.js';
+
+export const VERSION = '1.10.0';
+
+const LIMITS = {
+  PHOTO_BYTES: 8 * 1024 * 1024, VIDEO_BYTES: 20 * 1024 * 1024, THUMB_BYTES: 400 * 1024, AUDIO_BYTES: 3 * 1024 * 1024,
+  LOGO_BYTES: 200 * 1024, NAME: 80, WELCOME: 280, LABEL: 24, MAX_GUESTS: 5000, MAX_SHOTS: 500, MAX_EVENTS_LIST: 500,
+  UPLOADS_PER_GUEST_PER_MIN: 20, UPLOADS_PER_EVENT_PER_MIN: 600, JOINS_PER_EVENT_PER_MIN: 120, BAD_PIN_PER_EVENT_PER_10MIN: 40,
+  BAD_KEY_PER_10MIN: 30, REPORTS_PER_GUEST: 15, NOTES_PER_GUEST: 5, NOTE_TEXT: 500, BLUR_THRESHOLD: 40,
+  READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60,
+};
+
+// ----------------------------------------------------------------- context
+export function makeCtx(env) {
+  const db = env.DB;
+  const now = () => Date.now();
+  const one = (sql, ...args) => db.prepare(sql).bind(...args).first();
+  const all = async (sql, ...args) => (await db.prepare(sql).bind(...args).all()).results || [];
+  const run = (sql, ...args) => db.prepare(sql).bind(...args).run();
+  return { env, db, now, one, all, run };
+}
+
+async function rateOk(c, bucket, limit, windowSec, peek = false) {
+  const slot = Math.floor(c.now() / 1000 / windowSec);
+  const k = `${bucket}:${slot}`;
+  if (peek) { const r = await c.one('SELECT n FROM rate WHERE k = ?', k); return !r || r.n < limit; }
+  const r = await c.one('INSERT INTO rate (k, n, exp) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET n = n + 1 RETURNING n', k, (slot + 2) * windowSec * 1000);
+  if (Math.random() < 0.01) await c.run('DELETE FROM rate WHERE exp < ?', c.now());
+  return r.n <= limit;
+}
+const rateHit = (c, bucket, windowSec) => rateOk(c, bucket, 1e9, windowSec);
+
+async function logProblem(c, account, where, eventId, message) {
+  try {
+    await c.run('INSERT INTO problems (account, t, w, e, m) VALUES (?, ?, ?, ?, ?)', account || '', c.now(), String(where).slice(0, 30), String(eventId || '').slice(0, 20), String(message).slice(0, 300));
+    await c.run('DELETE FROM problems WHERE account = ? AND id NOT IN (SELECT id FROM problems WHERE account = ? ORDER BY id DESC LIMIT 50)', account || '', account || '');
+  } catch { /* never let logging break a request */ }
+}
+
+// ----------------------------------------------------------------- settings / views
+function sanitizeSettings(s) {
+  s = s || {};
+  const iso = (v) => { if (!v) return ''; const t = Date.parse(v); return isNaN(t) ? '' : new Date(t).toISOString(); };
+  const looks = ['none', 'vivid', 'classic', 'warm', 'moody', 'mono'];
+  return {
+    name: cleanText(s.name, LIMITS.NAME),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(s.date)) ? String(s.date) : '',
+    welcome: cleanText(s.welcome, LIMITS.WELCOME),
+    reveal: s.reveal === 'after' ? 'after' : 'live',
+    revealAt: iso(s.revealAt), opensAt: iso(s.opensAt), closesAt: iso(s.closesAt),
+    shotsPerGuest: int(s.shotsPerGuest, 1, LIMITS.MAX_SHOTS, 25),
+    maxGuests: int(s.maxGuests, 1, LIMITS.MAX_GUESTS, 150),
+    allowVideo: s.allowVideo !== false,
+    maxVideoSec: int(s.maxVideoSec, 3, 60, 15),
+    maxStorageMB: int(s.maxStorageMB, 100, 200000, 15000),
+    allowLibrary: s.allowLibrary === true,
+    approval: s.approval === true,
+    guestGallery: s.guestGallery !== false,
+    allowReports: s.allowReports !== false,
+    enhance: s.enhance !== false,
+    encrypted: s.encrypted === true,
+    guestbook: s.guestbook !== false,
+    paused: s.paused === true,
+    look: looks.includes(s.look) ? s.look : 'classic',
+    guestLooks: s.guestLooks !== false,
+    beauty: s.beauty !== false,
+    dateStamp: s.dateStamp === true,
+    accent: /^#[0-9a-fA-F]{6}$/.test(String(s.accent)) ? String(s.accent) : '#0f7c7a',
+    font: ['modern', 'elegant', 'script'].includes(s.font) ? s.font : 'modern',
+    tagline: cleanText(s.tagline, 80),
+  };
+}
+function isRevealed(s) {
+  if (s.reveal !== 'after') return true;
+  if (!s.revealAt) return false;
+  return Date.now() >= Date.parse(s.revealAt);
+}
+function publicEvent(ev) {
+  const s = ev.settings;
+  return {
+    id: ev.id, name: s.name, date: s.date, welcome: s.welcome, reveal: s.reveal, revealAt: s.revealAt,
+    opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
+    maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
+    allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
+    accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted,
+    enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pin_hash, revealed: isRevealed(s), now: Date.now(),
+  };
+}
+async function wallKey(ev) { return (await sha256Hex(ev.host_hash + ':wall')).slice(0, 32); }
+async function hostEvent(ev) {
+  const p = publicEvent(ev);
+  p.wallKey = await wallKey(ev);
+  p.settings = ev.settings;
+  p.folderUrl = 'https://drive.google.com/drive/folders/' + ev.folder;
+  p.createdAt = ev.created;
+  return p;
+}
+const guestView = (ev, g) => ({ id: g.id, label: g.label, shotsUsed: g.shots, shotsLeft: Math.max(0, ev.settings.shotsPerGuest - g.shots), blocked: !!g.blocked });
+
+// ----------------------------------------------------------------- loading + auth
+async function loadEvent(c, id) {
+  id = str(id, 20);
+  if (!/^[A-Za-z0-9]{6,20}$/.test(id)) throw err('not_found', 'Event not found');
+  const row = await c.one('SELECT * FROM events WHERE id = ? AND deleted = 0', id);
+  if (!row) throw err('not_found', 'Event not found');
+  row.settings = sanitizeSettings(parseJson(row.settings));
+  row.logo = row.logo ? parseJson(row.logo) : null;
+  if (row.logo && !row.logo.id) row.logo = null;
+  return row;
+}
+async function accountOf(c, ev) {
+  const a = await c.one('SELECT * FROM accounts WHERE id = ?', ev.account);
+  if (!a || a.status !== 'active') throw err('not_found', 'Event not found');
+  return a;
+}
+const drive = async (c, ev) => driveFor(c.env, c.db, await accountOf(c, ev));
+
+async function checkPin(c, ev, pin) {
+  if (!ev.pin_hash) return;
+  const bucket = 'badpin:' + ev.id;
+  if (!(await rateOk(c, bucket, LIMITS.BAD_PIN_PER_EVENT_PER_10MIN, 600, true))) throw err('rate_limited', 'Too many wrong codes. Wait a few minutes.');
+  if (!pin || !safeEq(await sha256Hex(ev.id + ':' + pin), ev.pin_hash)) { await rateHit(c, bucket, 600); throw err('pin_required', 'Enter the event code.'); }
+}
+
+/** Host account from an admin key. The site owner's key (OWNER_KEY secret) has extra powers. */
+async function authAccount(c, req) {
+  const k = req.k ? String(req.k).slice(0, 200) : '';
+  if (k) {
+    const hash = await sha256Hex(k);
+    if (c.env.OWNER_KEY && safeEq(hash, await sha256Hex(String(c.env.OWNER_KEY)))) {
+      let owner = await c.one('SELECT * FROM accounts WHERE id = ?', 'owner');
+      if (!owner) {
+        await c.run('INSERT INTO accounts (id, key_hash, kind, created) VALUES (?, ?, ?, ?)', 'owner', null, 'owner', c.now());
+        owner = await c.one('SELECT * FROM accounts WHERE id = ?', 'owner');
+      }
+      return owner;
+    }
+    const a = await c.one('SELECT * FROM accounts WHERE key_hash = ?', hash);
+    if (a) {
+      if (a.status !== 'active') throw err('forbidden', 'This account is turned off. Contact support.');
+      return a;
+    }
+  }
+  if (!(await rateOk(c, 'badkey', LIMITS.BAD_KEY_PER_10MIN, 600, true))) throw err('rate_limited', 'Too many attempts. Wait 10 minutes.');
+  await rateHit(c, 'badkey', 600);
+  throw err('unauthorized', 'That admin key isn’t right.');
+}
+const requireOwner = (a) => { if (a.kind !== 'owner') throw err('forbidden', 'Only the site owner can do that.'); };
+
+async function authHost(c, req) {
+  const ev = await loadEvent(c, req.e);
+  if (typeof req.k === 'string' && req.k.startsWith('admin:')) {
+    const a = await authAccount(c, { k: req.k.slice(6) });
+    if (a.id !== ev.account) throw err('forbidden', 'Only the account that created this event can open its dashboard.');
+    return ev;
+  }
+  if (req.k && safeEq(await sha256Hex(String(req.k).slice(0, 200)), ev.host_hash)) return ev;
+  const bucket = 'badhost:' + ev.id;
+  if (!(await rateOk(c, bucket, LIMITS.BAD_KEY_PER_10MIN, 600, true))) throw err('rate_limited', 'Too many attempts. Wait 10 minutes.');
+  await rateHit(c, bucket, 600);
+  throw err('unauthorized', 'Invalid host link');
+}
+async function findGuest(c, ev, id) {
+  if (!id) return null;
+  return c.one('SELECT * FROM guests WHERE event = ? AND id = ?', ev.id, str(id, 40));
+}
+async function authGuest(c, ev, req) {
+  const g = await findGuest(c, ev, req.g);
+  if (!g || !req.t || !safeEq(g.token_hash, await sha256Hex(String(req.t).slice(0, 200)))) throw err('unauthorized', 'Please re-open the event link.');
+  return g;
+}
+const bump = (c, ev) => c.run('UPDATE events SET v = ? WHERE id = ?', randomId(8), ev.id);
+async function eventKey(c, ev) {
+  if (!ev.settings.encrypted) return '';
+  const k = await unseal(c.env, ev.ek_enc);
+  if (!k) throw err('server_error', 'This private event’s key is missing.');
+  return k;
+}
+async function subFolder(c, ev, col, name) {
+  if (ev[col]) return ev[col];
+  const d = await drive(c, ev);
+  const id = await d.createFolder(name, ev.folder);
+  await c.run(`UPDATE events SET ${col} = ? WHERE id = ?`, id, ev.id);
+  ev[col] = id;
+  return id;
+}
+async function share(c, ev, ids, isPublic) {
+  const d = await drive(c, ev);
+  let ok = true;
+  for (const id of ids.filter(Boolean)) {
+    try { await d.share(id, isPublic); } catch (e) { ok = false; await logProblem(c, ev.account, 'sharing', ev.id, `Google Drive refused link sharing (${e.message}). Photos still upload.`); }
+  }
+  return ok;
+}
+async function readable(c, ev, req, m) {
+  if (!m || m.status === 'deleted' || m.event !== ev.id) return false;
+  const s = ev.settings;
+  const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
+  if (req.g && req.t) {
+    const g = await findGuest(c, ev, req.g);
+    if (g && safeEq(g.token_hash, await sha256Hex(String(req.t))) && m.guest === g.id) return true;
+  }
+  if (m.status !== 'visible' || !isRevealed(s) || (!s.guestGallery && !isWall)) return false;
+  if (!isWall) await checkPin(c, ev, req.pin);
+  return true;
+}
+const mediaRow = (c, ev, id) => c.one('SELECT * FROM media WHERE event = ? AND id = ?', ev.id, str(id, 100));
+
+// ================================================================= public (guests)
+const A = {};
+
+A.event = async (c, req) => ({ event: publicEvent(await loadEvent(c, req.e)) });
+
+A.join = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  await checkPin(c, ev, req.pin);
+  if (!(await rateOk(c, 'join:' + ev.id, LIMITS.JOINS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Too many people joining at once. Try again in a moment.');
+  if (req.g && req.t) {
+    const g = await findGuest(c, ev, req.g);
+    if (g && safeEq(g.token_hash, await sha256Hex(String(req.t)))) return { guest: guestView(ev, g), event: publicEvent(ev), key: (await eventKey(c, ev)) || undefined };
+  }
+  const n = await c.one('SELECT COUNT(*) AS n FROM guests WHERE event = ?', ev.id);
+  if (n.n >= ev.settings.maxGuests * 4 + 50) throw err('full', 'This event has reached its guest limit.');
+  const id = randomId(12), token = randomKey(24);
+  const label = cleanText(req.label, LIMITS.LABEL) || 'Guest ' + id.slice(0, 4).toUpperCase();
+  await c.run('INSERT INTO guests (event, id, token_hash, label, created) VALUES (?, ?, ?, ?, ?)', ev.id, id, await sha256Hex(token), label, c.now());
+  return { guest: guestView(ev, { id, label, shots: 0, blocked: 0 }), token, event: publicEvent(ev), shotsPerGuest: ev.settings.shotsPerGuest, key: (await eventKey(c, ev)) || undefined };
+};
+
+A.me = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const g = await authGuest(c, ev, req);
+  return { guest: guestView(ev, g), key: (await eventKey(c, ev)) || undefined };
+};
+
+A.upload = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const s = ev.settings;
+  const g = await authGuest(c, ev, req);
+  const now = c.now();
+  if (s.paused) throw err('paused', 'The host has paused uploads.');
+  if (s.opensAt && now < Date.parse(s.opensAt)) throw err('not_open', 'Uploads have not opened yet.');
+  if (s.closesAt && now > Date.parse(s.closesAt)) throw err('closed', 'This album is closed.');
+  if (g.blocked) throw err('blocked', 'Uploads are turned off for this guest.');
+  const kind = req.kind === 'video' ? 'video' : 'photo';
+  if (kind === 'video' && !s.allowVideo) throw err('no_video', 'Videos are turned off for this event.');
+  const clientId = str(req.clientId, 64);
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientId)) throw err('bad_request', 'Invalid clientId');
+  if (!(await rateOk(c, `upg:${ev.id}:${g.id}`, LIMITS.UPLOADS_PER_GUEST_PER_MIN, 60))) throw err('rate_limited', 'Slow down a little.');
+  if (!(await rateOk(c, 'upe:' + ev.id, LIMITS.UPLOADS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Lots of uploads right now. Retrying soon.');
+  const dup = await c.one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+  if (dup) return { id: dup.id, duplicate: true, guest: guestView(ev, g) };
+  const used = await c.one("SELECT COALESCE(SUM(bytes), 0) AS b FROM media WHERE event = ? AND status != 'deleted'", ev.id);
+
+  const enc = s.encrypted === true;
+  let bytes = b64decode(req.data);
+  const max = (kind === 'video' ? LIMITS.VIDEO_BYTES : LIMITS.PHOTO_BYTES) + (enc ? ENC_OVERHEAD : 0);
+  if (!bytes.length || bytes.length > max) throw err('too_large', 'File is too large.');
+  if (used.b + bytes.length > s.maxStorageMB * 1024 * 1024) throw err('full', 'This album has reached its storage limit.');
+  let mime, plainSha = '';
+  if (enc) {
+    if (!isEnc(bytes)) throw err('needs_update', 'This event needs the latest version of the camera page. Please reload.');
+    mime = String(req.mime || '');
+    if (kind === 'photo' && mime !== 'image/jpeg') throw err('bad_type', 'Photos must be JPEG.');
+    if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err('bad_type', 'Unsupported video format.');
+    plainSha = /^[0-9a-f]{64}$/.test(String(req.sha)) ? String(req.sha) : '';
+  } else {
+    mime = sniffMime(bytes);
+    if (kind === 'photo' && mime !== 'image/jpeg') throw err('bad_type', 'Photos must be JPEG.');
+    if (kind === 'video' && mime !== 'video/mp4' && mime !== 'video/webm') throw err('bad_type', 'Unsupported video format.');
+    if (mime === 'image/jpeg') bytes = stripJpegMeta(bytes);
+    plainSha = /^[0-9a-f]{64}$/.test(String(req.sha)) ? String(req.sha) : '';
+  }
+  let thumbBytes = null;
+  if (req.thumb) {
+    thumbBytes = b64decode(req.thumb);
+    if (enc) { if (thumbBytes.length > LIMITS.THUMB_BYTES + ENC_OVERHEAD || !isEnc(thumbBytes)) throw err('bad_type', 'Invalid preview image.'); }
+    else {
+      if (thumbBytes.length > LIMITS.THUMB_BYTES || sniffMime(thumbBytes) !== 'image/jpeg') throw err('bad_type', 'Invalid preview image.');
+      thumbBytes = stripJpegMeta(thumbBytes);
+    }
+  }
+  if (kind === 'video' && !thumbBytes) throw err('bad_request', 'Video preview required.');
+
+  // Reserve a shot atomically so parallel uploads can't exceed the roll or the guest limit.
+  if (g.uploads === 0) {
+    const active = await c.one('SELECT COUNT(*) AS n FROM guests WHERE event = ? AND uploads > 0', ev.id);
+    if (active.n >= s.maxGuests) throw err('full', 'This event has reached its guest limit.');
+  }
+  const total = await c.one('SELECT COUNT(*) AS n FROM media WHERE event = ?', ev.id);
+  if (total.n >= s.maxGuests * s.shotsPerGuest + 50) throw err('full', 'This album is full.');
+  const res = await c.run('UPDATE guests SET shots = shots + 1, uploads = uploads + 1 WHERE event = ? AND id = ? AND shots < ?', ev.id, g.id, s.shotsPerGuest);
+  if (!res.meta || !res.meta.changes) throw err('no_shots', 'Your roll is finished!');
+  g.shots += 1; g.uploads += 1;
+  const refund = () => c.run('UPDATE guests SET shots = MAX(0, shots - 1), uploads = MAX(0, uploads - 1) WHERE event = ? AND id = ?', ev.id, g.id);
+
+  const d = await drive(c, ev).catch(async (e) => { await refund(); throw e; });
+  const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[mime];
+  const base = new Date(now).toISOString().replace(/[-:]/g, '').slice(0, 15) + '_' + g.id.slice(0, 6) + '_' + clientId.slice(0, 8);
+  const sfx = enc ? '.enc' : '';
+  let fileId = '', thumbId = '';
+  try {
+    fileId = await d.upload({ name: `${base}.${ext}${sfx}`, mime: enc ? 'application/octet-stream' : mime, parent: ev.folder, bytes });
+    if (thumbBytes) thumbId = await d.upload({ name: `${base}_preview.jpg${sfx}`, mime: enc ? 'application/octet-stream' : 'image/jpeg', parent: await subFolder(c, ev, 'previews_folder', 'Previews (used by the app)'), bytes: thumbBytes });
+  } catch (e) {
+    await refund();
+    if (fileId) await d.trash(fileId).catch(() => {});
+    if (e.code === 'drive_full') await logProblem(c, ev.account, 'upload', ev.id, 'Your Google Drive is full, so new photos can’t be saved. Free up space or add storage from Google.');
+    throw e;
+  }
+  const status = s.approval ? 'pending' : 'visible';
+  const flags = [];
+  const blur = Number(req.blur);
+  if (kind === 'photo' && isFinite(blur) && blur >= 0 && blur < LIMITS.BLUR_THRESHOLD) flags.push('blurry');
+  if (!enc && status === 'visible' && !(await share(c, ev, [fileId, thumbId], true))) flags.push('share-failed');
+  if (enc) flags.push('encrypted');
+  try {
+    await c.run('INSERT INTO media (event, id, thumb, guest, kind, mime, bytes, sha, w, h, dur, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ev.id, fileId, thumbId, g.id, kind, mime, bytes.length, plainSha, int(req.w, 0, 20000, 0), int(req.h, 0, 20000, 0), int(req.dur, 0, 600, 0), now, status, clientId, flags.join(','));
+  } catch (e) {
+    await d.trash(fileId).catch(() => {}); if (thumbId) await d.trash(thumbId).catch(() => {});
+    await refund();
+    const again = await c.one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+    if (again) return { id: again.id, duplicate: true, guest: guestView(ev, g) };
+    throw e;
+  }
+  await bump(c, ev);
+  return { id: fileId, status, guest: guestView(ev, g) };
+};
+
+A.list = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const s = ev.settings;
+  const isWall = req.mode === 'wall' && !!req.wk && safeEq(String(req.wk), await wallKey(ev));
+  if (!isWall) await checkPin(c, ev, req.pin);
+  const revealed = isRevealed(s);
+  if (!ev.v) { ev.v = randomId(8); await c.run('UPDATE events SET v = ? WHERE id = ?', ev.v, ev.id); }
+  const base = { v: ev.v, revealed, event: publicEvent(ev) };
+  if (req.v && req.v === ev.v) { base.unchanged = true; return base; }
+  const rows = await c.all('SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? ORDER BY m.seq', ev.id);
+  const visible = rows.filter((m) => m.status === 'visible');
+  base.count = visible.length;
+  base.pending = rows.filter((m) => m.status === 'pending').length;
+  if (s.encrypted && revealed && (s.guestGallery || isWall)) base.key = await eventKey(c, ev);
+  if (!revealed || (!s.guestGallery && !isWall)) { base.items = []; return base; }
+  base.items = visible.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), c: m.created, w: m.w, h: m.h, d: m.dur || 0, f: m.fav ? 1 : 0 }));
+  return base;
+};
+
+A.thumb = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
+  const m = await mediaRow(c, ev, req.id);
+  if (!(await readable(c, ev, req, m))) throw err('not_found', 'Not found');
+  if (!m.thumb && m.kind === 'video') throw err('not_found', 'Not found');
+  const bytes = await (await drive(c, ev)).download(m.thumb || m.id);
+  if (isEnc(bytes)) {
+    if (bytes.length > LIMITS.THUMB_BYTES + ENC_OVERHEAD) throw err('too_large', 'Preview too large');
+    return { mime: 'image/jpeg', enc: true, data: b64encode(bytes) };
+  }
+  if (sniffMime(bytes) !== 'image/jpeg') throw err('not_found', 'Not found');
+  if (bytes.length > LIMITS.THUMB_BYTES && m.thumb) throw err('too_large', 'Preview too large');
+  return { mime: 'image/jpeg', data: b64encode(bytes) };
+};
+
+A.photo = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
+  const m = await mediaRow(c, ev, req.id);
+  if (!(await readable(c, ev, req, m))) throw err('not_found', 'Not found');
+  const bytes = await (await drive(c, ev)).download(m.id);
+  if (isEnc(bytes)) {
+    if (bytes.length > LIMITS.VIDEO_BYTES + ENC_OVERHEAD) throw err('too_large', 'Too large');
+    return { mime: m.mime, enc: true, data: b64encode(bytes) };
+  }
+  const mime = sniffMime(bytes);
+  if (m.kind === 'video') {
+    if (bytes.length > LIMITS.VIDEO_BYTES || (mime !== 'video/mp4' && mime !== 'video/webm')) throw err('not_found', 'Not found');
+    return { mime, data: b64encode(bytes) };
+  }
+  if (bytes.length > LIMITS.PHOTO_BYTES || mime !== 'image/jpeg') throw err('not_found', 'Not found');
+  return { mime: 'image/jpeg', data: b64encode(bytes) };
+};
+
+A.mine = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const g = await authGuest(c, ev, req);
+  const rows = await c.all("SELECT * FROM media WHERE event = ? AND guest = ? AND status != 'deleted' ORDER BY seq", ev.id, g.id);
+  return { items: rows.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', c: m.created, w: m.w, h: m.h, s: m.status })), guest: guestView(ev, g) };
+};
+
+A.report = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  if (!ev.settings.allowReports) throw err('disabled', 'Reporting is turned off.');
+  const g = await authGuest(c, ev, req);
+  if (g.uploads < 1) throw err('not_allowed', 'Take a photo first, then you can report photos.');
+  if (g.reports >= LIMITS.REPORTS_PER_GUEST) throw err('rate_limited', 'Report limit reached. Please tell the host.');
+  const m = await mediaRow(c, ev, req.id);
+  if (!m) throw err('not_found', 'Photo not found.');
+  if (m.status === 'visible') {
+    await c.run("UPDATE media SET status = 'reported', reports = reports + 1 WHERE seq = ?", m.seq);
+    await share(c, ev, [m.id, m.thumb], false);
+  }
+  await c.run('UPDATE guests SET reports = reports + 1 WHERE event = ? AND id = ?', ev.id, g.id);
+  await bump(c, ev);
+  return {};
+};
+
+// ---- guestbook
+A.guestbookAdd = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const s = ev.settings;
+  if (!s.guestbook) throw err('disabled', 'The guestbook is turned off.');
+  const g = await authGuest(c, ev, req);
+  if (g.blocked) throw err('blocked', 'Posting is turned off for this guest.');
+  if (s.closesAt && c.now() > Date.parse(s.closesAt)) throw err('closed', 'This album is closed.');
+  const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+  if (clientId) {
+    const prev = await c.one('SELECT id, status FROM notes WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+    if (prev) return { id: prev.id, status: prev.status, duplicate: true };
+  }
+  const text = cleanText(req.text, LIMITS.NOTE_TEXT);
+  let audio = null, mime = '';
+  if (req.audio) {
+    audio = b64decode(req.audio);
+    if (audio.length > LIMITS.AUDIO_BYTES + ENC_OVERHEAD) throw err('too_large', 'That voice message is too long.');
+    if (s.encrypted) {
+      if (!isEnc(audio)) throw err('needs_update', 'This event needs the latest version of the page. Please reload.');
+      mime = /^audio\/(webm|mp4|ogg)$/.test(String(req.audioMime)) ? String(req.audioMime) : '';
+    } else mime = sniffAudio(audio);
+    if (!mime) throw err('bad_type', 'This phone recorded in a format we can’t save. Try typing a message instead.');
+  }
+  if (!text && !audio) throw err('bad_request', 'Write a note or record a message.');
+  if (!(await rateOk(c, `gb:${ev.id}:${g.id}`, 4, 60))) throw err('rate_limited', 'Slow down a little.');
+  const existing = await c.one("SELECT COUNT(*) AS n FROM notes WHERE event = ? AND guest = ? AND status != 'deleted'", ev.id, g.id);
+  if (existing.n >= LIMITS.NOTES_PER_GUEST) throw err('full', 'You’ve left the maximum number of messages.');
+  const status = s.approval ? 'pending' : 'visible';
+  const id = randomId(12);
+  let audioId = '';
+  if (audio) {
+    const ext = { 'audio/webm': '.webm', 'audio/mp4': '.m4a', 'audio/ogg': '.ogg' }[mime];
+    const d = await drive(c, ev);
+    audioId = await d.upload({ name: `guestbook_${id}${ext}${s.encrypted ? '.enc' : ''}`, mime: s.encrypted ? 'application/octet-stream' : mime, parent: await subFolder(c, ev, 'voice_folder', 'Guestbook voice messages'), bytes: audio });
+  }
+  await c.run('INSERT INTO notes (id, event, guest, label, text, audio, created, status, client, dur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, ev.id, g.id, g.label, text, audioId ? `${audioId}|${mime}` : '', c.now(), status, clientId, int(req.dur, 0, 600, 0));
+  await bump(c, ev);
+  return { id, status };
+};
+const audioParts = (a) => { const [id, mime] = String(a || '').split('|'); return { id: id || '', mime: mime || '' }; };
+
+A.guestbookList = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const s = ev.settings;
+  const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
+  if (!isWall) await checkPin(c, ev, req.pin);
+  if (!s.guestbook || !isRevealed(s) || (!s.guestGallery && !isWall)) return { notes: [] };
+  const rows = await c.all("SELECT * FROM notes WHERE event = ? AND status = 'visible' ORDER BY created", ev.id);
+  return { notes: rows.map((n) => ({ id: n.id, g: n.label, text: n.text, a: audioParts(n.audio).id, c: n.created, d: n.dur })) };
+};
+
+A.noteAudio = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  const s = ev.settings;
+  const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
+  if (!isWall) await checkPin(c, ev, req.pin);
+  if (!s.guestbook || !isRevealed(s) || (!s.guestGallery && !isWall)) throw err('not_found', 'Not found');
+  if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
+  const id = str(req.id, 100);
+  const note = id && await c.one("SELECT * FROM notes WHERE event = ? AND status = 'visible' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
+  if (!note || !id) throw err('not_found', 'Not found');
+  const { mime } = audioParts(note.audio);
+  const bytes = await (await drive(c, ev)).download(id);
+  if (isEnc(bytes)) return { mime, enc: true, data: b64encode(bytes) };
+  if (bytes.length > LIMITS.AUDIO_BYTES || !sniffAudio(bytes)) throw err('not_found', 'Not found');
+  return { mime: sniffAudio(bytes), data: b64encode(bytes) };
+};
+
+A.logo = async (c, req) => {
+  const ev = await loadEvent(c, req.e);
+  if (!ev.logo) throw err('not_found', 'No logo');
+  if (!(await rateOk(c, 'logo:' + ev.id, 240, 60))) throw err('rate_limited', 'Busy, try again.');
+  const bytes = await (await drive(c, ev)).download(ev.logo.id);
+  if (bytes.length > LIMITS.LOGO_BYTES || sniffImage(bytes) !== ev.logo.mime) throw err('not_found', 'No logo');
+  return { mime: ev.logo.mime, v: ev.logo.v, data: b64encode(bytes) };
+};
+
+// ================================================================= host (host key or the owning account's admin key)
+A.hostGet = async (c, req) => {
+  const ev = await authHost(c, req);
+  return { event: await hostEvent(ev), key: (await eventKey(c, ev)) || undefined };
+};
+
+A.hostUpdate = async (c, req) => {
+  const ev = await authHost(c, req);
+  const incoming = req.settings && typeof req.settings === 'object' ? req.settings : {};
+  const merged = {};
+  for (const k of Object.keys(ev.settings)) merged[k] = Object.prototype.hasOwnProperty.call(incoming, k) ? incoming[k] : ev.settings[k];
+  merged.encrypted = ev.settings.encrypted;
+  const next = sanitizeSettings(merged);
+  let pinHash = ev.pin_hash;
+  if (req.pin === '') pinHash = '';
+  else if (req.pin != null) {
+    if (!/^[0-9]{4,8}$/.test(String(req.pin))) throw err('bad_request', 'Code must be 4–8 digits.');
+    pinHash = await sha256Hex(ev.id + ':' + req.pin);
+  }
+  await c.run('UPDATE events SET name = ?, settings = ?, pin_hash = ?, v = ? WHERE id = ?', next.name, JSON.stringify(next), pinHash, randomId(8), ev.id);
+  ev.settings = next; ev.pin_hash = pinHash;
+  return { event: await hostEvent(ev) };
+};
+
+A.hostList = async (c, req) => {
+  const ev = await authHost(c, req);
+  const rows = await c.all("SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? AND m.status != 'deleted' ORDER BY m.seq", ev.id);
+  if (!ev.v) { ev.v = randomId(8); await c.run('UPDATE events SET v = ? WHERE id = ?', ev.v, ev.id); }
+  return {
+    items: rows.map((m) => ({ i: m.id, t: m.thumb, k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), gid: m.guest,
+      c: m.created, w: m.w, h: m.h, s: m.status, r: m.reports || 0, b: m.bytes, sha: m.sha, ai: null, f: m.flags || '', fv: !!m.fav })),
+    v: ev.v, event: await hostEvent(ev),
+  };
+};
+
+A.hostModerate = async (c, req) => {
+  const ev = await authHost(c, req);
+  const map = { show: 'visible', approve: 'visible', hide: 'hidden', delete: 'deleted' };
+  const status = map[req.action];
+  if (!status) throw err('bad_request', 'Unknown moderation action');
+  const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 100)) : [];
+  const d = await drive(c, ev);
+  let changed = 0;
+  for (const id of ids) {
+    const m = await mediaRow(c, ev, id);
+    if (!m || m.status === 'deleted') continue;
+    if (status === 'deleted') { await d.trash(m.id).catch(() => {}); if (m.thumb) await d.trash(m.thumb).catch(() => {}); }
+    else if (!m.flags.includes('encrypted')) await share(c, ev, [m.id, m.thumb], status === 'visible');
+    await c.run('UPDATE media SET status = ?, reports = ? WHERE seq = ?', status, status === 'visible' ? 0 : m.reports, m.seq);
+    changed++;
+  }
+  await bump(c, ev);
+  return { changed };
+};
+
+A.hostFavorite = async (c, req) => {
+  const ev = await authHost(c, req);
+  const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 100)) : [];
+  let changed = 0;
+  for (const id of ids) { const r = await c.run("UPDATE media SET fav = ? WHERE event = ? AND id = ? AND status != 'deleted'", req.fav === true ? 1 : 0, ev.id, id); changed += r.meta.changes || 0; }
+  await bump(c, ev);
+  return { changed };
+};
+
+A.hostGuests = async (c, req) => {
+  const ev = await authHost(c, req);
+  const rows = await c.all('SELECT * FROM guests WHERE event = ? ORDER BY created', ev.id);
+  return { guests: rows.map((r) => ({ id: r.id, label: r.label, shots: r.shots, uploads: r.uploads, joined: r.created, reports: r.reports, blocked: !!r.blocked })) };
+};
+
+A.hostBlockGuest = async (c, req) => {
+  const ev = await authHost(c, req);
+  const r = await c.run('UPDATE guests SET blocked = ? WHERE event = ? AND id = ?', req.block === true ? 1 : 0, ev.id, str(req.guestId, 40));
+  if (!r.meta.changes) throw err('not_found', 'Guest not found');
+  return {};
+};
+
+A.hostRotateKey = async (c, req) => {
+  const ev = await authHost(c, req);
+  const key = randomKey(32);
+  await c.run('UPDATE events SET host_hash = ? WHERE id = ?', await sha256Hex(key), ev.id);
+  return { hostKey: key };
+};
+
+A.hostMedia = async (c, req) => {
+  const ev = await authHost(c, req);
+  const id = str(req.id, 100);
+  const d = await drive(c, ev);
+  const m = await mediaRow(c, ev, id);
+  if (!m && req.which === 'note') {
+    const note = id && await c.one("SELECT * FROM notes WHERE event = ? AND status != 'deleted' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
+    if (!note || !id) throw err('not_found', 'Not found');
+    const bytes = await d.download(id);
+    return { mime: audioParts(note.audio).mime, enc: isEnc(bytes) || undefined, data: b64encode(bytes) };
+  }
+  if (!m || m.status === 'deleted') throw err('not_found', 'Not found');
+  const which = req.which === 'orig' ? m.id : (m.thumb || m.id);
+  const bytes = await d.download(which);
+  if (bytes.length > LIMITS.VIDEO_BYTES + ENC_OVERHEAD) throw err('too_large', 'File too large to fetch');
+  const mime = which === m.id ? m.mime : 'image/jpeg';
+  if (isEnc(bytes)) return { mime, enc: true, data: b64encode(bytes), sha256: m.sha };
+  return { mime: which === m.id ? (sniffMime(bytes) || m.mime) : 'image/jpeg', data: b64encode(bytes), sha256: m.sha };
+};
+
+A.hostSetLogo = async (c, req) => {
+  const ev = await authHost(c, req);
+  const d = await drive(c, ev);
+  const old = ev.logo;
+  let rec = null;
+  if (req.data) {
+    const bytes = b64decode(req.data);
+    if (bytes.length > LIMITS.LOGO_BYTES) throw err('too_large', 'That logo is too big. Use an image under 200 KB.');
+    const mime = sniffImage(bytes);
+    if (!mime) throw err('bad_type', 'Use a PNG, JPEG or WebP image.');
+    rec = { id: await d.upload({ name: 'logo.' + mime.split('/')[1], mime, parent: ev.folder, bytes }), v: randomId(8), mime };
+  }
+  await c.run('UPDATE events SET logo = ?, v = ? WHERE id = ?', rec ? JSON.stringify(rec) : '', randomId(8), ev.id);
+  if (old) await d.trash(old.id).catch(() => {});
+  return { logoV: rec ? rec.v : '' };
+};
+
+A.hostGuestbook = async (c, req) => {
+  const ev = await authHost(c, req);
+  const rows = await c.all("SELECT * FROM notes WHERE event = ? AND status != 'deleted' ORDER BY created", ev.id);
+  return { notes: rows.map((n) => ({ id: n.id, g: n.label, gid: n.guest, text: n.text, a: audioParts(n.audio).id, c: n.created, s: n.status, d: n.dur })) };
+};
+
+A.hostGuestbookModerate = async (c, req) => {
+  const ev = await authHost(c, req);
+  const map = { show: 'visible', approve: 'visible', hide: 'hidden', delete: 'deleted' };
+  const status = map[req.action];
+  if (!status) throw err('bad_request', 'Unknown action');
+  const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 40)) : [];
+  let changed = 0;
+  for (const id of ids) {
+    const n = await c.one('SELECT * FROM notes WHERE event = ? AND id = ?', ev.id, id);
+    if (!n || n.status === 'deleted') continue;
+    const a = audioParts(n.audio);
+    if (a.id) {
+      if (status === 'deleted') await (await drive(c, ev)).trash(a.id).catch(() => {});
+      else if (!ev.settings.encrypted) await share(c, ev, [a.id], status === 'visible');
+    }
+    await c.run('UPDATE notes SET status = ? WHERE id = ?', status, id);
+    changed++;
+  }
+  await bump(c, ev);
+  return { changed };
+};
+
+/** Adds files the app saved in the event folder but the album doesn't list (rare: interrupted uploads). */
+A.hostRecover = async (c, req) => {
+  const ev = await authHost(c, req);
+  const d = await drive(c, ev);
+  const known = new Set((await c.all('SELECT id FROM media WHERE event = ?', ev.id)).map((r) => r.id));
+  const files = (await d.list(ev.folder)).filter((f) => !known.has(f.id) && /\.(jpg|mp4|webm)(\.enc)?$/.test(f.name) && !/^logo\./.test(f.name));
+  if (req.dryRun === true || !files.length) return { found: files.length, duplicates: 0, added: 0 };
+  const status = ev.settings.approval ? 'pending' : 'visible';
+  for (const f of files) {
+    const mime = /\.mp4/.test(f.name) ? 'video/mp4' : /\.webm/.test(f.name) ? 'video/webm' : 'image/jpeg';
+    await c.run('INSERT OR IGNORE INTO media (event, id, thumb, guest, kind, mime, bytes, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ev.id, f.id, '', 'recovered', mime.startsWith('video') ? 'video' : 'photo', mime, Number(f.size) || 0, Date.parse(f.createdTime) || c.now(), status, 'recovered-' + f.id.slice(0, 40), 'recovered' + (/\.enc$/.test(f.name) ? ',encrypted' : ''));
+    if (status === 'visible' && !/\.enc$/.test(f.name)) await share(c, ev, [f.id], true);
+  }
+  await bump(c, ev);
+  return { found: files.length, duplicates: 0, added: files.length };
+};
+
+// ================================================================= accounts (admin key)
+A.adminCheck = async (c, req) => {
+  const a = await authAccount(c, req);
+  return { version: VERSION, me: { name: a.kind === 'owner' ? 'Owner' : (a.email || 'Host'), role: a.kind === 'owner' ? 'owner' : 'host', cloud: true, drive: !!a.refresh_enc, googleEmail: a.google_email || '' } };
+};
+
+A.driveStatus = async (c, req) => {
+  const a = await authAccount(c, req);
+  if (!a.refresh_enc) return { connected: false };
+  try {
+    const about = await (await driveFor(c.env, c.db, a)).about();
+    const q = about.storageQuota || {};
+    return { connected: true, email: a.google_email || (about.user && about.user.emailAddress) || '', used: Number(q.usage) || 0, limit: Number(q.limit) || 0 };
+  } catch (e) {
+    if (e.code === 'drive_not_connected') return { connected: false };
+    return { connected: true, email: a.google_email || '', used: 0, limit: 0 };
+  }
+};
+
+/** Starts "Connect Google Drive" (purpose connect) for a signed-in account. */
+A.oauthStart = async (c, req) => {
+  const a = await authAccount(c, req);
+  if (!c.env.GOOGLE_CLIENT_ID) throw err('not_configured', 'Google sign-in isn’t set up on this server yet.');
+  const state = randomKey(24);
+  await c.run('INSERT INTO oauth_state (state, account, purpose, exp) VALUES (?, ?, ?, ?)', state, a.id, 'connect', c.now() + 15 * 60000);
+  return { url: `${c.env.SITE_ORIGIN}/oauth/start?s=${state}` };
+};
+
+/** "Lost your admin key?": sign in with the Google account connected to it to get a new key. */
+A.recoverStart = async (c) => {
+  if (!c.env.GOOGLE_CLIENT_ID) throw err('not_configured', 'Google sign-in isn’t set up on this server yet.');
+  if (!(await rateOk(c, 'recover', 60, 600))) throw err('rate_limited', 'Too many attempts. Wait 10 minutes.');
+  const state = randomKey(24);
+  await c.run('INSERT INTO oauth_state (state, account, purpose, exp) VALUES (?, ?, ?, ?)', state, '', 'recover', c.now() + 15 * 60000);
+  return { url: `${c.env.SITE_ORIGIN}/oauth/start?s=${state}` };
+};
+
+/** Finishes the recovery after Google sent the browser back: one-time ticket → new key. */
+A.recoverFinish = async (c, req) => {
+  const t = str(req.ticket, 64);
+  const row = t && await c.one("SELECT * FROM oauth_state WHERE state = ? AND purpose = 'ticket' AND exp > ?", t, c.now());
+  if (!row) throw err('expired', 'That sign-in link expired. Try again.');
+  await c.run('DELETE FROM oauth_state WHERE state = ?', t);
+  const key = randomKey(32);
+  await c.run('UPDATE accounts SET key_hash = ? WHERE id = ? AND kind != \'owner\'', await sha256Hex(key), row.account);
+  return { adminKey: key };
+};
+
+A.adminList = async (c, req) => {
+  const a = await authAccount(c, req);
+  const rows = await c.all('SELECT id, name, created, folder, settings FROM events WHERE account = ? AND deleted = 0 ORDER BY created DESC LIMIT ?', a.id, LIMITS.MAX_EVENTS_LIST);
+  return { events: rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created, date: parseJson(r.settings).date || '', folderUrl: 'https://drive.google.com/drive/folders/' + r.folder, createdBy: '', canManage: true })) };
+};
+
+A.adminCreate = async (c, req) => {
+  const a = await authAccount(c, req);
+  const settings = sanitizeSettings(req.settings || {});
+  if (!settings.name) throw err('bad_request', 'Event name required');
+  if (!a.refresh_enc) throw err('drive_not_connected', 'Connect your Google Drive first: it’s where your photos are saved.');
+  const n = await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ? AND deleted = 0', a.id);
+  if (n.n >= LIMITS.EVENTS_PER_ACCOUNT) throw err('full', 'You’ve reached the event limit. Delete old events first.');
+  const d = await driveFor(c.env, c.db, a);
+  let root = a.root_folder;
+  if (!root) { root = await d.createFolder('PhotoShare'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
+  const id = randomId(10);
+  let folder;
+  try { folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root); }
+  catch (e) {
+    if (e.code !== 'not_found') throw e;
+    root = await d.createFolder('PhotoShare'); // the folder was deleted in Drive: make a new one
+    await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id);
+    folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root);
+  }
+  const hostKey = randomKey(32);
+  const ek = settings.encrypted ? await seal(c.env, randomKey(32)) : '';
+  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek);
+  return { id, hostKey };
+};
+
+async function ownedEvent(c, req) {
+  const a = await authAccount(c, req);
+  const ev = await loadEvent(c, req.e);
+  if (ev.account !== a.id) throw err('forbidden', 'That event belongs to another account.');
+  return { a, ev };
+}
+A.adminHostLink = async (c, req) => {
+  const { ev } = await ownedEvent(c, req);
+  const key = randomKey(32);
+  await c.run('UPDATE events SET host_hash = ? WHERE id = ?', await sha256Hex(key), ev.id);
+  return { hostKey: key };
+};
+A.adminDelete = async (c, req) => {
+  const { ev } = await ownedEvent(c, req);
+  if (req.confirm !== ev.id) throw err('bad_request', 'Confirmation does not match');
+  try { await (await drive(c, ev)).trash(ev.folder); } catch { /* folder already gone */ }
+  await c.run('UPDATE events SET deleted = 1 WHERE id = ?', ev.id);
+  return {};
+};
+A.adminProblems = async (c, req) => {
+  const a = await authAccount(c, req);
+  const rows = await c.all('SELECT t, w, e, m FROM problems WHERE account = ? ORDER BY id DESC LIMIT 50', a.id);
+  return { problems: rows };
+};
+A.adminClearProblems = async (c, req) => { const a = await authAccount(c, req); await c.run('DELETE FROM problems WHERE account = ?', a.id); return {}; };
+A.adminExportKeys = async (c, req) => {
+  const a = await authAccount(c, req);
+  const rows = await c.all("SELECT id, ek_enc FROM events WHERE account = ? AND ek_enc != ''", a.id);
+  const keys = {};
+  for (const r of rows) keys[r.id] = await unseal(c.env, r.ek_enc);
+  return { keys };
+};
+
+// ---- buying a key
+A.checkoutStart = async (c) => {
+  if (!(await rateOk(c, 'checkout', LIMITS.CHECKOUTS_PER_10MIN, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
+  return { url: await createCheckout(c.env) };
+};
+
+/** After paying: turn the Stripe Checkout Session into an account and show its admin key. */
+A.claimPurchase = async (c, req) => {
+  if (!(await rateOk(c, 'claim', 120, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
+  const sid = str(req.session_id, 260);
+  const p = await readCheckout(c.env, sid);
+  if (!p.paid) throw err('not_paid', 'This payment hasn’t gone through yet. If you just paid, wait a moment and refresh.');
+  const key = randomKey(32);
+  const hash = await sha256Hex(key);
+  const existing = await c.one('SELECT * FROM accounts WHERE stripe_session = ?', sid);
+  if (existing) {
+    // The thank-you page can show a fresh key for a short while (e.g. it was closed by mistake).
+    if (existing.claim_until < c.now()) throw err('already_claimed', 'This purchase was already set up. Sign in with your admin key, or use “Lost your key?” on the sign-in page.');
+    await c.run('UPDATE accounts SET key_hash = ? WHERE id = ?', hash, existing.id);
+    return { adminKey: key, email: existing.email, again: true };
+  }
+  const id = randomId(12);
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, stripe_session, claim_until) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    id, hash, 'paid', p.email, c.now(), sid, c.now() + 2 * 3600000);
+  return { adminKey: key, email: p.email };
+};
+
+// ---- owner tools
+A.ownerCreateAccount = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const key = randomKey(32);
+  const id = randomId(12);
+  await c.run('INSERT INTO accounts (id, key_hash, kind, email, created, note) VALUES (?, ?, ?, ?, ?, ?)', id, await sha256Hex(key), 'comp', '', c.now(), cleanText(req.note, 60));
+  return { id, adminKey: key };
+};
+A.ownerAccounts = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const rows = await c.all("SELECT a.id, a.kind, a.status, a.email, a.created, a.google_email, a.note, a.refresh_enc != '' AS drive, (SELECT COUNT(*) FROM events e WHERE e.account = a.id AND e.deleted = 0) AS events FROM accounts a WHERE a.kind != 'owner' ORDER BY a.created DESC LIMIT 1000");
+  return { accounts: rows.map((r) => ({ ...r, drive: !!r.drive })) };
+};
+A.ownerSetStatus = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const status = req.status === 'disabled' ? 'disabled' : 'active';
+  const r = await c.run("UPDATE accounts SET status = ? WHERE id = ? AND kind != 'owner'", status, str(req.id, 20));
+  if (!r.meta.changes) throw err('not_found', 'Account not found');
+  return {};
+};
+
+export const ACTIONS = A;

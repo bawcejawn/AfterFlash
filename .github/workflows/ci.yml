@@ -16,6 +16,13 @@ jobs:
           node-version: 22
       - name: Backend unit tests (real Code.gs on mocked Google services)
         run: node test/backend.test.mjs
+      - name: Cloud API tests (worker on SQLite, fake Google Drive and Stripe)
+        run: node --no-warnings cloud/test/api.test.mjs
+      - name: Cloud worker builds for Cloudflare
+        working-directory: cloud
+        run: |
+          npm ci --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/cloud-build
       - name: Contract build + tests (mock Koinos VM, koilib integration)
         working-directory: contract
         run: |
@@ -34,3 +41,5 @@ jobs:
           node test/server.mjs 8787 &
           sleep 2
           python test/e2e.py
+      - name: Cloud end-to-end browser test (buy, connect Drive, event, recover key)
+        run: bash cloud/test/run-e2e.sh
