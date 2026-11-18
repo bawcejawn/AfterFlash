@@ -21,7 +21,7 @@ jobs:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: if [ -n "$TOKEN" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "No CLOUDFLARE_API_TOKEN secret yet; see docs/LAUNCH.md."; fi
       - if: steps.gate.outputs.go == '1'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - if: steps.gate.outputs.go == '1'
         uses: actions/setup-node@v4
         with:
