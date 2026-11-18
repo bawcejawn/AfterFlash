@@ -379,3 +379,38 @@ export function partnersPanel({ studio, adminKey }) {
     h('p', { class: 'small muted' }, 'Each partner gets a code and a link. Buyers get the discount; the seller earns the commission on every sale with their code, renewals included, and the partners above them (up to 2 tiers) split the team bonus. Partners in tiers 1 and 2 can invite people to their team. Partners request payouts at $25; you pay them and click Paid.'),
     create, result, h('h3', null, 'Cash sale'), h('p', { class: 'small muted' }, 'Sold a key in person? Record it here to make their admin key and credit the partner.'), cashForm, cashResult, body);
 }
+
+/** Owner: how full the databases are, and when the nightly cleanup last ran. */
+export function healthPanel({ studio, adminKey }) {
+  const body = h('div', null, h('p', { class: 'muted' }, 'Checking…'));
+  const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB');
+  const ADVICE = {
+    ok: ['', 'Plenty of room.'],
+    soon: ['warn', 'The database new events use is over 70% full. Add an extra database soon: see docs/SCALING.md (two GitHub variables, then run the deploy).'],
+    urgent: ['warn', 'The database new events use is over 85% full. Add an extra database now: see docs/SCALING.md.'],
+  };
+  async function load() {
+    try {
+      const r = await api(studio, 'ownerHealth', { k: adminKey });
+      const [cls, msg] = ADVICE[r.advice] || ADVICE.ok;
+      const n = r.nightly;
+      clear(body).append(
+        h('p', { class: cls ? 'callout ' + cls : '' }, msg),
+        h('table', { class: 'list' },
+          h('thead', null, h('tr', null, h('th', null, 'Database'), h('th', null, 'Used'), h('th', null, 'Events'), h('th', null, 'Photos indexed'))),
+          h('tbody', null, r.dbs.map((d) => h('tr', null,
+            h('td', null, d.name, d.active ? h('div', { class: 'small muted' }, 'new events go here') : null),
+            h('td', null, `${mb(d.size)} of 10 GB (${d.pct}%)`),
+            h('td', null, `${d.live} open, ${d.events} total`),
+            h('td', null, String(d.photos)))))),
+        h('p', { class: 'small muted' }, n ? `Last nightly cleanup: ${fmtWhen(n.t)}. Cleared ${n.albums} old album${n.albums === 1 ? '' : 's'} (${n.rows} rows)${n.more ? '; more left for tonight' : ''}.` : 'The nightly cleanup hasn’t run yet. It runs every night at about 7:17 UTC.'),
+        h('button', { class: 'btn small', onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try { await api(studio, 'ownerRunCleanup', { k: adminKey }); toast('Cleanup done.'); } catch (err) { toast(err.message, 'error'); }
+          load();
+        } }, 'Run cleanup now'));
+    } catch (err) { clear(body).append(h('p', null, err.message)); }
+  }
+  load();
+  return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: system health'), body);
+}

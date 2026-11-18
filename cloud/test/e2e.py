@@ -142,6 +142,9 @@ with sync_playwright() as p:
     page.click("text=Create a free key")
     expect(page.locator("text=Free admin key")).to_be_visible()
     expect(page.locator("text=/2 accounts: 1 paid, 1 free/")).to_be_visible()
+    expect(page.locator("section", has=page.locator("h2", has_text="Owner: system health"))).to_contain_text("of 10 GB", timeout=15000)
+    page.click("button:has-text('Run cleanup now')")
+    expect(page.locator("text=Last nightly cleanup")).to_be_visible(timeout=15000)
     page.screenshot(path=f"{SHOTS}/05-owner.png", full_page=True)
 
     # ---- referral partner: owner adds a friend with a lifetime key

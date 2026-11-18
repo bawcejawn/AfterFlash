@@ -7,6 +7,8 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 
 ---
 
+**Owner docs:** [CHECKLIST](docs/CHECKLIST.md) (your to-dos) · [HANDOFF](docs/HANDOFF.md) (project overview for a new chat) · [LAUNCH](docs/LAUNCH.md) (paid setup) · [PARTNERS](docs/PARTNERS.md) · [SCALING](docs/SCALING.md)
+
 ## Two ways to run it
 
 - **AfterFlash Cloud (the paid product):** hosts buy an admin key, connect their Google Drive with one click, and run unlimited events. Photos go to each host's own Drive. It runs on Cloudflare (code in `cloud/`). **To launch it, follow [docs/LAUNCH.md](docs/LAUNCH.md)**: Cloudflare, Google sign-in and Stripe, plus a plan for your first sale.

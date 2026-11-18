@@ -20,14 +20,31 @@ const LIMITS = {
 };
 
 // ----------------------------------------------------------------- context
+const wrap = (db) => ({
+  db,
+  one: (sql, ...args) => db.prepare(sql).bind(...args).first(),
+  all: async (sql, ...args) => (await db.prepare(sql).bind(...args).all()).results || [],
+  run: (sql, ...args) => db.prepare(sql).bind(...args).run(),
+});
+/** Shard names are '' (the main DB) or SHARD_1 … SHARD_99 (extra D1 databases bound to the worker). */
+export const SHARD_RE = /^SHARD_([1-9][0-9]?)$/;
 export function makeCtx(env) {
-  const db = env.DB;
-  const now = () => Date.now();
-  const one = (sql, ...args) => db.prepare(sql).bind(...args).first();
-  const all = async (sql, ...args) => (await db.prepare(sql).bind(...args).all()).results || [];
-  const run = (sql, ...args) => db.prepare(sql).bind(...args).run();
-  return { env, db, now, one, all, run };
+  const main = wrap(env.DB);
+  const shards = new Map();
+  /** The database holding an event's guests, photos and notes. */
+  const shard = (name) => {
+    if (!name) return main;
+    if (!shards.has(name)) {
+      if (!SHARD_RE.test(name) || !env[name]) throw err('server_error', 'This event’s storage isn’t available right now. Try again soon.');
+      shards.set(name, wrap(env[name]));
+    }
+    return shards.get(name);
+  };
+  return { env, db: env.DB, now: () => Date.now(), one: main.one, all: main.all, run: main.run, shard };
 }
+/** Where new events go: ACTIVE_SHARD if it names a bound database, otherwise the main one. */
+export const activeShard = (env) => (SHARD_RE.test(env.ACTIVE_SHARD || '') && env[env.ACTIVE_SHARD] ? env.ACTIVE_SHARD : '');
+const S = (c, ev) => c.shard(ev.shard || '');
 
 async function rateOk(c, bucket, limit, windowSec, peek = false) {
   const slot = Math.floor(c.now() / 1000 / windowSec);
@@ -192,7 +209,7 @@ async function authHost(c, req) {
 }
 async function findGuest(c, ev, id) {
   if (!id) return null;
-  return c.one('SELECT * FROM guests WHERE event = ? AND id = ?', ev.id, str(id, 40));
+  return S(c, ev).one('SELECT * FROM guests WHERE event = ? AND id = ?', ev.id, str(id, 40));
 }
 async function authGuest(c, ev, req) {
   const g = await findGuest(c, ev, req.g);
@@ -234,7 +251,7 @@ async function readable(c, ev, req, m) {
   if (!isWall) await checkPin(c, ev, req.pin);
   return true;
 }
-const mediaRow = (c, ev, id) => c.one('SELECT * FROM media WHERE event = ? AND id = ?', ev.id, str(id, 100));
+const mediaRow = (c, ev, id) => S(c, ev).one('SELECT * FROM media WHERE event = ? AND id = ?', ev.id, str(id, 100));
 
 // ================================================================= public (guests)
 const A = {};
@@ -249,11 +266,11 @@ A.join = async (c, req) => {
     const g = await findGuest(c, ev, req.g);
     if (g && safeEq(g.token_hash, await sha256Hex(String(req.t)))) return { guest: guestView(ev, g), event: publicEvent(ev), key: (await eventKey(c, ev)) || undefined };
   }
-  const n = await c.one('SELECT COUNT(*) AS n FROM guests WHERE event = ?', ev.id);
+  const n = await S(c, ev).one('SELECT COUNT(*) AS n FROM guests WHERE event = ?', ev.id);
   if (n.n >= ev.settings.maxGuests * 4 + 50) throw err('full', 'This event has reached its guest limit.');
   const id = randomId(12), token = randomKey(24);
   const label = cleanText(req.label, LIMITS.LABEL) || 'Guest ' + id.slice(0, 4).toUpperCase();
-  await c.run('INSERT INTO guests (event, id, token_hash, label, created) VALUES (?, ?, ?, ?, ?)', ev.id, id, await sha256Hex(token), label, c.now());
+  await S(c, ev).run('INSERT INTO guests (event, id, token_hash, label, created) VALUES (?, ?, ?, ?, ?)', ev.id, id, await sha256Hex(token), label, c.now());
   return { guest: guestView(ev, { id, label, shots: 0, blocked: 0 }), token, event: publicEvent(ev), shotsPerGuest: ev.settings.shotsPerGuest, key: (await eventKey(c, ev)) || undefined };
 };
 
@@ -279,9 +296,9 @@ A.upload = async (c, req) => {
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientId)) throw err('bad_request', 'Invalid clientId');
   if (!(await rateOk(c, `upg:${ev.id}:${g.id}`, LIMITS.UPLOADS_PER_GUEST_PER_MIN, 60))) throw err('rate_limited', 'Slow down a little.');
   if (!(await rateOk(c, 'upe:' + ev.id, LIMITS.UPLOADS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Lots of uploads right now. Retrying soon.');
-  const dup = await c.one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+  const dup = await S(c, ev).one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
   if (dup) return { id: dup.id, duplicate: true, guest: guestView(ev, g) };
-  const used = await c.one("SELECT COALESCE(SUM(bytes), 0) AS b FROM media WHERE event = ? AND status != 'deleted'", ev.id);
+  const used = await S(c, ev).one("SELECT COALESCE(SUM(bytes), 0) AS b FROM media WHERE event = ? AND status != 'deleted'", ev.id);
 
   const enc = s.encrypted === true;
   let bytes = b64decode(req.data);
@@ -315,15 +332,15 @@ A.upload = async (c, req) => {
 
   // Reserve a shot atomically so parallel uploads can't exceed the roll or the guest limit.
   if (g.uploads === 0) {
-    const active = await c.one('SELECT COUNT(*) AS n FROM guests WHERE event = ? AND uploads > 0', ev.id);
+    const active = await S(c, ev).one('SELECT COUNT(*) AS n FROM guests WHERE event = ? AND uploads > 0', ev.id);
     if (active.n >= s.maxGuests) throw err('full', 'This event has reached its guest limit.');
   }
-  const total = await c.one('SELECT COUNT(*) AS n FROM media WHERE event = ?', ev.id);
+  const total = await S(c, ev).one('SELECT COUNT(*) AS n FROM media WHERE event = ?', ev.id);
   if (total.n >= s.maxGuests * s.shotsPerGuest + 50) throw err('full', 'This album is full.');
-  const res = await c.run('UPDATE guests SET shots = shots + 1, uploads = uploads + 1 WHERE event = ? AND id = ? AND shots < ?', ev.id, g.id, s.shotsPerGuest);
+  const res = await S(c, ev).run('UPDATE guests SET shots = shots + 1, uploads = uploads + 1 WHERE event = ? AND id = ? AND shots < ?', ev.id, g.id, s.shotsPerGuest);
   if (!res.meta || !res.meta.changes) throw err('no_shots', 'Your roll is finished!');
   g.shots += 1; g.uploads += 1;
-  const refund = () => c.run('UPDATE guests SET shots = MAX(0, shots - 1), uploads = MAX(0, uploads - 1) WHERE event = ? AND id = ?', ev.id, g.id);
+  const refund = () => S(c, ev).run('UPDATE guests SET shots = MAX(0, shots - 1), uploads = MAX(0, uploads - 1) WHERE event = ? AND id = ?', ev.id, g.id);
 
   const d = await drive(c, ev).catch(async (e) => { await refund(); throw e; });
   const ext = { 'image/jpeg': 'jpg', 'video/mp4': 'mp4', 'video/webm': 'webm' }[mime];
@@ -346,12 +363,12 @@ A.upload = async (c, req) => {
   if (!enc && status === 'visible' && !(await share(c, ev, [fileId, thumbId], true))) flags.push('share-failed');
   if (enc) flags.push('encrypted');
   try {
-    await c.run('INSERT INTO media (event, id, thumb, guest, kind, mime, bytes, sha, w, h, dur, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    await S(c, ev).run('INSERT INTO media (event, id, thumb, guest, kind, mime, bytes, sha, w, h, dur, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ev.id, fileId, thumbId, g.id, kind, mime, bytes.length, plainSha, int(req.w, 0, 20000, 0), int(req.h, 0, 20000, 0), int(req.dur, 0, 600, 0), now, status, clientId, flags.join(','));
   } catch (e) {
     await d.trash(fileId).catch(() => {}); if (thumbId) await d.trash(thumbId).catch(() => {});
     await refund();
-    const again = await c.one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+    const again = await S(c, ev).one('SELECT id FROM media WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
     if (again) return { id: again.id, duplicate: true, guest: guestView(ev, g) };
     throw e;
   }
@@ -368,7 +385,7 @@ A.list = async (c, req) => {
   if (!ev.v) { ev.v = randomId(8); await c.run('UPDATE events SET v = ? WHERE id = ?', ev.v, ev.id); }
   const base = { v: ev.v, revealed, event: publicEvent(ev) };
   if (req.v && req.v === ev.v) { base.unchanged = true; return base; }
-  const rows = await c.all('SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? ORDER BY m.seq', ev.id);
+  const rows = await S(c, ev).all('SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? ORDER BY m.seq', ev.id);
   const visible = rows.filter((m) => m.status === 'visible');
   base.count = visible.length;
   base.pending = rows.filter((m) => m.status === 'pending').length;
@@ -416,7 +433,7 @@ A.photo = async (c, req) => {
 A.mine = async (c, req) => {
   const ev = await loadPublicEvent(c, req.e);
   const g = await authGuest(c, ev, req);
-  const rows = await c.all("SELECT * FROM media WHERE event = ? AND guest = ? AND status != 'deleted' ORDER BY seq", ev.id, g.id);
+  const rows = await S(c, ev).all("SELECT * FROM media WHERE event = ? AND guest = ? AND status != 'deleted' ORDER BY seq", ev.id, g.id);
   return { items: rows.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', c: m.created, w: m.w, h: m.h, s: m.status })), guest: guestView(ev, g) };
 };
 
@@ -429,10 +446,10 @@ A.report = async (c, req) => {
   const m = await mediaRow(c, ev, req.id);
   if (!m) throw err('not_found', 'Photo not found.');
   if (m.status === 'visible') {
-    await c.run("UPDATE media SET status = 'reported', reports = reports + 1 WHERE seq = ?", m.seq);
+    await S(c, ev).run("UPDATE media SET status = 'reported', reports = reports + 1 WHERE seq = ?", m.seq);
     await share(c, ev, [m.id, m.thumb], false);
   }
-  await c.run('UPDATE guests SET reports = reports + 1 WHERE event = ? AND id = ?', ev.id, g.id);
+  await S(c, ev).run('UPDATE guests SET reports = reports + 1 WHERE event = ? AND id = ?', ev.id, g.id);
   await bump(c, ev);
   return {};
 };
@@ -448,7 +465,7 @@ A.guestbookAdd = async (c, req) => {
   if (s.closesAt && c.now() > Date.parse(s.closesAt)) throw err('closed', 'This album is closed.');
   const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
   if (clientId) {
-    const prev = await c.one('SELECT id, status FROM notes WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
+    const prev = await S(c, ev).one('SELECT id, status FROM notes WHERE event = ? AND guest = ? AND client = ?', ev.id, g.id, clientId);
     if (prev) return { id: prev.id, status: prev.status, duplicate: true };
   }
   const text = cleanText(req.text, LIMITS.NOTE_TEXT);
@@ -464,7 +481,7 @@ A.guestbookAdd = async (c, req) => {
   }
   if (!text && !audio) throw err('bad_request', 'Write a note or record a message.');
   if (!(await rateOk(c, `gb:${ev.id}:${g.id}`, 4, 60))) throw err('rate_limited', 'Slow down a little.');
-  const existing = await c.one("SELECT COUNT(*) AS n FROM notes WHERE event = ? AND guest = ? AND status != 'deleted'", ev.id, g.id);
+  const existing = await S(c, ev).one("SELECT COUNT(*) AS n FROM notes WHERE event = ? AND guest = ? AND status != 'deleted'", ev.id, g.id);
   if (existing.n >= LIMITS.NOTES_PER_GUEST) throw err('full', 'You’ve left the maximum number of messages.');
   const status = s.approval ? 'pending' : 'visible';
   const id = randomId(12);
@@ -474,7 +491,7 @@ A.guestbookAdd = async (c, req) => {
     const d = await drive(c, ev);
     audioId = await d.upload({ name: `guestbook_${id}${ext}${s.encrypted ? '.enc' : ''}`, mime: s.encrypted ? 'application/octet-stream' : mime, parent: await subFolder(c, ev, 'voice_folder', 'Guestbook voice messages'), bytes: audio });
   }
-  await c.run('INSERT INTO notes (id, event, guest, label, text, audio, created, status, client, dur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  await S(c, ev).run('INSERT INTO notes (id, event, guest, label, text, audio, created, status, client, dur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, ev.id, g.id, g.label, text, audioId ? `${audioId}|${mime}` : '', c.now(), status, clientId, int(req.dur, 0, 600, 0));
   await bump(c, ev);
   return { id, status };
@@ -487,7 +504,7 @@ A.guestbookList = async (c, req) => {
   const isWall = !!req.wk && safeEq(String(req.wk), await wallKey(ev));
   if (!isWall) await checkPin(c, ev, req.pin);
   if (!s.guestbook || !isRevealed(s) || (!s.guestGallery && !isWall)) return { notes: [] };
-  const rows = await c.all("SELECT * FROM notes WHERE event = ? AND status = 'visible' ORDER BY created", ev.id);
+  const rows = await S(c, ev).all("SELECT * FROM notes WHERE event = ? AND status = 'visible' ORDER BY created", ev.id);
   return { notes: rows.map((n) => ({ id: n.id, g: n.label, text: n.text, a: audioParts(n.audio).id, c: n.created, d: n.dur })) };
 };
 
@@ -499,7 +516,7 @@ A.noteAudio = async (c, req) => {
   if (!s.guestbook || !isRevealed(s) || (!s.guestGallery && !isWall)) throw err('not_found', 'Not found');
   if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
   const id = str(req.id, 100);
-  const note = id && await c.one("SELECT * FROM notes WHERE event = ? AND status = 'visible' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
+  const note = id && await S(c, ev).one("SELECT * FROM notes WHERE event = ? AND status = 'visible' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
   if (!note || !id) throw err('not_found', 'Not found');
   const { mime } = audioParts(note.audio);
   const bytes = await (await drive(c, ev)).download(id);
@@ -520,7 +537,7 @@ A.logo = async (c, req) => {
 // ================================================================= host (host key or the owning account's admin key)
 A.hostGet = async (c, req) => {
   const ev = await authHost(c, req);
-  return { event: await hostEvent(ev), key: (await eventKey(c, ev)) || undefined };
+  return { event: { ...(await hostEvent(ev)), purged: !!ev.purged }, key: (await eventKey(c, ev)) || undefined };
 };
 
 A.hostUpdate = async (c, req) => {
@@ -543,7 +560,7 @@ A.hostUpdate = async (c, req) => {
 
 A.hostList = async (c, req) => {
   const ev = await authHost(c, req);
-  const rows = await c.all("SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? AND m.status != 'deleted' ORDER BY m.seq", ev.id);
+  const rows = await S(c, ev).all("SELECT m.*, g.label AS glabel FROM media m LEFT JOIN guests g ON g.event = m.event AND g.id = m.guest WHERE m.event = ? AND m.status != 'deleted' ORDER BY m.seq", ev.id);
   if (!ev.v) { ev.v = randomId(8); await c.run('UPDATE events SET v = ? WHERE id = ?', ev.v, ev.id); }
   return {
     items: rows.map((m) => ({ i: m.id, t: m.thumb, k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), gid: m.guest,
@@ -565,7 +582,7 @@ A.hostModerate = async (c, req) => {
     if (!m || m.status === 'deleted') continue;
     if (status === 'deleted') { await d.trash(m.id).catch(() => {}); if (m.thumb) await d.trash(m.thumb).catch(() => {}); }
     else if (!m.flags.includes('encrypted')) await share(c, ev, [m.id, m.thumb], status === 'visible');
-    await c.run('UPDATE media SET status = ?, reports = ? WHERE seq = ?', status, status === 'visible' ? 0 : m.reports, m.seq);
+    await S(c, ev).run('UPDATE media SET status = ?, reports = ? WHERE seq = ?', status, status === 'visible' ? 0 : m.reports, m.seq);
     changed++;
   }
   await bump(c, ev);
@@ -576,20 +593,20 @@ A.hostFavorite = async (c, req) => {
   const ev = await authHost(c, req);
   const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 100)) : [];
   let changed = 0;
-  for (const id of ids) { const r = await c.run("UPDATE media SET fav = ? WHERE event = ? AND id = ? AND status != 'deleted'", req.fav === true ? 1 : 0, ev.id, id); changed += r.meta.changes || 0; }
+  for (const id of ids) { const r = await S(c, ev).run("UPDATE media SET fav = ? WHERE event = ? AND id = ? AND status != 'deleted'", req.fav === true ? 1 : 0, ev.id, id); changed += r.meta.changes || 0; }
   await bump(c, ev);
   return { changed };
 };
 
 A.hostGuests = async (c, req) => {
   const ev = await authHost(c, req);
-  const rows = await c.all('SELECT * FROM guests WHERE event = ? ORDER BY created', ev.id);
+  const rows = await S(c, ev).all('SELECT * FROM guests WHERE event = ? ORDER BY created', ev.id);
   return { guests: rows.map((r) => ({ id: r.id, label: r.label, shots: r.shots, uploads: r.uploads, joined: r.created, reports: r.reports, blocked: !!r.blocked })) };
 };
 
 A.hostBlockGuest = async (c, req) => {
   const ev = await authHost(c, req);
-  const r = await c.run('UPDATE guests SET blocked = ? WHERE event = ? AND id = ?', req.block === true ? 1 : 0, ev.id, str(req.guestId, 40));
+  const r = await S(c, ev).run('UPDATE guests SET blocked = ? WHERE event = ? AND id = ?', req.block === true ? 1 : 0, ev.id, str(req.guestId, 40));
   if (!r.meta.changes) throw err('not_found', 'Guest not found');
   return {};
 };
@@ -607,7 +624,7 @@ A.hostMedia = async (c, req) => {
   const d = await drive(c, ev);
   const m = await mediaRow(c, ev, id);
   if (!m && req.which === 'note') {
-    const note = id && await c.one("SELECT * FROM notes WHERE event = ? AND status != 'deleted' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
+    const note = id && await S(c, ev).one("SELECT * FROM notes WHERE event = ? AND status != 'deleted' AND substr(audio, 1, ?) = ?", ev.id, id.length + 1, id + '|');
     if (!note || !id) throw err('not_found', 'Not found');
     const bytes = await d.download(id);
     return { mime: audioParts(note.audio).mime, enc: isEnc(bytes) || undefined, data: b64encode(bytes) };
@@ -640,7 +657,7 @@ A.hostSetLogo = async (c, req) => {
 
 A.hostGuestbook = async (c, req) => {
   const ev = await authHost(c, req);
-  const rows = await c.all("SELECT * FROM notes WHERE event = ? AND status != 'deleted' ORDER BY created", ev.id);
+  const rows = await S(c, ev).all("SELECT * FROM notes WHERE event = ? AND status != 'deleted' ORDER BY created", ev.id);
   return { notes: rows.map((n) => ({ id: n.id, g: n.label, gid: n.guest, text: n.text, a: audioParts(n.audio).id, c: n.created, s: n.status, d: n.dur })) };
 };
 
@@ -652,14 +669,14 @@ A.hostGuestbookModerate = async (c, req) => {
   const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 40)) : [];
   let changed = 0;
   for (const id of ids) {
-    const n = await c.one('SELECT * FROM notes WHERE event = ? AND id = ?', ev.id, id);
+    const n = await S(c, ev).one('SELECT * FROM notes WHERE event = ? AND id = ?', ev.id, id);
     if (!n || n.status === 'deleted') continue;
     const a = audioParts(n.audio);
     if (a.id) {
       if (status === 'deleted') await (await drive(c, ev)).trash(a.id).catch(() => {});
       else if (!ev.settings.encrypted) await share(c, ev, [a.id], status === 'visible');
     }
-    await c.run('UPDATE notes SET status = ? WHERE id = ?', status, id);
+    await S(c, ev).run('UPDATE notes SET status = ? WHERE id = ?', status, id);
     changed++;
   }
   await bump(c, ev);
@@ -670,16 +687,19 @@ A.hostGuestbookModerate = async (c, req) => {
 A.hostRecover = async (c, req) => {
   const ev = await authHost(c, req);
   const d = await drive(c, ev);
-  const known = new Set((await c.all('SELECT id FROM media WHERE event = ?', ev.id)).map((r) => r.id));
+  const known = new Set((await S(c, ev).all('SELECT id FROM media WHERE event = ?', ev.id)).map((r) => r.id));
   const files = (await d.list(ev.folder)).filter((f) => !known.has(f.id) && /\.(jpg|mp4|webm)(\.enc)?$/.test(f.name) && !/^logo\./.test(f.name));
   if (req.dryRun === true || !files.length) return { found: files.length, duplicates: 0, added: 0 };
-  const status = ev.settings.approval ? 'pending' : 'visible';
+  // An album whose photo list the nightly cleanup cleared comes back "waiting for approval", so
+  // photos the host had hidden don't reappear without them deciding again.
+  const status = ev.settings.approval || ev.purged ? 'pending' : 'visible';
   for (const f of files) {
     const mime = /\.mp4/.test(f.name) ? 'video/mp4' : /\.webm/.test(f.name) ? 'video/webm' : 'image/jpeg';
-    await c.run('INSERT OR IGNORE INTO media (event, id, thumb, guest, kind, mime, bytes, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    await S(c, ev).run('INSERT OR IGNORE INTO media (event, id, thumb, guest, kind, mime, bytes, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ev.id, f.id, '', 'recovered', mime.startsWith('video') ? 'video' : 'photo', mime, Number(f.size) || 0, Date.parse(f.createdTime) || c.now(), status, 'recovered-' + f.id.slice(0, 40), 'recovered' + (/\.enc$/.test(f.name) ? ',encrypted' : ''));
     if (status === 'visible' && !/\.enc$/.test(f.name)) await share(c, ev, [f.id], true);
   }
+  if (ev.purged) await c.run('UPDATE events SET purged = 0 WHERE id = ?', ev.id);
   await bump(c, ev);
   return { found: files.length, duplicates: 0, added: files.length };
 };
@@ -769,8 +789,8 @@ A.adminCreate = async (c, req) => {
   }
   const hostKey = randomKey(32);
   const ek = settings.encrypted ? await seal(c.env, randomKey(32)) : '';
-  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek);
+  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc, shard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek, activeShard(c.env));
   return { id, hostKey };
 };
 
@@ -1170,3 +1190,65 @@ A.ownerCashSale = async (c, req) => {
 };
 
 export const ACTIONS = A;
+
+// ================================================================= nightly cleanup
+/**
+ * Run by the worker's daily cron. Keeps the databases small:
+ * - clears the photo index (guests, photos, notes rows) of albums past their 12-month hold and of
+ *   deleted events. The photos stay in the host's Drive; renewing + "Find missing photos" rebuilds it.
+ * - removes expired rate-limit, sign-in and invite rows and problem logs older than 90 days.
+ * Works in batches so one run stays well inside the worker's time limits; the next night continues.
+ */
+export async function nightly(env, { batch = 200 } = {}) {
+  const c = makeCtx(env);
+  const now = c.now();
+  const day = 86400000;
+  const out = { at: now, albums: 0, rows: 0, rate: 0, oauth: 0, invites: 0, problems: 0, more: false };
+  const evs = await c.all(`SELECT e.id, e.shard FROM events e JOIN accounts a ON a.id = e.account
+    WHERE e.purged = 0 AND (e.deleted = 1 OR (a.kind != 'owner' AND a.plan != 'partner' AND COALESCE(a.expires, 0) > 0 AND a.expires < ?))
+    LIMIT ?`, now - LIMITS.HOLD_MS, batch + 1);
+  out.more = evs.length > batch;
+  for (const ev of evs.slice(0, batch)) {
+    const db = c.shard(ev.shard || '');
+    for (const t of ['media', 'notes', 'guests']) out.rows += (await db.run(`DELETE FROM ${t} WHERE event = ?`, ev.id)).meta.changes || 0;
+    await c.run('UPDATE events SET purged = ? WHERE id = ?', now, ev.id);
+    out.albums++;
+  }
+  out.rate = (await c.run('DELETE FROM rate WHERE exp < ?', now)).meta.changes || 0;
+  out.oauth = (await c.run('DELETE FROM oauth_state WHERE exp < ?', now)).meta.changes || 0;
+  out.invites = (await c.run('DELETE FROM invites WHERE exp < ?', now - 30 * day)).meta.changes || 0;
+  out.problems = (await c.run('DELETE FROM problems WHERE t < ?', now - 90 * day)).meta.changes || 0;
+  await c.run('INSERT INTO meta (k, v, t) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, t = excluded.t', 'nightly', JSON.stringify(out), now);
+  return out;
+}
+
+// ================================================================= system health (owner)
+const GB = 1024 * 1024 * 1024;
+const DB_LIMIT = 10 * GB; // Cloudflare D1's per-database maximum
+/** Size of one D1 database in bytes (D1 reports it on every query), or 0 if unknown. */
+async function dbSize(db) {
+  try { const r = await db.prepare('SELECT 1').run(); return Number(r.meta && r.meta.size_after) || 0; } catch { return 0; }
+}
+A.ownerHealth = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const names = [''];
+  for (let i = 1; i <= 99; i++) if (c.env['SHARD_' + i]) names.push('SHARD_' + i);
+  const active = activeShard(c.env);
+  const dbs = [];
+  for (const name of names) {
+    const db = c.shard(name);
+    const size = await dbSize(db.db);
+    const ev = await c.one('SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN deleted = 0 AND purged = 0 THEN 1 ELSE 0 END), 0) AS live FROM events WHERE shard = ?', name);
+    const media = await db.one('SELECT COUNT(*) AS n FROM media');
+    dbs.push({ name: name || 'Main', active: name === active, size, limit: DB_LIMIT, pct: size ? Math.round((size / DB_LIMIT) * 1000) / 10 : 0, events: ev.n, live: ev.live, photos: media.n });
+  }
+  const m = await c.one("SELECT v, t FROM meta WHERE k = 'nightly'");
+  const fullest = dbs.find((d) => d.name === (active || 'Main')) || dbs[0];
+  const advice = fullest.pct >= 85 ? 'urgent' : fullest.pct >= 70 ? 'soon' : 'ok';
+  return { dbs, nightly: m ? { ...parseJson(m.v), t: m.t } : null, advice, accounts: (await c.one("SELECT COUNT(*) AS n FROM accounts WHERE kind != 'owner'")).n };
+};
+/** Owner: run the cleanup now (normally it runs every night). */
+A.ownerRunCleanup = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  return { result: await nightly(c.env) };
+};

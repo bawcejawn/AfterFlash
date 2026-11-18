@@ -16,12 +16,17 @@ database_name = "photoshare"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
+# Nightly database cleanup (UTC). See docs/SCALING.md.
+[triggers]
+crons = ["17 7 * * *"]
+
 [vars]
 APP_NAME = "AfterFlash"
 PRICE_EVENT = "5"
 PRICE_MONTH = "10"
 PRICE_YEAR = "30"
 OVERRIDE_PCT = "5"
+ACTIVE_SHARD = ""
 SITE_ORIGIN = "https://photoshare.example.workers.dev"
 GOOGLE_CLIENT_ID = ""
 SUPPORT_EMAIL = ""

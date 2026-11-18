@@ -45,6 +45,8 @@ jobs:
           PRICE_MONTH: ${{ vars.PRICE_MONTH }}
           PRICE_YEAR: ${{ vars.PRICE_YEAR }}
           OVERRIDE_PCT: ${{ vars.OVERRIDE_PCT }}
+          SHARDS: ${{ vars.SHARDS }}
+          ACTIVE_SHARD: ${{ vars.ACTIVE_SHARD }}
           SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
           BUSINESS_NAME: ${{ vars.BUSINESS_NAME }}
           APP_NAME: ${{ vars.APP_NAME }}

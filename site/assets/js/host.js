@@ -187,6 +187,7 @@ function photosTab() {
     h('button', { class: 'btn small', disabled: !selected.size, onclick: () => setFav([...selected], false) }, 'Unfavorite'),
     c.fav ? h('button', { class: 'btn small', onclick: downloadFavorites }, `Download favorites (${c.fav})`) : null,
     h('button', { class: 'btn small', onclick: recoverMissing, title: 'Adds photos that are in the Drive folder but missing from the album' }, 'Find missing photos'));
+  if (ev.purged) bodyEl.append(h('p', { class: 'callout warn' }, 'This album’s photo list was cleared because the plan had ended over 12 months ago. Your photos are still in your Google Drive: click “Find missing photos” to bring them back. They’ll come back waiting for your approval.'));
   bodyEl.append(h('div', { class: 'mod-toolbar stack' }, h('div', { class: 'row' }, ...chips), actions));
   if (!list.length) { bodyEl.append(h('p', { class: 'empty' }, filter === 'all' ? 'No photos yet. Share the QR code to get started.' : 'Nothing here.')); return; }
   bodyEl.append(h('div', { class: 'mod-grid' }, list.map((it) => {

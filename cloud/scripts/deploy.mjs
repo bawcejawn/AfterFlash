@@ -5,6 +5,7 @@
 //   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY       (secrets; DATA_KEY optional)
 //   GOOGLE_CLIENT_ID, PRICE_EVENT / PRICE_MONTH / PRICE_YEAR (dollars), SUPPORT_EMAIL,
 //   BUSINESS_NAME, APP_NAME, SITE_ORIGIN, GOOGLE_SITE_VERIFICATION                              (plain settings; all optional)
+//   SHARDS (how many extra databases, 0–20), ACTIVE_SHARD (e.g. SHARD_1: where new events go)   (scaling; see docs/SCALING.md)
 // Never prints secret values (this repository's Actions logs are public).
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -33,6 +34,28 @@ if (!db) {
 }
 const dbId = db.uuid || db.database_id || db.id;
 
+// 1b. Extra databases for event data ("shards"; docs/SCALING.md). Existing ones are always kept
+// bound, even if SHARDS is lowered: events stored there still need them.
+const idOf = (d) => d.uuid || d.database_id || d.id;
+const want = Number.parseInt(env.SHARDS || '0', 10);
+if (!Number.isInteger(want) || want < 0 || want > 20) fail('SHARDS must be a whole number from 0 to 20.');
+const have = dbs.map((d) => /^photoshare-shard-(\d+)$/.exec(d.name)).filter(Boolean).map((m) => Number(m[1]));
+const shardCount = Math.max(want, ...have, 0);
+const shards = [];
+for (let i = 1; i <= shardCount; i++) {
+  const name = `photoshare-shard-${i}`;
+  let d = dbs.find((x) => x.name === name);
+  if (!d) {
+    console.log(`Creating extra database ${i}…`);
+    run(['d1', 'create', name]);
+    dbs = JSON.parse(run(['d1', 'list', '--json']));
+    d = dbs.find((x) => x.name === name);
+  }
+  shards.push({ binding: `SHARD_${i}`, name, id: idOf(d) });
+}
+const active = env.ACTIVE_SHARD || '';
+if (active && !shards.some((x) => x.binding === active)) fail(`ACTIVE_SHARD is "${active}", but only ${shards.length ? shards.map((x) => x.binding).join(', ') : 'the main database'} exist. Set SHARDS first, or clear ACTIVE_SHARD.`);
+
 // 2. The site's address
 let origin = (env.SITE_ORIGIN || '').replace(/\/+$/, '');
 if (!origin) {
@@ -55,10 +78,12 @@ const vars = {
   PRICE_EVENT: env.PRICE_EVENT || '5',
   PRICE_MONTH: env.PRICE_MONTH || '10',
   PRICE_YEAR: env.PRICE_YEAR || '30',
+  ACTIVE_SHARD: active,
   OVERRIDE_PCT: env.OVERRIDE_PCT || '5',
 };
 let toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8')
   .replace(/database_id = "[^"]*"/, `database_id = "${dbId}"`)
+  .replace('\n[triggers]', shards.map((x) => `\n[[d1_databases]]\nbinding = "${x.binding}"\ndatabase_name = "${x.name}"\ndatabase_id = "${x.id}"\nmigrations_dir = "migrations-shard"\n`).join('') + '\n[triggers]')
   .replace(/\[vars\][\s\S]*$/, '[vars]\n' + Object.entries(vars).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n') + '\n');
 const cfg = path.join(root, 'wrangler.deploy.toml');
 fs.writeFileSync(cfg, toml);
@@ -66,6 +91,7 @@ fs.writeFileSync(cfg, toml);
 // 4. Database tables, then the code + website
 console.log('Updating database tables…');
 run(['d1', 'migrations', 'apply', 'photoshare', '--remote', '-c', cfg], { input: 'y\n' });
+for (const x of shards) run(['d1', 'migrations', 'apply', x.name, '--remote', '-c', cfg], { input: 'y\n' });
 console.log('Deploying…');
 run(['deploy', '-c', cfg]);
 
