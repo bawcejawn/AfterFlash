@@ -3,6 +3,7 @@ import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, se
 import { api, ApiError } from './api.js';
 import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore } from './film.js';
 import { openComposer } from './guestbook.js';
+import { applyBrand, logoEl } from './brand.js';
 import { queue, createUploader } from './queue.js';
 
 frameGuard();
@@ -55,7 +56,7 @@ async function boot() {
   } catch (e) {
     return fail(e.code === 'not_found' ? 'We couldn’t find this event. It may have been removed.' : e.message);
   }
-  setAccent(ev.accent);
+  applyBrand(ev);
   setTitle(ev.name);
   auth = store.get(authKey());
   if (auth) { auth.name = ev.name; auth.lastUsed = Date.now(); store.set(authKey(), auth); }
@@ -89,7 +90,9 @@ function welcome(errMsg) {
   const go = h('button', { class: 'btn flash block', type: 'submit' }, 'Open the camera');
   const form = h('form', { class: 'stack' },
     h('div', null,
+      logoEl(studio, eventId, ev),
       h('h1', null, ev.name),
+      ev.tagline ? h('p', { class: 'lede' }, ev.tagline) : null,
       ev.date ? h('p', { class: 'muted' }, fmtDate(ev.date)) : null,
       ev.welcome ? h('p', null, ev.welcome) : null),
     h('p', null, `You get ${ev.shotsPerGuest} shots${ev.allowVideo ? ', and any of them can be a short video' : ''}. Make them count.`),
@@ -187,7 +190,7 @@ async function startCamera() {
 
   clear(root).append(h('div', { class: 'cam-shell' },
     h('header', { class: 'cam-top' },
-      h('div', { class: 'cam-title' }, ev.name),
+      h('div', { class: 'cam-title-wrap' }, logoEl(studio, eventId, ev), h('div', { class: 'cam-title' }, ev.name)),
       h('div', { class: 'counter' }, els.counter, h('span', null, 'left'))),
     els.vf,
     h('footer', { class: 'cam-bottom' },

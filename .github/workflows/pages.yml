@@ -2,7 +2,7 @@ name: Deploy site to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'backend/Code.gs', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # Friends copy the backend from the site itself when they set up their own PhotoShare.
+      - run: mkdir -p site/backend && cp backend/Code.gs site/backend/Code.gs.txt
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

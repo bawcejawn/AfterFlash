@@ -13,12 +13,10 @@
  *  grain    film grain amount              vig   vignette strength
  */
 export const LOOKS = {
-  none: { label: 'Natural' },
-  glow: { label: 'Glow', exp: 1.05, con: 0.96, lift: 6, roll: 0.25, sat: 0.96, vib: 0.12, warm: 0.035, hi: [6, 3, 0], glow: 0.22, beauty: 0.35, grain: 0, vig: 0.1 },
+  none: { label: 'Original' },
   vivid: { label: 'Bright', exp: 1.06, con: 1.12, gamma: 0.96, sat: 1.12, vib: 0.22, warm: 0.01, sh: [-4, 0, 7], hi: [6, 3, -2], grain: 0, vig: 0.08 },
   classic: { label: 'Classic film', exp: 1.02, con: 1.06, lift: 16, roll: 0.2, gamma: 0.97, sat: 0.9, warm: 0.045, tint: 0.01, sh: [-3, 4, 4], hi: [8, 4, -6], grain: 10, vig: 0.26 },
   warm: { label: 'Golden hour', exp: 1.04, con: 1.04, lift: 8, roll: 0.15, sat: 1.06, vib: 0.1, warm: 0.09, hi: [12, 5, -8], glow: 0.08, grain: 5, vig: 0.22 },
-  fade: { label: 'Soft pastel', exp: 1.06, con: 0.86, lift: 30, roll: 0.3, sat: 0.8, warm: -0.01, sh: [2, 2, 8], hi: [4, 2, 4], grain: 4, vig: 0.08 },
   moody: { label: 'Moody', exp: 0.98, con: 1.1, lift: 18, gamma: 1.04, sat: 0.82, warm: 0.02, sh: [-6, 2, 10], hi: [10, 4, -6], grain: 8, vig: 0.32 },
   mono: { label: 'Black & white', mono: true, exp: 1.02, con: 1.24, lift: 8, gamma: 0.98, grain: 12, vig: 0.26 },
 };

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 // Exercises backend/Code.gs against the in-memory Apps Script mock.
 import assert from 'node:assert/strict';
 import { createGas } from './gas-mock.mjs';
@@ -728,6 +729,52 @@ t('find missing photos also works for private-storage events', () => {
   const items = env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items;
   assert.equal(items.length, 1); assert.ok(items[0].t, 'locked preview re-linked');
   assert.equal(env.post({ a: 'hostRecover', e: ev.id, k: ev.hostKey, dryRun: true }).found, 0);
+});
+
+t('a friend can claim a fresh backend from the website exactly once', () => {
+  const gas = createGas(); // fresh deployment: setup() never run
+  assert.equal(JSON.parse(gas.ctx.doGet().body).ready, false);
+  const r = gas.post({ a: 'claim' });
+  assert.equal(r.ok, true); assert.ok(/^[A-Za-z0-9_-]{43}$/.test(r.adminKey));
+  assert.equal(JSON.parse(gas.ctx.doGet().body).ready, true);
+  assert.equal(gas.post({ a: 'claim' }).error, 'already_set_up');
+  assert.equal(gas.post({ a: 'adminCheck', k: r.adminKey }).ok, true);
+  const ev = gas.post({ a: 'adminCreate', k: r.adminKey, settings: { name: 'Friend party' } });
+  assert.equal(ev.ok, true);
+  // an existing studio can never be claimed
+  const env = boot();
+  assert.equal(env.post({ a: 'claim' }).error, 'already_set_up');
+});
+
+t('website and backend versions match', () => {
+  const api = fs.readFileSync(new URL('../site/assets/js/api.js', import.meta.url), 'utf8');
+  const code = fs.readFileSync(new URL('../backend/Code.gs', import.meta.url), 'utf8');
+  assert.equal(/BACKEND_VERSION = '([^']+)'/.exec(api)[1], /APP_VERSION = '([^']+)'/.exec(code)[1]);
+});
+
+t('branding: logo upload is host-only, image-only, and served publicly; font and tagline sanitised', () => {
+  const env = boot();
+  const ev = makeEvent(env, { font: 'script', tagline: '=HYPERLINK("x") Snap away!' });
+  let pub = env.post({ a: 'event', e: ev.id }).event;
+  assert.equal(pub.font, 'script'); assert.equal(pub.tagline, 'HYPERLINK("x") Snap away!'); assert.equal(pub.logoV, '');
+  assert.equal(makeEvent(env, { font: 'comic' }).ok, true);
+  const pngLogo = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 3)]);
+  assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: 'nope', data: b64(pngLogo) }).error, 'unauthorized');
+  assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey, data: b64(html()) }).error, 'bad_type');
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey, data: b64(svg) }).error, 'bad_type');
+  assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey, data: b64(Buffer.concat([pngLogo, Buffer.alloc(210 * 1024)])) }).error, 'too_large');
+  const set = env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey, data: b64(pngLogo) });
+  assert.equal(set.ok, true);
+  pub = env.post({ a: 'event', e: ev.id }).event;
+  assert.equal(pub.logoV, set.logoV);
+  const logo = env.post({ a: 'logo', e: ev.id });
+  assert.equal(logo.mime, 'image/png'); assert.equal(Buffer.from(logo.data, 'base64').length, pngLogo.length);
+  // settings can't smuggle a logo file id
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { logo: { id: 'other', v: 'x' }, logoId: 'other' } });
+  assert.equal(env.post({ a: 'event', e: ev.id }).event.logoV, set.logoV);
+  assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey }).logoV, '');
+  assert.equal(env.post({ a: 'logo', e: ev.id }).error, 'not_found');
 });
 
 // tiny helper so the test above can stay sync

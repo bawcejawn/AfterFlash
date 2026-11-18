@@ -91,7 +91,7 @@ with sync_playwright() as p:
     expect(cam.locator(".viewfinder")).to_have_class(re.compile("previewing"))
     # the live preview is a real processed frame: black & white means R == G == B
     wait_js(cam, "(() => { const c = document.querySelector('.vf-preview'); if (!c.width) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 0; i < d.length; i += 4000) if (Math.abs(d[i] - d[i+1]) > 2 || Math.abs(d[i+1] - d[i+2]) > 2) return false; return true; })()", 10000)
-    cam.click("button[data-look=glow]")
+    cam.click("button[data-look=vivid]")
     cam.click("button.chip:has-text('Beauty')")
     expect(cam.locator("button.chip:has-text('Beauty')")).to_have_attribute("aria-pressed", "false")
     cam.click("button.chip:has-text('Beauty')")
@@ -273,6 +273,89 @@ with sync_playwright() as p:
         page.click("text=Download key backup")
     backup = json.loads(open(dl.value.path()).read())
     assert p_id in json.dumps(backup), backup
+
+    # ---- branding: logo, heading style and tagline show on the guest pages
+    import zlib, struct
+    def png(w, h):
+        raw = b"".join(b"\x00" + b"".join(bytes([200, 60, 90, 255 if (x // 8 + y // 8) % 2 else 0]) for x in range(w)) for y in range(h))
+        chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    host.click("role=tab[name='Settings']")
+    host.set_input_files("fieldset:has(legend:text('Branding')) input[type=file]", files=[{"name": "logo.png", "mimeType": "image/png", "buffer": png(96, 48)}])
+    expect(host.locator(".toast").last).to_contain_text("Logo saved", timeout=15000)
+    host.select_option("select[name=font]", "script")
+    host.fill("input[name=tagline]", "Snap away, share the love")
+    host.click("text=Save settings")
+    expect(host.locator(".toast").last).to_contain_text("Settings saved")
+    bc = phone.new_page(); watch(bc, "brandcam")
+    bc.goto(f"{BASE}/cam.html?e={event_id}")
+    wait_js(bc, "document.documentElement.dataset.font === 'script'", 10000)
+    wait_js(bc, "[...document.querySelectorAll('img.brand-logo')].some(i => !i.hidden && i.naturalWidth === 96)", 15000)
+    bc.screenshot(path=f"{SHOTS}/15-branded-cam.png")
+    bc.close()
+
+    # ---- highlight video: made in the browser from the album
+    host.click("role=tab[name='Highlight video']")
+    host.select_option("select[name=speed]", "2")
+    host.click("button:has-text('Make the video')")
+    try:
+        expect(host.locator("video.film-preview")).to_be_visible(timeout=90000)
+    except Exception:
+        print("DEBUG status:", host.locator("p[aria-live]").all_inner_texts(), host.locator(".toast").all_inner_texts(), errors[-5:])
+        raise
+    expect(host.locator("text=/Done: /")).to_be_visible()
+    size_kb = int(host.locator("p[data-bytes]").get_attribute("data-bytes")) / 1024
+    assert size_kb > 20, size_kb
+    with host.expect_download() as dl:
+        host.click("a:has-text('Download video')")
+    dl.value.save_as(f"{SHOTS}/highlight.{dl.value.suggested_filename.rsplit('.', 1)[-1]}")
+    host.screenshot(path=f"{SHOTS}/16-highlight.png", full_page=True)
+
+    # ---- a friend sets up their own PhotoShare (their own backend, their own Drive)
+    friend = browser.new_context(viewport={"width": 1100, "height": 900}, permissions=["clipboard-read", "clipboard-write"])
+    friend.route(re.compile(r"^https://script\.google\.com/macros/s/AKfy[A-Za-z0-9_-]+/exec"), lambda route: route.fulfill(response=route.fetch(url=BASE + "/mock-byo")))
+    fp = friend.new_page(); watch(fp, "setup")
+    fp.goto(BASE + "/setup.html")
+    fp.click("button:has-text('Copy the code')")
+    expect(fp.locator(".toast").last).to_contain_text("Code copied")
+    assert "var APP_VERSION" in fp.evaluate("navigator.clipboard.readText()")
+    fp.fill("#exec-url", "https://script.google.com/macros/s/AKfyFRIEND0000000000000000000000000/dev")
+    fp.click("button:has-text('Connect')")
+    expect(fp.locator(".callout")).to_contain_text("test URL")
+    friend_url = "https://script.google.com/macros/u/1/s/AKfyFRIEND0000000000000000000000000/exec"
+    fp.fill("#exec-url", friend_url)
+    fp.fill("#studio-name", "Jordan's parties")
+    fp.click("button:has-text('Connect')")
+    expect(fp.locator("h1")).to_have_text("You’re set up", timeout=20000)
+    friend_key = fp.locator(".keybox").inner_text().strip()
+    assert len(friend_key) == 43 and friend_key != ADMIN_KEY
+    fp.screenshot(path=f"{SHOTS}/17-setup-done.png", full_page=True)
+    fp.click("text=Create your first event")
+    expect(fp.locator("h1")).to_have_text("Events", timeout=15000)
+    fp.fill("input[name=name]", "Jordan's birthday")
+    fp.click("text=Create event")
+    fh_url = fp.locator(".keybox").first.inner_text().strip()
+    assert "b=AKfyFRIEND" in fh_url, fh_url
+    f_id = re.search(r"e=([A-Za-z0-9]+)", fh_url).group(1)
+    # the owner's admin key is useless on the friend's PhotoShare and vice versa
+    assert '"unauthorized"' in fp.evaluate(f"fetch('{BASE}/mock-byo', {{method: 'POST', body: JSON.stringify({{a: 'adminCheck', k: '{ADMIN_KEY}'}})}}).then(r => r.text())")
+    # a guest of the friend's event uploads to the friend's backend
+    gctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, permissions=["camera", "microphone"])
+    gctx.route(re.compile(r"^https://script\.google\.com/macros/s/AKfy[A-Za-z0-9_-]+/exec"), lambda route: route.fulfill(response=route.fetch(url=BASE + "/mock-byo")))
+    fg = gctx.new_page(); watch(fg, "friendcam")
+    fg.goto(f"{BASE}/cam.html?e={f_id}&b=AKfyFRIEND0000000000000000000000000")
+    expect(fg.locator("h1")).to_have_text("Jordan's birthday")
+    fg.click("text=Open the camera")
+    wait_js(fg, "document.querySelector('video') && document.querySelector('video').videoWidth > 0", 15000)
+    fg.click(".shutter")
+    expect(fg.locator(".queue-pill")).to_contain_text("All photos uploaded", timeout=30000)
+    # an admin page link naming a backend this device never set up is ignored (no key phishing)
+    ev2 = desk.new_page(); watch(ev2, "phish")
+    ev2.goto(BASE + "/admin.html?b=AKfyEVIL00000000000000000000000000000")
+    expect(ev2.locator(".callout")).to_contain_text("isn’t set up on this device")
+    # the friend's home page lists their PhotoShare
+    fp.goto(BASE + "/index.html")
+    expect(fp.locator("#my-studios")).to_contain_text("Jordan's parties")
 
     # ---- Koinos pages load under their CSP (koilib needs eval there) without script errors
     host.click("role=tab[name='Keepsakes']")

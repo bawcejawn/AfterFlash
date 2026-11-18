@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.9.0';
+var APP_VERSION = '1.10.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -55,7 +55,8 @@ var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash
 // ---------------------------------------------------------------- entry points
 
 function doGet() {
-  return json_({ ok: true, app: 'photoshare', version: APP_VERSION });
+  var ready = !!PropertiesService.getScriptProperties().getProperty('ADMIN_KEY_HASH');
+  return json_({ ok: true, app: 'photoshare', version: APP_VERSION, ready: ready });
 }
 
 function doPost(e) {
@@ -85,7 +86,9 @@ function doPost(e) {
 
 var ACTIONS = {
   // public
+  claim: aClaim,
   event: aEvent,
+  logo: aLogo,
   join: aJoin,
   upload: aUpload,
   list: aList,
@@ -110,6 +113,7 @@ var ACTIONS = {
   hostSaveManifest: aHostSaveManifest,
   hostMarkArchived: aHostMarkArchived,
   hostFavorite: aHostFavorite,
+  hostSetLogo: aHostSetLogo,
   hostRecover: aHostRecover,
   hostGuestbook: aHostGuestbook,
   hostGuestbookModerate: aHostGuestbookModerate,
@@ -132,6 +136,16 @@ var ACTIONS = {
 
 /** Creates the root folder + index sheet and prints a new admin key to the execution log. */
 function setup() {
+  ensureStorage_();
+  if (!PropertiesService.getScriptProperties().getProperty('ADMIN_KEY_HASH')) {
+    rotateAdminKey();
+  } else {
+    console.log('Setup already complete. Run rotateAdminKey() to issue a new admin key.');
+  }
+}
+
+/** Creates the PhotoShare folder and the events index sheet in this Google account's Drive (once). */
+function ensureStorage_() {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ROOT_FOLDER_ID')) {
     var folder = DriveApp.createFolder('PhotoShare');
@@ -145,11 +159,23 @@ function setup() {
     sh.getRange(1, 1, 1, EVENT_COLS.length).setValues([EVENT_COLS]);
     props.setProperty('INDEX_SHEET_ID', ss.getId());
   }
-  if (!props.getProperty('ADMIN_KEY_HASH')) {
-    rotateAdminKey();
-  } else {
-    console.log('Setup already complete. Run rotateAdminKey() to issue a new admin key.');
-  }
+}
+
+/**
+ * First-time setup from the website (no editor steps): only works while this backend has no
+ * admin key yet, so it can be done exactly once, by whoever deployed it moments ago. Creates
+ * the Drive folder and index, and returns a new admin key (only its hash is kept).
+ */
+function aClaim(req) {
+  if (!rateOk_('claim', 10, 600)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
+  var key = randomKey_(32);
+  withLock_(function () {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('ADMIN_KEY_HASH')) throw err_('already_set_up', 'This PhotoShare is already set up. Sign in with its admin key.');
+    ensureStorage_();
+    props.setProperty('ADMIN_KEY_HASH', sha256Hex_(key));
+  });
+  return { adminKey: key, version: APP_VERSION };
 }
 
 /** Issues a new admin key (invalidates the old one). Copy it from the execution log. */
@@ -563,6 +589,63 @@ function aHostGuestbookModerate(req) {
   return { changed: changed };
 }
 
+// ---------------------------------------------------------------- branding (logo)
+
+var LOGO_BYTES = 200 * 1024;
+
+/** The event's logo record {id, v, mime} (kept in Script Properties, never in settings). */
+function readLogo_(eventId) {
+  var x = parseJson_(PropertiesService.getScriptProperties().getProperty('LOGO:' + eventId) || '');
+  return x && x.id && x.v ? x : null;
+}
+
+/** PNG, JPEG or WebP only (never SVG: it can carry scripts). */
+function sniffImage_(b) {
+  if (b.length < 12) return '';
+  if (u8_(b[0]) === 0x89 && u8_(b[1]) === 0x50 && u8_(b[2]) === 0x4e && u8_(b[3]) === 0x47) return 'image/png';
+  if (u8_(b[0]) === 0xff && u8_(b[1]) === 0xd8 && u8_(b[2]) === 0xff) return 'image/jpeg';
+  if (u8_(b[0]) === 0x52 && u8_(b[1]) === 0x49 && u8_(b[2]) === 0x46 && u8_(b[3]) === 0x46 && u8_(b[8]) === 0x57 && u8_(b[9]) === 0x45 && u8_(b[10]) === 0x42 && u8_(b[11]) === 0x50) return 'image/webp';
+  return '';
+}
+
+function aHostSetLogo(req) {
+  var ev = authHost_(req);
+  var old = ev.logo;
+  var rec = null;
+  if (req.data) {
+    var bytes = decodeB64_(req.data);
+    if (bytes.length > LOGO_BYTES) throw err_('too_large', 'That logo is too big. Use an image under 200 KB.');
+    var mime = sniffImage_(bytes);
+    if (!mime) throw err_('bad_type', 'Use a PNG, JPEG or WebP image.');
+    var f = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(bytes, mime, 'logo.' + mime.split('/')[1]));
+    rec = { id: f.getId(), v: randomId_(8), mime: mime };
+    PropertiesService.getScriptProperties().setProperty('LOGO:' + ev.id, JSON.stringify(rec));
+  } else {
+    PropertiesService.getScriptProperties().deleteProperty('LOGO:' + ev.id);
+  }
+  if (old) { try { DriveApp.getFileById(old.id).setTrashed(true); } catch (x) { /* already gone */ } }
+  dropEventCache_(ev.id);
+  bumpVersion_(ev.id);
+  return { logoV: rec ? rec.v : '' };
+}
+
+/** The event's logo (public: it's shown on the camera page and the printed sign). */
+function aLogo(req) {
+  var ev = loadEvent_(req.e);
+  if (!ev.logo) throw err_('not_found', 'No logo');
+  var cache = CacheService.getScriptCache();
+  var ck = 'logo:' + ev.id + ':' + ev.logo.v;
+  var data = cache.get(ck);
+  if (!data) {
+    if (!rateOk_('logo:' + ev.id, 120, 60)) throw err_('rate_limited', 'Busy, try again.');
+    var bytes = DriveApp.getFileById(ev.logo.id).getBlob().getBytes();
+    if (bytes.length > LOGO_BYTES || sniffImage_(bytes) !== ev.logo.mime) throw err_('not_found', 'No logo');
+    data = Utilities.base64Encode(bytes);
+    if (data.length < 95000) cache.put(ck, data, 21600);
+  }
+  return { mime: ev.logo.mime, v: ev.logo.v, data: data };
+}
+
 // ---------------------------------------------------------------- favorites
 
 /**
@@ -968,6 +1051,7 @@ function aAdminDelete(req) {
   requireEventAdmin_(me, ev.id);
   if (req.confirm !== ev.id) throw err_('bad_request', 'Confirmation does not match');
   DriveApp.getFolderById(ev.folderId).setTrashed(true);
+  PropertiesService.getScriptProperties().deleteProperty('LOGO:' + ev.id);
   withLock_(function () {
     var row = findEventRow_(ev.id);
     row.sheet.getRange(row.rowIndex, 9).setValue(true);
@@ -1039,7 +1123,7 @@ function loadEvent_(id) {
     var row = findEventRow_(id);
     if (!row || row.row[8] === true) throw err_('not_found', 'Event not found');
     var r = row.row;
-    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '' };
+    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '', logo: readLogo_(String(r[0])) };
     cache.put('e:' + id, JSON.stringify(ev), 300);
   }
   return ev;
@@ -1067,7 +1151,7 @@ function sanitizeSettings_(s) {
     var t = Date.parse(v);
     return isNaN(t) ? '' : new Date(t).toISOString();
   };
-  var looks = ['none', 'glow', 'vivid', 'classic', 'warm', 'fade', 'moody', 'mono'];
+  var looks = ['none', 'vivid', 'classic', 'warm', 'moody', 'mono'];
   var color = /^#[0-9a-fA-F]{6}$/.test(String(s.accent)) ? String(s.accent) : '#0f7c7a';
   return {
     name: cleanText_(s.name, LIMITS.NAME),
@@ -1094,7 +1178,9 @@ function sanitizeSettings_(s) {
     guestLooks: s.guestLooks !== false,
     beauty: s.beauty !== false,
     dateStamp: s.dateStamp === true,
-    accent: color
+    accent: color,
+    font: ['modern', 'elegant', 'script'].indexOf(s.font) >= 0 ? s.font : 'modern',
+    tagline: cleanText_(s.tagline, 80)
   };
 }
 
@@ -1111,7 +1197,7 @@ function publicEvent_(ev) {
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
-    accent: s.accent, approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
+    accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
   };
 }
 

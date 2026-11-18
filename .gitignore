@@ -5,3 +5,4 @@ recovered-*/
 *-manifest.json
 .env
 .env.*
+site/backend/

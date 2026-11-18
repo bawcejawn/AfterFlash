@@ -4,8 +4,9 @@ export default {
   appName: 'PhotoShare',
 
   // One entry per Google Apps Script deployment ("studio"). Keys are short names that
-  // appear in links as ?s=<key>. The FIRST entry is the default. Only URLs listed here
-  // are ever contacted — links cannot point the app at any other server.
+  // appear in links as ?s=<key>. The FIRST entry is the default. Friends who set up their own
+  // PhotoShare (setup.html) use links with ?b=<deployment id>, which can only ever mean a
+  // https://script.google.com/macros/s/<id>/exec address. No other server is ever contacted.
   backends: {
     main: 'https://script.google.com/macros/s/AKfycbzuMjd4EGHezYGCs6Lc1v84fMs7xc-qm8Tg_2LPycnGZOCbUc88qZNzEyOlgPhbeQk_/exec',
   },
