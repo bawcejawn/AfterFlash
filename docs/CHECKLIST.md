@@ -2,15 +2,12 @@
 
 Your to-do list, in order. Tick items off as you go. Step-by-step instructions are in the linked docs.
 
-## Right now (about 5 minutes)
+## Right now
 
-- [ ] **Decide what to do about the free website.** You made the repo **private** on Nov 18. That's good: your code can't be copied, and Claude's access still works. But GitHub's free plan only runs GitHub Pages (the free site at bawcejawn.github.io/PhotoShare) for public repos, so that site is off. Pick one:
-  - **A. Pay for GitHub Pro ($4/month):** github.com/settings/billing → upgrade to Pro. Then **Settings → Pages → Source: GitHub Actions** and **Actions → Deploy site to GitHub Pages → Run workflow**. The repo stays private; the site itself is public, which is fine because it holds no secrets.
-  - **B. Skip the free site ($0):** set up the paid Cloudflare version (docs/LAUNCH.md). It hosts its own website from the private repo. Test with friends by giving them free keys from your owner panel, with Stripe in test mode.
-  - **C. Make the repo public again ($0):** **Settings → General → Danger Zone → Change visibility.** Everything works as before, but anyone can read and copy the code.
-  - Recommended: **B**. You need Cloudflare anyway, and free keys make friend tests easy.
-- [ ] **Delete the old branches.** Go to **github.com/bawcejawn/PhotoShare/branches** and click the trash icon on every branch except `main`. All of their work is already in `main`.
-- [ ] **Turn on automatic branch cleanup:** **Settings → General → Pull Requests →** tick **Automatically delete head branches**.
+- [x] **Free website decided (Nov 18): repo is public again.** The free site is back at **https://bawcejawn.github.io/AfterFlash/**. Anyone can read the code, but it holds no secrets. If you go private later, the free site turns off (GitHub Pro, $4/month, keeps it on).
+- [x] **Old branches deleted.**
+- [x] **Automatic branch cleanup turned on.**
+- [ ] **Put AfterFlash on your phone:** open the site in Safari (iPhone) or Chrome (Android), sign in to your studio admin page, tap **Add to home screen**. Help article: **/help.html#home-screen-host**.
 
 ## The name (before you recruit partners or print anything)
 
@@ -19,7 +16,7 @@ Your to-do list, in order. Tick items off as you go. Step-by-step instructions a
 - [ ] Check the domain in Cloudflare (**Domain Registration → Register Domains**): `afterflash.com`, or `getafterflash.com` / `afterflash.app`. Buy one (about $10–15 a year).
 - [ ] Get a trademark attorney's clearance search, then file the AfterFlash trademark yourself.
 - [ ] If the name isn't safe, pick another. It's a one-PR rename.
-- [ ] Optional: rename the repo (**Settings → Repository name → AfterFlash**). The free site's address changes to `bawcejawn.github.io/AfterFlash/`, so do it before you share links.
+- [x] Repo renamed to **AfterFlash** (Nov 18). Old `/PhotoShare/` site links no longer work.
 
 ## Try it with friends first ($0)
 

@@ -2,8 +2,8 @@
 
 A shared disposable camera for weddings, parties and other events. Guests scan a QR code, take photos from their phone's browser, and every photo lands in one album stored in **your** Google Drive. There's no app to install, guests don't need accounts, and it costs nothing to run.
 
-- **Live site:** https://bawcejawn.github.io/PhotoShare/
-- **Studio sign-in (create events):** https://bawcejawn.github.io/PhotoShare/admin.html
+- **Live site:** https://bawcejawn.github.io/AfterFlash/
+- **Studio sign-in (create events):** https://bawcejawn.github.io/AfterFlash/admin.html
 
 ---
 
@@ -142,7 +142,7 @@ Open the **Google Drive folder** (link on the Share tab) and download it. Google
 
 ## Let friends host their own events
 
-Send friends this link: **https://bawcejawn.github.io/PhotoShare/setup.html**
+Send friends this link: **https://bawcejawn.github.io/AfterFlash/setup.html**
 
 They set up their own AfterFlash in about 5 minutes with their own Google account. Their photos go to **their** Google Drive, they're the admin of their own events, and nothing touches your Drive or your storage. The setup page walks them through it:
 

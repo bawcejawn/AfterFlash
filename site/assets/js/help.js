@@ -31,6 +31,11 @@ const GUESTS = [
   { id: 'remove-photo', q: 'I want a photo taken down', steps: [
     'Open the photo in the album and tap “Report”. It’s hidden right away until the host decides.',
     'Or ask the host directly: they can hide or delete any photo.'] },
+  { id: 'home-screen', q: 'Put the camera on my phone’s home screen', steps: [
+    'On the camera page, tap “Add to home screen” at the bottom and follow the steps.',
+    'iPhone: it must be Safari. Tap the Share button (the square with an arrow) → “Add to Home Screen” → “Add”.',
+    'Android: Chrome’s menu (⋮) → “Add to Home screen” or “Install app”.',
+    'The icon opens the event you used last. Tap the logo at the top to see all your events.'] },
 ];
 
 const HOSTS = [
@@ -68,6 +73,11 @@ const HOSTS = [
   { id: 'problems', q: 'Something else went wrong', steps: [
     'If something failed, your admin page shows a “Recent problems” list with what went wrong and when. It often says exactly what to fix.',
     support ? `Still stuck? Email ${support} with your event name and what happened.` : 'Still stuck? Contact whoever set up your AfterFlash.'] },
+  { id: 'home-screen-host', q: 'Open my dashboard from my phone’s home screen', steps: [
+    'Hosts: open your host link, go to the Access tab, tick “Remember me on this device”, then tap “Add to home screen”. Only do this on your own phone.',
+    'Studio admins: sign in, then tap “Add to home screen” next to Sign out. You’ll sign in each time you open it; your admin key is never saved on the phone.',
+    'The icon opens whatever you used last on that phone. Tap the logo at the top to switch to another event.',
+    'Lost your phone? Make a new host link (Access tab) so the old one stops working.'] },
 ];
 
 const PARTNERS = [

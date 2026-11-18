@@ -46,7 +46,7 @@ Commit and push to `main`.
 1. In the repository on GitHub, go to **Settings → Pages**.
 2. Under **Build and deployment → Source**, choose **GitHub Actions**.
 3. The **Deploy site to GitHub Pages** workflow runs on every push to `main` that changes `site/`. You can also run it by hand from the **Actions** tab.
-4. Your site will be at `https://<your-user>.github.io/<repo>/`, for example `https://bawcejawn.github.io/PhotoShare/`.
+4. Your site will be at `https://<your-user>.github.io/<repo>/`, for example `https://bawcejawn.github.io/AfterFlash/`.
 
 > A custom domain (e.g. `photos.yourstudio.com`) also works: add it under Settings → Pages and turn on **Enforce HTTPS**. The camera needs HTTPS.
 
