@@ -9,9 +9,10 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 export const SITE_DIR = path.resolve(here, '../../site');
 
 // ---------------------------------------------------------------- D1 shim
-export function d1() {
+export function d1(dir = 'migrations') {
   const db = new DatabaseSync(':memory:');
-  for (const f of fs.readdirSync(path.join(here, '../migrations')).sort()) db.exec(fs.readFileSync(path.join(here, '../migrations', f), 'utf8'));
+  for (const f of fs.readdirSync(path.join(here, '..', dir)).sort()) db.exec(fs.readFileSync(path.join(here, '..', dir, f), 'utf8'));
+  const size = () => { const a = db.prepare('PRAGMA page_count').get(); const b = db.prepare('PRAGMA page_size').get(); return a.page_count * b.page_size; };
   const norm = (a) => a.map((v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0) : v));
   return {
     raw: db,
@@ -19,7 +20,7 @@ export function d1() {
       const bound = (args) => ({
         async first() { return db.prepare(sql).get(...norm(args)) ?? null; },
         async all() { return { results: db.prepare(sql).all(...norm(args)) }; },
-        async run() { const r = db.prepare(sql).run(...norm(args)); return { meta: { changes: Number(r.changes) } }; },
+        async run() { const r = db.prepare(sql).run(...norm(args)); return { meta: { changes: Number(r.changes), size_after: size() } }; },
       });
       return { bind: (...args) => bound(args), ...bound([]) };
     },

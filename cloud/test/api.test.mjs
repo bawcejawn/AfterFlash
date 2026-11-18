@@ -1,7 +1,7 @@
 // AfterFlash Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { makeEnv } from './harness.mjs';
+import { makeEnv, d1 } from './harness.mjs';
 
 const tests = [];
 const t = (name, fn) => tests.push([name, fn]);
@@ -496,6 +496,77 @@ t('partner tiers: invites, overrides split up the team, payout requests, rules a
   const before = cust.expires;
   assert.ok((await s.call({ a: 'ownerAddDays', k: owner, id: cust.id, days: 7 })).expires >= before + 7 * day - 1000);
   assert.equal((await s.call({ a: 'ownerAddDays', k: owner, id: accts.find((x) => x.plan === 'partner').id, days: 7 })).error, 'bad_request');
+});
+
+t('scaling: events can live in an extra database; nightly cleanup; owner health', async () => {
+  const s = await boot({ SHARD_1: d1('migrations-shard') });
+  const owner = s.env.OWNER_KEY;
+  const day = 86400000;
+  const k = await hostWithDrive(s, { plan: 'month' });
+  const k2 = await hostWithDrive(s, { plan: 'year', sub: 'host-2' });
+  const main = s.env.DB.raw, sh = s.env.SHARD_1.raw;
+  const shoot = async (ev) => {
+    const g = await s.call({ a: 'join', e: ev.id, label: 'Ann' });
+    const up = await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid() });
+    assert.equal(up.ok, true, JSON.stringify(up));
+    assert.equal((await s.call({ a: 'guestbookAdd', e: ev.id, g: g.guest.id, t: g.token, text: 'Hi!', clientId: cid() })).ok, true);
+    return { g, up };
+  };
+  // before ACTIVE_SHARD: the main database
+  const evA = await s.call({ a: 'adminCreate', k, settings: { name: 'Old party' } });
+  await shoot(evA);
+  // ACTIVE_SHARD pointing at a database that isn't bound is ignored
+  s.env.ACTIVE_SHARD = 'SHARD_9';
+  const evX = await s.call({ a: 'adminCreate', k, settings: { name: 'Fallback' } });
+  assert.equal(main.prepare('SELECT shard FROM events WHERE id = ?').get(evX.id).shard, '');
+  // new events go to SHARD_1 and everything works there
+  s.env.ACTIVE_SHARD = 'SHARD_1';
+  const evB = await s.call({ a: 'adminCreate', k: k2, settings: { name: 'New party' } });
+  assert.equal(main.prepare('SELECT shard FROM events WHERE id = ?').get(evB.id).shard, 'SHARD_1');
+  const { up } = await shoot(evB);
+  assert.equal(sh.prepare('SELECT COUNT(*) n FROM media WHERE event = ?').get(evB.id).n, 1, 'photo index in the extra database');
+  assert.equal(main.prepare('SELECT COUNT(*) n FROM media WHERE event = ?').get(evB.id).n, 0);
+  assert.equal(sh.prepare('SELECT COUNT(*) n FROM notes WHERE event = ?').get(evB.id).n, 1);
+  assert.equal((await s.call({ a: 'list', e: evB.id })).items.length, 1);
+  assert.equal((await s.call({ a: 'guestbookList', e: evB.id })).notes.length, 1);
+  assert.equal((await s.call({ a: 'hostModerate', e: evB.id, k: evB.hostKey, action: 'hide', ids: [up.id] })).ok, true);
+  assert.equal((await s.call({ a: 'hostGuests', e: evB.id, k: evB.hostKey })).guests.length, 1);
+  assert.equal((await s.call({ a: 'list', e: evA.id })).items.length, 1, 'old events keep working in the main database');
+  // a shard that later disappears (misconfiguration) fails safely, without touching the main database
+  const saved = s.env.SHARD_1; delete s.env.SHARD_1;
+  const s2err = await s.call({ a: 'list', e: evB.id });
+  assert.equal(s2err.error, 'server_error');
+  s.env.SHARD_1 = saved;
+  // owner health
+  const hl = await s.call({ a: 'ownerHealth', k: owner });
+  assert.deepEqual(hl.dbs.map((d) => [d.name, d.active, d.photos]), [['Main', false, 1], ['SHARD_1', true, 1]]);
+  assert.ok(hl.dbs[0].size > 0); assert.equal(hl.advice, 'ok'); assert.equal(hl.nightly, null);
+  assert.equal((await s.call({ a: 'ownerHealth', k })).error, 'forbidden');
+  // nightly cleanup: host 1's plan ended over 12 months ago → their albums' photo index is cleared
+  main.prepare("UPDATE accounts SET expires = ? WHERE id = (SELECT account FROM events WHERE id = ?)").run(Date.now() - 400 * day, evA.id);
+  main.prepare('INSERT INTO problems (account, t, w, e, m) VALUES (?, ?, ?, ?, ?)').run('x', Date.now() - 100 * day, 'old', '', 'old problem');
+  main.prepare('INSERT INTO rate (k, n, exp) VALUES (?, 1, ?)').run('old:1', Date.now() - 1000);
+  const r = (await s.call({ a: 'ownerRunCleanup', k: owner })).result;
+  assert.equal(r.albums, 2, 'both of host 1’s events'); assert.equal(r.rows, 3, "1 photo, 1 note, 1 guest"); assert.equal(r.problems, 1); assert.ok(r.rate >= 1);
+  assert.equal(main.prepare('SELECT COUNT(*) n FROM media WHERE event = ?').get(evA.id).n, 0);
+  assert.ok(main.prepare('SELECT purged FROM events WHERE id = ?').get(evA.id).purged > 0);
+  assert.equal(sh.prepare('SELECT COUNT(*) n FROM media WHERE event = ?').get(evB.id).n, 1, 'active plans untouched');
+  assert.equal((await s.call({ a: 'list', e: evA.id })).error, 'archived');
+  assert.equal((await s.call({ a: 'ownerRunCleanup', k: owner })).result.albums, 0, 'nothing to do twice');
+  assert.ok((await s.call({ a: 'ownerHealth', k: owner })).nightly.t > 0);
+  // a deleted event's index is cleared too
+  await s.call({ a: 'adminDelete', k: k2, e: evB.id, confirm: evB.id });
+  await s.call({ a: 'ownerRunCleanup', k: owner });
+  assert.equal(sh.prepare('SELECT COUNT(*) n FROM media WHERE event = ?').get(evB.id).n, 0);
+  // host 1 renews: albums reopen; "Find missing photos" brings photos back from Drive, waiting for approval
+  const sid = (await s.call({ a: 'checkoutStart', plan: 'month', k })).url.split('/').pop(); s.fk.pay(sid);
+  await s.call({ a: 'claimPurchase', session_id: sid });
+  assert.equal((await s.call({ a: 'list', e: evA.id })).items.length, 0, 'open again, index empty');
+  assert.equal((await s.call({ a: 'hostGet', e: evA.id, k: 'admin:' + k })).event.purged, true);
+  const rec = await s.call({ a: 'hostRecover', e: evA.id, k: 'admin:' + k });
+  assert.ok(rec.added >= 1, JSON.stringify(rec));
+  assert.equal(main.prepare("SELECT COUNT(*) n FROM media WHERE event = ? AND status = 'pending'").get(evA.id).n, rec.added);
+  assert.equal((await s.call({ a: 'hostGet', e: evA.id, k: 'admin:' + k })).event.purged, false);
 });
 
 let passed = 0;

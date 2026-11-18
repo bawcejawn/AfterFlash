@@ -1,7 +1,7 @@
 // AfterFlash Cloud worker: serves the website (static assets from ../site), the JSON API at
 // /api, the Google "Connect Drive" callback at /oauth/callback, and a config.js built from
 // this deployment's settings.
-import { ACTIONS, VERSION, makeCtx } from './actions.js';
+import { ACTIONS, VERSION, makeCtx, nightly } from './actions.js';
 import { ApiErr, randomKey, sha256Hex } from './lib.js';
 import { authUrl, exchangeCode, sealRefresh } from './google.js';
 import { ON_SALE, PLAN_NAMES, planPrices, money } from './stripe.js';
@@ -132,6 +132,10 @@ export default {
     }
     if (url.pathname === '/setup.html') return redirect(`${env.SITE_ORIGIN}/index.html#pricing`); // self-hosting isn't offered here
     return env.ASSETS.fetch(request);
+  },
+  /** Daily cron (wrangler.toml [triggers]): database cleanup. */
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(nightly(env).catch((e) => console.log('nightly cleanup failed', e && e.message)));
   },
 };
 

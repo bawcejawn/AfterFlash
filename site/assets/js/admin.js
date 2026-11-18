@@ -2,7 +2,7 @@
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -106,6 +106,7 @@ async function dashboard(created) {
     !CLOUD && me.role === 'owner' ? adminsPanel() : null,
     CLOUD && me.role === 'owner' ? ownerPanel({ studio, adminKey }) : null,
     CLOUD && me.role === 'owner' ? partnersPanel({ studio, adminKey }) : null,
+    CLOUD && me.role === 'owner' ? healthPanel({ studio, adminKey }) : null,
     me.role === 'owner' || CLOUD ? keyBackupPanel() : null);
 }
 
