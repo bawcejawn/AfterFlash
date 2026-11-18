@@ -22,7 +22,7 @@ jobs:
       - uses: actions/configure-pages@v5
       # Friends copy the backend from the site itself when they set up their own PhotoShare.
       - run: mkdir -p site/backend && cp backend/Code.gs site/backend/Code.gs.txt
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deployment
