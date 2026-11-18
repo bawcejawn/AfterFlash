@@ -1,4 +1,5 @@
 import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config, knownStudio, myStudios } from './util.js';
+import { api } from './api.js';
 
 frameGuard();
 
@@ -59,4 +60,24 @@ if (studioBox) {
       h('ul', { class: 'my-events' }, list.map((s) => h('li', null, h('b', null, s.name),
         h('a', { class: 'btn small primary', href: link('admin.html', { s: s.id }) }, 'Open my events')))));
   }
+}
+
+// ---- PhotoShare Cloud: sales sections, price, checkout
+const cloud = config.cloud;
+for (const el of document.querySelectorAll('[data-only]')) el.hidden = (el.dataset.only === 'cloud') !== !!cloud;
+if (cloud) {
+  for (const el of document.querySelectorAll('[data-price]')) el.textContent = cloud.price;
+  const sup = $('#support');
+  if (sup && cloud.support) sup.append(h('a', { href: 'mailto:' + cloud.support }, cloud.support));
+  if (cloud.testMode) document.body.prepend(h('div', { class: 'test-banner' }, 'Test mode: no real charges. Pay with card 4242 4242 4242 4242, any future date, any CVC.'));
+  const buy = $('#buy'), msg = $('#buy-msg');
+  if (!cloud.payments) { buy.disabled = true; msg.textContent = 'Sales open soon.'; }
+  buy.addEventListener('click', async () => {
+    buy.disabled = true; msg.textContent = 'Opening secure checkout…';
+    try {
+      const { url } = await api('main', 'checkoutStart', {}, { retries: 1 });
+      if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.');
+      location.href = url;
+    } catch (e) { msg.textContent = e.message; buy.disabled = false; }
+  });
 }

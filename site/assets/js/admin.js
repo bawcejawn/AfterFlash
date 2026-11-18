@@ -2,6 +2,7 @@
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -23,6 +24,7 @@ let me = { name: '', role: '' };
 const KEY = () => `ps:ak:${studio}`;
 
 function login(msg) {
+  if (CLOUD) return cloudLogin({ root, msg, onKey: signedIn });
   const keyIn = h('input', { type: 'password', autocomplete: 'current-password', required: true, id: 'ak' });
   const studioSel = studios.length > 1 ? h('select', { id: 'studio' }, studios.map((s) => h('option', { value: s, selected: s === studio }, studioName(s)))) : null;
   const form = h('form', { class: 'narrow section stack' },
@@ -58,6 +60,16 @@ function login(msg) {
   if (studioSel) studioSel.addEventListener('change', () => { studio = studioSel.value; check(); });
 }
 
+/** Cloud: a key was just bought, recovered or typed in. */
+async function signedIn(key, { show = false } = {}) {
+  adminKey = key;
+  store.set(KEY(), adminKey, sessionStorage);
+  try { const c = await api(studio, 'adminCheck', { k: adminKey }, { retries: 0 }); me = { ...(c.me || me), version: c.version }; }
+  catch (err) { store.del(KEY(), sessionStorage); return login(err.code === 'unauthorized' ? 'That admin key isn’t right.' : err.message); }
+  if (show) return cloudKeyScreen({ root, key, onContinue: () => dashboard() });
+  dashboard();
+}
+
 async function dashboard(created) {
   clear(root).append(h('p', { class: 'muted' }, 'Loading events…'));
   let events = [];
@@ -65,12 +77,15 @@ async function dashboard(created) {
     if (e.code === 'unauthorized') { store.del(KEY(), sessionStorage); return login('Please sign in again.'); }
     toast(e.message, 'error');
   }
-  if (!me.role) { try { const c = await api(studio, 'adminCheck', { k: adminKey }); me = { ...(c.me || me), version: c.version }; } catch { /* handled below */ } }
+  if (!me.role || CLOUD) { try { const c = await api(studio, 'adminCheck', { k: adminKey }); me = { ...(c.me || me), version: c.version }; } catch { /* handled below */ } }
+  const needsDrive = CLOUD && !me.drive;
   clear(root).append(
     h('div', { class: 'row spread' }, h('h1', null, 'Events'),
       h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
+    CLOUD ? cloudBanner() : null,
+    CLOUD ? drivePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
-    createForm(),
+    needsDrive ? null : createForm(),
     h('h2', { class: 'section' }, `Your events (${events.length})`),
     events.length ? h('table', { class: 'list' },
       h('thead', null, h('tr', null, h('th', null, 'Event'), h('th', null, 'Date'), h('th', null, 'Created'), h('th', null, ''))),
@@ -80,13 +95,14 @@ async function dashboard(created) {
         h('td', null, fmtWhen(ev.createdAt), h('div', { class: 'small muted' }, ev.createdBy ? `by ${ev.createdBy}` : '')),
         h('td', null, h('div', { class: 'row' },
           ev.canManage !== false ? h('a', { class: 'btn small primary', href: link('host.html', { e: ev.id, s: studio, extra: { admin: '1' } }) }, 'Open dashboard') : null,
-          me.role === 'owner' ? h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder') : null,
+          me.role === 'owner' || CLOUD ? h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder') : null,
           ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
           ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
-    me.version && me.version !== BACKEND_VERSION && me.role === 'owner' ? updatePanel(me.version) : null,
+    !CLOUD && me.version && me.version !== BACKEND_VERSION && me.role === 'owner' ? updatePanel(me.version) : null,
     problemsPanel(),
-    me.role === 'owner' ? adminsPanel() : null,
-    me.role === 'owner' ? keyBackupPanel() : null);
+    !CLOUD && me.role === 'owner' ? adminsPanel() : null,
+    CLOUD && me.role === 'owner' ? ownerPanel({ studio, adminKey }) : null,
+    me.role === 'owner' || CLOUD ? keyBackupPanel() : null);
 }
 
 function createdPanel({ id, hostKey, name }) {
@@ -167,7 +183,7 @@ function problemsPanel() {
 // ---------------------------------------------------------------- admins (owner only)
 function keyBackupPanel() {
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Private event keys'),
-    h('p', null, 'Private events are locked with a key kept by your backend. Download a backup after creating a private event and store it somewhere safe and offline (for example a USB stick). Without it, the locked files in Drive can’t be opened if the backend is ever deleted.'),
+    h('p', null, CLOUD ? 'Private events are locked with a key that PhotoShare keeps for you. Download a backup after creating a private event and keep it somewhere safe and offline. With it, you can always unlock those files, even without PhotoShare.' : 'Private events are locked with a key kept by your backend. Download a backup after creating a private event and store it somewhere safe and offline (for example a USB stick). Without it, the locked files in Drive can’t be opened if the backend is ever deleted.'),
     h('div', { class: 'row' }, h('button', { class: 'btn', onclick: async () => {
       try {
         const r = await api(studio, 'adminExportKeys', { k: adminKey });
@@ -176,7 +192,7 @@ function keyBackupPanel() {
         toast('Key backup downloaded. Keep it private.', 'ok');
       } catch (e) { toast(e.message, 'error'); }
     } }, 'Download key backup'),
-    h('label', { class: 'btn' }, 'Restore from backup', h('input', { type: 'file', accept: 'application/json,.json', class: 'hidden', onchange: async (e) => {
+    CLOUD ? null : h('label', { class: 'btn' }, 'Restore from backup', h('input', { type: 'file', accept: 'application/json,.json', class: 'hidden', onchange: async (e) => {
       const file = e.target.files[0];
       e.target.value = '';
       if (!file || file.size > 1024 * 1024) return toast('Choose the key backup file you downloaded.', 'error');
@@ -240,4 +256,9 @@ function updatePanel(have) {
 function signOut() { store.del(KEY(), sessionStorage); adminKey = ''; me = { name: '', role: '' }; login(); }
 
 adminKey = store.get(KEY(), sessionStorage) || '';
-if (adminKey) dashboard(); else login();
+if (CLOUD && location.hash.startsWith('#recover=')) {
+  // Back from "Lost your key? Sign in with Google": swap the one-time ticket for a new key.
+  const ticket = decodeURIComponent(location.hash.slice(9));
+  history.replaceState(null, '', location.pathname);
+  api(studio, 'recoverFinish', { ticket }, { retries: 0 }).then((r) => signedIn(r.adminKey, { show: true })).catch((e) => login(e.message));
+} else if (adminKey) dashboard(); else login();

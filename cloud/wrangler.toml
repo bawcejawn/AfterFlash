@@ -1,0 +1,27 @@
+# PhotoShare Cloud on Cloudflare Workers. The deploy workflow (.github/workflows/cloud.yml)
+# fills in the database id and the site address; you normally don't edit this by hand.
+name = "photoshare"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[assets]
+directory = "../site"
+binding = "ASSETS"
+run_worker_first = ["/api", "/oauth/*", "/config.js", "/setup.html", "/google*.html"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "photoshare"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+APP_NAME = "PhotoShare"
+PRICE_LABEL = "$39"
+SITE_ORIGIN = "https://photoshare.example.workers.dev"
+GOOGLE_CLIENT_ID = ""
+STRIPE_PRICE_ID = ""
+SUPPORT_EMAIL = ""
+BUSINESS_NAME = ""
+GOOGLE_SITE_VERIFICATION = ""

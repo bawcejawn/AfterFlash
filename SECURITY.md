@@ -57,6 +57,19 @@ PhotoShare is built for a hostile internet: anyone can find a guest link, and th
 - Turn on 2-step verification for the Google account that owns the backend.
 - When updating the backend, read the diff to `backend/Code.gs` before pasting it into Apps Script.
 
+## PhotoShare Cloud (cloud/)
+
+- One Cloudflare Worker serves the site and the API on the same origin. API calls from other origins are refused, and pages use a strict CSP and security headers (`site/_headers`).
+- **Google:** only the non-sensitive `drive.file` scope, so the app can touch only the files it creates in a host's Drive. Refresh tokens and private-event keys are encrypted at rest with AES-256-GCM under the `DATA_KEY` secret.
+- **The Google round trip:**
+  - Each sign-in starts at `/oauth/start`, which binds a single-use 15-minute state to the starting browser with an HttpOnly cookie.
+  - The callback refuses a state that doesn't match the cookie, so someone else's link can't attach your Drive to their account.
+  - Key recovery never shows the key in a URL: Google returns a one-time ticket, and the page swaps it for a new key.
+- **Payments:** the thank-you page checks the Checkout Session with Stripe server-side. Each Stripe session creates exactly one account, and its key can be re-shown (rotating it) only for 2 hours. The purchase id is removed from the address bar.
+- **Keys:** admin keys and host keys are 256-bit random and stored only as SHA-256 hashes. The owner key is a Worker secret. Wrong keys are rate-limited without ever locking out a correct key.
+- **Uploads:** same checks as the Apps Script backend: magic-byte types, size caps, EXIF/GPS stripped, encrypted envelopes for private events. Atomic shot reservations are refunded on any failure.
+- **Logs:** the deploy workflow never prints secrets, which matters because Actions logs on a public repo are public.
+
 ## Friends' own backends
 
 - A link may name a friend's backend with `?b=<deployment id>`. The site turns that into `https://script.google.com/macros/s/<id>/exec` and nothing else, so it only ever talks to Google Apps Script. It still never contacts any other server.

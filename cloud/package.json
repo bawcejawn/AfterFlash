@@ -1,0 +1,14 @@
+{
+  "name": "photoshare-cloud",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --no-warnings test/api.test.mjs",
+    "e2e": "bash test/run-e2e.sh",
+    "dev": "wrangler dev",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.164.0"
+  }
+}

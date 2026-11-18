@@ -1,8 +1,12 @@
-node_modules/
-.DS_Store
-*.log
-recovered-*/
 *-manifest.json
+*.log
+.DS_Store
+.dev.vars
 .env
 .env.*
+.wrangler/
+node_modules/
+recovered-*/
 site/backend/
+.secrets.json
+cloud/wrangler.deploy.toml

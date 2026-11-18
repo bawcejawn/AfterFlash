@@ -7,6 +7,11 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 
 ---
 
+## Two ways to run it
+
+- **PhotoShare Cloud (the paid product):** hosts buy an admin key, connect their Google Drive with one click, and run unlimited events. Photos go to each host's own Drive. It runs on Cloudflare (code in `cloud/`). **To launch it, follow [docs/LAUNCH.md](docs/LAUNCH.md)**: Cloudflare, Google sign-in and Stripe, plus a plan for your first sale.
+- **Self-hosted (this guide):** the free version on GitHub Pages with your own Google Apps Script backend, for your own events.
+
 ## Contents
 
 1. [What you get](#what-you-get)
