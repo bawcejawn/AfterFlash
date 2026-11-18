@@ -99,7 +99,7 @@ function renderHeader() {
       h('div', { class: 'stat' }, h('b', null, fmtBytes(bytes)), 'in Drive'))));
 }
 
-const TABS = [['share', 'Share'], ['photos', 'Photos'], ['highlights', 'Highlight video'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['keepsakes', 'Keepsakes'], ['security', 'Access']];
+const TABS = [['share', 'Share'], ['photos', 'Photos'], ['highlights', 'Highlight video'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['security', 'Access']];
 function renderTabs() {
   const c = counts();
   clear(tabsEl).append(...TABS.map(([id, label]) => {
@@ -110,7 +110,7 @@ function renderTabs() {
 }
 
 function renderTab() {
-  const map = { share: shareTab, photos: photosTab, highlights: highlightsTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, keepsakes: keepsakesTab, security: securityTab };
+  const map = { share: shareTab, photos: photosTab, highlights: highlightsTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, security: securityTab };
   clear(bodyEl);
   map[tab]();
 }
@@ -556,18 +556,6 @@ async function highlightsTab() {
     h('label', { class: 'field' }, h('span', null, 'Music (optional)'), music, h('small', null, 'A song file from this computer. Use music you’re allowed to share.')),
     h('label', { class: 'field' }, h('span', null, 'Closing line'), closing),
     est, h('div', { class: 'row' }, go), bar, status, out));
-}
-
-// ------------------------------------------------------------------ keepsakes (Koinos)
-function keepsakesTab() {
-  const enabled = !!(config.koinos && config.koinos.contract);
-  bodyEl.append(h('div', { class: 'stack narrow' },
-    h('h2', null, 'Keep this album on Koinos'),
-    h('p', null, 'Save a screen-quality copy of every photo, plus a fingerprint of the originals, on the Koinos blockchain. It stays recoverable even if the Drive folder is lost, and anyone can check that a photo is an untouched original.'),
-    h('p', null, 'Each photo costs about 25 mana. Mana comes back on its own, so there’s nothing to pay.'),
-    enabled
-      ? h('a', { class: 'btn primary', href: key.startsWith('admin:') ? link('archive.html', { e: eventId, s: studio, extra: { admin: '1' } }) : link('archive.html', { e: eventId, s: studio, frag: { k: key } }), rel: 'noopener' }, 'Open the archive tool')
-      : h('p', { class: 'callout' }, 'Koinos isn’t configured for this site yet. Add the contract address to config.js (see docs/KOINOS.md).')));
 }
 
 // ------------------------------------------------------------------ access
