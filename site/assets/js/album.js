@@ -5,6 +5,7 @@ import { urlCache,
   downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
 import { mediaBlob } from './crypto.js';
+import { applyBrand, logoEl } from './brand.js';
 import { api } from './api.js';
 import { enhance, canvasToBlob } from './film.js';
 import { openComposer, renderNotes } from './guestbook.js';
@@ -50,7 +51,7 @@ async function refresh(first) {
   ev = r.event;
   version = r.v;
   albumKey = r.key || (auth && auth.key) || albumKey;
-  if (first) { setAccent(ev.accent); setTitle(ev.name); }
+  if (first) { applyBrand(ev); setTitle(ev.name); }
   if (!r.unchanged) {
     items = (r.items || []).filter((x) => isDriveId(x.i)).sort((a, b) => b.c - a.c);
     lastList = r;
@@ -83,7 +84,7 @@ function render() {
   const r = lastList || { revealed: false, count: 0 };
   const open = !ev.closesAt || Date.now() < Date.parse(ev.closesAt);
   const head = h('header', { class: 'album-head row spread' },
-    h('div', null, h('h1', null, ev.name), h('p', { class: 'muted' }, [fmtDate(ev.date), `${r.count || 0} photos`].filter(Boolean).join(', '))),
+    h('div', null, logoEl(studio, eventId, ev), h('h1', null, ev.name), ev.tagline ? h('p', null, ev.tagline) : null, h('p', { class: 'muted' }, [fmtDate(ev.date), `${r.count || 0} photos`].filter(Boolean).join(', '))),
     open ? h('a', { class: 'btn flash', href: link('cam.html', { e: eventId, s: studio }) }, 'Open the camera') : null);
   const tabs = [['album', 'Album']];
   if (auth) tabs.push(['mine', 'My photos']);

@@ -1,7 +1,10 @@
 // Backend client for the Apps Script web app.
 // Requests are POSTed as text/plain so the browser sends a "simple" CORS request
 // (Apps Script can't answer preflights). No cookies, no referrer.
-import { config } from './util.js';
+import { config, ownStudio } from './util.js';
+
+/** Backend version this website expects (kept in step with APP_VERSION in backend/Code.gs by CI). */
+export const BACKEND_VERSION = '1.10.0';
 
 // Personal accounts: /macros/s/ID/exec. Google Workspace accounts: /a/macros/DOMAIN/s/ID/exec.
 const PROD_URL = /^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
@@ -11,6 +14,7 @@ export class ApiError extends Error {
 }
 
 export function backendUrl(studio) {
+  if (ownStudio(studio)) return `https://script.google.com/macros/s/${studio.slice(2)}/exec`;
   // Chrome inserts /u/<n>/ when several Google accounts are signed in; the clean URL is what works for guests.
   const url = String((config.backends || {})[studio] || '').trim().replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
   if (!url || url.includes('REPLACE_WITH')) throw new ApiError('not_configured', 'This site is not connected to a backend yet. Add your Apps Script URL to config.js.');
@@ -72,7 +76,7 @@ export async function ping(studio) {
   try {
     const res = await fetch(url, { method: 'GET', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
     const data = await res.json();
-    if (data && data.ok && data.app === 'photoshare') return { ok: true, version: data.version };
+    if (data && data.ok && data.app === 'photoshare') return { ok: true, version: data.version, ready: data.ready !== false };
     return { ok: false, message: 'That URL answered, but it isn’t a PhotoShare backend.' };
   } catch {
     return { ok: false, message: 'Can’t reach the backend. Check the URL in config.js and that the deployment’s access is “Anyone”.' };

@@ -75,8 +75,30 @@ export function params() {
   return { q, f };
 }
 
+// ---------- studios
+// A studio is one PhotoShare backend (a Google Apps Script web app in someone's own Google
+// account). Built-in studios are listed in config.js. Friends run their own: their links carry
+// ?b=<deployment id>, which can only ever mean https://script.google.com/macros/s/<id>/exec.
+export const DEPLOYMENT_ID = /^AKfy[A-Za-z0-9_-]{20,140}$/;
+export const ownStudio = (s) => typeof s === 'string' && s.startsWith('b.') && DEPLOYMENT_ID.test(s.slice(2));
+export const studioOfDeployment = (id) => (DEPLOYMENT_ID.test(id) ? 'b.' + id : '');
+/** Studios this device has set up or signed in to as an organizer (never filled from a link). */
+export const myStudios = {
+  list() { const l = store.get('ps:studios'); return Array.isArray(l) ? l.filter((x) => x && ownStudio(x.id)) : []; },
+  add(id, name) { if (!ownStudio(id)) return; const l = myStudios.list().filter((x) => x.id !== id); l.unshift({ id, name: String(name || 'My PhotoShare').slice(0, 40), added: Date.now() }); store.set('ps:studios', l.slice(0, 10)); },
+  has(id) { return myStudios.list().some((x) => x.id === id); },
+  remove(id) { store.set('ps:studios', myStudios.list().filter((x) => x.id !== id)); },
+};
+/** Whether a studio key is one this site knows how to reach (built-in or a deployment id). */
+export const knownStudio = (s) => ownStudio(s) || Object.prototype.hasOwnProperty.call(config.backends || {}, s);
+
 /** Resolve which backend ("studio") a link refers to. Unknown keys are refused. */
 export function studioFrom(q) {
+  const b = q.get('b');
+  if (b) {
+    if (!DEPLOYMENT_ID.test(b)) throw new Error('Unknown studio in link');
+    return 'b.' + b;
+  }
   const keys = Object.keys(config.backends || {});
   const s = q.get('s');
   if (!s) return keys[0];
@@ -92,7 +114,8 @@ export function link(page, { e, s, extra = {}, frag = {} } = {}) {
   const u = new URL(page, siteBase());
   if (e) u.searchParams.set('e', e);
   const keys = Object.keys(config.backends || {});
-  if (s && s !== keys[0]) u.searchParams.set('s', s);
+  if (ownStudio(s)) u.searchParams.set('b', s.slice(2));
+  else if (s && s !== keys[0]) u.searchParams.set('s', s);
   for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') u.searchParams.set(k, v);
   const f = new URLSearchParams();
   for (const [k, v] of Object.entries(frag)) if (v) f.set(k, v);

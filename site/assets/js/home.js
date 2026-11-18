@@ -1,15 +1,14 @@
-import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config } from './util.js';
+import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config, knownStudio, myStudios } from './util.js';
 
 frameGuard();
 
 // ---- events this phone has joined (kept in this browser only)
 function myEvents() {
   const out = [];
-  const studios = Object.keys(config.backends || {});
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i) || '';
     const m = /^ps:g:([^:]+):([A-Za-z0-9]{6,20})$/.exec(k);
-    if (!m || !studios.includes(m[1]) || !isEventId(m[2])) continue;
+    if (!m || !knownStudio(m[1]) || !isEventId(m[2])) continue;
     const a = store.get(k) || {};
     out.push({ studio: m[1], id: m[2], name: typeof a.name === 'string' ? a.name : m[2], lastUsed: Number(a.lastUsed) || 0, key: k });
   }
@@ -49,3 +48,15 @@ form.addEventListener('submit', (e) => {
   if (!isEventId(code)) { $('#join-msg').textContent = 'That doesn’t look like an event code. It’s 10 letters and numbers on the sign.'; return; }
   location.href = 'cam.html?e=' + encodeURIComponent(code);
 });
+
+// ---- studios this device organizes (friends who host their own events)
+const studioBox = $('#my-studios');
+if (studioBox) {
+  const list = myStudios.list();
+  if (list.length) {
+    studioBox.hidden = false;
+    clear(studioBox).append(h('h2', null, 'Your PhotoShare'),
+      h('ul', { class: 'my-events' }, list.map((s) => h('li', null, h('b', null, s.name),
+        h('a', { class: 'btn small primary', href: link('admin.html', { s: s.id }) }, 'Open my events')))));
+  }
+}

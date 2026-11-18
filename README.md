@@ -12,11 +12,12 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 1. [What you get](#what-you-get)
 2. [One-time setup (about 20 minutes)](#one-time-setup)
 3. [Run an event](#run-an-event)
-4. [Add another admin](#add-another-admin)
-5. [Update the backend when the code changes](#update-the-backend)
-6. [Troubleshooting](#troubleshooting)
-7. [Keep it safe](#keep-it-safe)
-8. [For developers](#for-developers)
+4. [Let friends host their own events](#let-friends-host-their-own-events)
+5. [Add another admin](#add-another-admin)
+6. [Update the backend when the code changes](#update-the-backend)
+7. [Troubleshooting](#troubleshooting)
+8. [Keep it safe](#keep-it-safe)
+9. [For developers](#for-developers)
 
 ---
 
@@ -24,7 +25,7 @@ A shared disposable camera for weddings, parties and other events. Guests scan a
 
 | Page | Who uses it | What it does |
 |---|---|---|
-| **Camera** (`cam.html`) | Guests | Opens when they scan the QR code. A limited roll of shots, 8 looks (Glow, Bright, Classic film, Golden hour, Soft pastel, Moody, Black & white) shown live in the viewfinder, an optional **Beauty** touch-up (softens skin and blemishes, keeps eyes and hair sharp), short videos. Works on weak signal: photos upload when there's a connection. |
+| **Camera** (`cam.html`) | Guests | Opens when they scan the QR code. A limited roll of shots, 6 looks (Original, Bright, Classic film, Golden hour, Moody, Black & white) shown live in the viewfinder, an optional **Beauty** touch-up (softens skin and blemishes, keeps eyes and hair sharp), short videos. Works on weak signal: photos upload when there's a connection. |
 | **Album** (`album.html`) | Guests | Browse, download and report photos. **Enhance** toggle (an automatic touch-up; originals never change), **Hosts’ picks**, **My photos** (each guest’s own shots, even before the reveal), and the **Guestbook**. |
 | **TV wall** (`tv.html`) | A TV or projector | New photos appear in seconds, with the QR code beside them. |
 | **Host dashboard** (`host.html`) | The host | QR sign, moderation, **♥ favorites** (shown more often on the TV, one-click download), **blurry-photo flags**, guestbook moderation, guests, settings. |
@@ -129,6 +130,25 @@ Open the **Google Drive folder** (link on the Share tab) and download it. Google
 | Album link | Guests | No |
 | **Host link** | **Only a trusted co-host** | **Yes, everything for that event.** If it leaks: **Access → Make a new host link**. |
 | **Admin key** | **Nobody**; give others their own | Yes, studio-wide |
+
+---
+
+## Let friends host their own events
+
+Send friends this link: **https://bawcejawn.github.io/PhotoShare/setup.html**
+
+They set up their own PhotoShare in about 5 minutes with their own Google account. Their photos go to **their** Google Drive, they're the admin of their own events, and nothing touches your Drive or your storage. The setup page walks them through it:
+
+1. Copy the code (one button).
+2. Paste it into a new Apps Script project at script.google.com/create and save.
+3. **Deploy → New deployment → Web app**, Execute as **Me**, access **Anyone** → Deploy → allow access.
+4. Paste the Web app URL back into the setup page. It creates their folder and gives them their admin key.
+
+Their event links carry their own backend address, so their guests' photos go straight to them. When this site gets a backend update, their admin page shows an **Update** box with a copy button and three steps.
+
+Each event can also be **branded** (Settings → Branding): logo or monogram, accent colour, heading style (Modern, Elegant serif, Script) and a tagline. They show on the camera, album, TV wall and printed sign.
+
+After the party, the **Highlight video** tab makes a short film from the favorites and the best of the rest, with guestbook messages, voice notes and optional music. It's made in the browser and downloaded or shared straight from there.
 
 ---
 

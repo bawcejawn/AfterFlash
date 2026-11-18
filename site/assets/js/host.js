@@ -7,6 +7,8 @@ import { api } from './api.js';
 import { LOOKS } from './film.js';
 import { voicePlayer } from './guestbook.js';
 import { mediaBlob } from './crypto.js';
+import { applyBrand, logoEl, logoBlob, prepareLogo, FONTS } from './brand.js';
+import { ownStudio, blobToBase64 } from './util.js';
 
 frameGuard();
 const root = $('#app');
@@ -39,7 +41,7 @@ async function boot() {
     if (e.code === 'forbidden') return fail('Only the studio owner or the admin who created this event can open its dashboard.');
     return fail(e.code === 'unauthorized' ? (key.startsWith('admin:') ? 'Please sign in again on the studio admin page.' : 'This host link is no longer valid. Ask the studio for a new one.') : e.message);
   }
-  setAccent(ev.accent);
+  applyBrand(ev);
   setTitle(ev.name + ' host');
   await loadItems();
   render();
@@ -90,14 +92,14 @@ function renderHeader() {
   const c = counts();
   const bytes = items.reduce((a, b) => a + (Number(b.b) || 0), 0);
   clear(headerEl).append(h('div', { class: 'event-head' },
-    h('div', null, h('h1', null, ev.name), h('p', { class: 'muted' }, [fmtDate(ev.date), ev.paused ? 'Uploads paused' : ''].filter(Boolean).join(', '))),
+    h('div', null, logoEl(studio, eventId, ev), h('h1', null, ev.name), h('p', { class: 'muted' }, [fmtDate(ev.date), ev.paused ? 'Uploads paused' : ''].filter(Boolean).join(', '))),
     h('div', { class: 'stats' },
       h('div', { class: 'stat' }, h('b', null, String(c.all)), 'photos and videos'),
       h('div', { class: 'stat' }, h('b', null, String(c.pending + c.reported)), 'need a look'),
       h('div', { class: 'stat' }, h('b', null, fmtBytes(bytes)), 'in Drive'))));
 }
 
-const TABS = [['share', 'Share'], ['photos', 'Photos'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['keepsakes', 'Keepsakes'], ['security', 'Access']];
+const TABS = [['share', 'Share'], ['photos', 'Photos'], ['highlights', 'Highlight video'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['keepsakes', 'Keepsakes'], ['security', 'Access']];
 function renderTabs() {
   const c = counts();
   clear(tabsEl).append(...TABS.map(([id, label]) => {
@@ -108,7 +110,7 @@ function renderTabs() {
 }
 
 function renderTab() {
-  const map = { share: shareTab, photos: photosTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, keepsakes: keepsakesTab, security: securityTab };
+  const map = { share: shareTab, photos: photosTab, highlights: highlightsTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, keepsakes: keepsakesTab, security: securityTab };
   clear(bodyEl);
   map[tab]();
 }
@@ -132,7 +134,7 @@ function shareTab() {
         h('button', { class: 'btn small', onclick: downloadQr }, 'Download QR'))),
     h('div', { class: 'stack grow' },
       h('div', null, h('span', { class: 'small muted' }, 'Event code'), h('div', { class: 'row' }, h('span', { class: 'event-code' }, eventId), h('button', { class: 'btn small', onclick: () => copy(eventId) }, 'Copy')),
-        h('small', { class: 'muted' }, `Guests can also type this at ${link('index.html').replace(/index\.html$/, '')}`)),
+        ownStudio(studio) ? null : h('small', { class: 'muted' }, `Guests can also type this at ${link('index.html').replace(/index\.html$/, '')}`)),
       linkRow('Guest link', guestUrl(), 'This is what the QR code opens. Share it in texts or on the invitation.'),
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
@@ -152,8 +154,9 @@ function downloadQr() {
 
 function printSign() {
   return h('div', { class: 'print-sign', 'aria-hidden': 'true' },
+    logoEl(studio, eventId, ev),
     h('h1', null, ev.name),
-    h('p', null, 'Be our photographer! Scan to open the camera.'),
+    h('p', { class: 'tagline' }, ev.tagline || 'Be our photographer! Scan to open the camera.'),
     h('div', { class: 'qr' }, qrSvg(guestUrl(), { dark: '#000' })),
     h('p', null, `${ev.shotsPerGuest} shots each. No app needed.`),
     h('p', null, guestUrl()));
@@ -381,8 +384,9 @@ function settingsTab() {
     h('fieldset', null, h('legend', null, 'Event'), h('div', { class: 'grid-form' },
       h('label', { class: 'field' }, h('span', null, 'Name'), inp('name', { type: 'text', maxlength: 80, value: s.name, required: true })),
       h('label', { class: 'field' }, h('span', null, 'Date'), inp('date', { type: 'date', value: s.date })),
-      h('label', { class: 'field' }, h('span', null, 'Accent colour'), inp('accent', { type: 'color', value: s.accent }))),
+      ),
       h('label', { class: 'field' }, h('span', null, 'Welcome note'), h('textarea', { name: 'welcome', maxlength: 280 }, s.welcome), h('small', null, 'Shown to guests before they open the camera.'))),
+    brandingFieldset(s, inp),
     h('fieldset', null, h('legend', null, 'The roll'), h('div', { class: 'grid-form' },
       h('label', { class: 'field' }, h('span', null, 'Shots per guest'), inp('shotsPerGuest', { type: 'number', min: 1, max: 500, value: s.shotsPerGuest })),
       h('label', { class: 'field' }, h('span', null, 'Guest limit'), inp('maxGuests', { type: 'number', min: 1, max: 5000, value: s.maxGuests }), h('small', null, 'Guests count once they upload a photo.')),
@@ -415,7 +419,7 @@ function settingsTab() {
     e.preventDefault();
     const fd = new FormData(form);
     const settings = {
-      name: fd.get('name'), date: fd.get('date'), accent: fd.get('accent'), welcome: fd.get('welcome'),
+      name: fd.get('name'), date: fd.get('date'), accent: fd.get('accent'), welcome: fd.get('welcome'), font: fd.get('font'), tagline: fd.get('tagline'),
       shotsPerGuest: Number(fd.get('shotsPerGuest')), maxGuests: Number(fd.get('maxGuests')), maxVideoSec: Number(fd.get('maxVideoSec')),
       look: fd.get('look'), reveal: fd.get('reveal'),
       revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')),
@@ -427,13 +431,131 @@ function settingsTab() {
     else if (pin) payload.pin = pin;
     try {
       ev = (await api(studio, 'hostUpdate', payload)).event;
-      setAccent(ev.accent);
+      applyBrand(ev);
       toast('Settings saved', 'ok');
       render();
       tab = 'settings'; renderTabs(); renderTab();
     } catch (err) { toast(err.message, 'error'); }
   });
   bodyEl.append(form);
+}
+
+function brandingFieldset(s, inp) {
+  const preview = h('div', { class: 'logo-edit' });
+  const showLogo = () => {
+    clear(preview).append(
+      ev.logoV ? logoEl(studio, eventId, ev) : h('span', { class: 'small muted' }, 'No logo yet.'),
+      h('label', { class: 'btn small' }, ev.logoV ? 'Change logo' : 'Upload logo',
+        h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', class: 'hidden', onchange: (e) => setLogo(e.target.files[0], e.target) })),
+      ev.logoV ? h('button', { class: 'btn small', type: 'button', onclick: () => setLogo(null) }, 'Remove') : null);
+  };
+  async function setLogo(file, input) {
+    if (input) input.value = '';
+    try {
+      const data = file ? await blobToBase64(await prepareLogo(file)) : undefined;
+      const r = await api(studio, 'hostSetLogo', { e: eventId, k: key, data }, { retries: 1, timeout: 60000 });
+      ev.logoV = r.logoV;
+      toast(file ? 'Logo saved. It shows on the camera, album, TV wall and printed sign.' : 'Logo removed', 'ok');
+      showLogo();
+      renderHeader();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+  showLogo();
+  return h('fieldset', null, h('legend', null, 'Branding'),
+    h('div', { class: 'field' }, h('span', null, 'Logo or monogram'), preview, h('small', null, 'PNG with a transparent background looks best. Shown on every guest page and the printed sign.')),
+    h('div', { class: 'grid-form' },
+      h('label', { class: 'field' }, h('span', null, 'Accent colour'), inp('accent', { type: 'color', value: s.accent })),
+      h('label', { class: 'field' }, h('span', null, 'Heading style'),
+        h('select', { name: 'font' }, Object.entries(FONTS).map(([k, v]) => h('option', { value: k, selected: (s.font || 'modern') === k }, v))))),
+    h('label', { class: 'field' }, h('span', null, 'Tagline'), inp('tagline', { type: 'text', maxlength: 80, value: s.tagline || '', placeholder: 'e.g. Snap away, share the love' }),
+      h('small', null, 'Shown under the event name and on the printed sign.')));
+}
+
+// ------------------------------------------------------------------ highlight video
+let lastFilm = null;
+async function highlightsTab() {
+  const { pickPhotos, renderHighlight, highlightSupported } = await import('./highlight.js');
+  if (!highlightSupported()) {
+    bodyEl.append(h('p', { class: 'callout' }, 'This browser can’t make videos. Open this dashboard in Chrome, Edge or a recent Safari on a laptop.'));
+    return;
+  }
+  const count = h('select', { name: 'count' }, [12, 24, 40, 60].map((n) => h('option', { value: n, selected: n === 24 }, `${n} photos`)));
+  const speed = h('select', { name: 'speed' }, [[2, 'Quick (2 s each)'], [3, 'Relaxed (3 s each)'], [4, 'Slow (4 s each)']].map(([v, l]) => h('option', { value: v, selected: v === 3 }, l)));
+  const format = h('select', { name: 'format' }, h('option', { value: 'wide' }, 'Wide (TV, laptop, YouTube)'), h('option', { value: 'tall' }, 'Tall (phones, Stories, group chats)'));
+  const withNotes = h('input', { type: 'checkbox', checked: true });
+  const withVoices = h('input', { type: 'checkbox', checked: true });
+  const music = h('input', { type: 'file', accept: 'audio/*' });
+  const closing = h('input', { type: 'text', maxlength: 80, value: 'Thank you for celebrating with us' });
+  const est = h('p', { class: 'small muted' });
+  const go = h('button', { class: 'btn primary' }, 'Make the video');
+  const bar = h('progress', { max: 1, value: 0, hidden: true, class: 'film-progress' });
+  const status = h('p', { class: 'small', 'aria-live': 'polite' });
+  const out = h('div', { class: 'stack' });
+  const update = () => {
+    const n = pickPhotos(items, Number(count.value)).length;
+    const favs = items.filter((x) => x.fv && x.s === 'visible' && x.k !== 'v').length;
+    const secs = Math.round(7 + n * Number(speed.value) + (withNotes.checked ? Math.floor(n / 5) * 4 : 0));
+    est.textContent = n ? `${n} photos (${Math.min(favs, n)} favorite${Math.min(favs, n) === 1 ? '' : 's'}, the rest picked across the night, blurry ones skipped). About ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} long; it records in real time.` : 'No visible photos yet.';
+    go.disabled = !n;
+  };
+  [count, speed, withNotes].forEach((el) => el.addEventListener('change', update));
+  update();
+  go.addEventListener('click', async () => {
+    go.disabled = true; bar.hidden = false; clear(out);
+    try {
+      const picked = pickPhotos(items, Number(count.value));
+      status.textContent = 'Fetching photos…';
+      const fetchPool = pool(3);
+      const photos = (await Promise.all(picked.map((it) => fetchPool(async () => {
+        try { return await mediaBlob(await api(studio, 'hostMedia', { e: eventId, k: key, id: it.i, which: 'thumb' }, { retries: 2 }), eventKey); } catch { return null; }
+      })))).filter(Boolean);
+      let notes = [], voices = [];
+      if ((withNotes.checked || withVoices.checked) && ev.settings.guestbook) {
+        const all = (await api(studio, 'hostGuestbook', { e: eventId, k: key })).notes.filter((n) => n.s === 'visible').sort((a, b) => a.c - b.c);
+        if (withNotes.checked) notes = all.filter((n) => n.text).map((n) => ({ text: n.text.slice(0, 160), g: n.g }));
+        if (withVoices.checked) {
+          for (const n of all.filter((x) => x.a && isDriveId(x.a)).slice(0, 8)) {
+            try { voices.push(await mediaBlob(await api(studio, 'hostMedia', { e: eventId, k: key, id: n.a, which: 'note' }, { timeout: 60000 }), eventKey)); } catch { /* skip */ }
+          }
+        }
+      }
+      const logo = await logoBlob(studio, eventId, ev);
+      const film = await renderHighlight({
+        photos, notes, voices, music: music.files[0] || null, logo,
+        title: ev.name, subtitle: [fmtDate(ev.date), ev.tagline].filter(Boolean).join(' · '), closing: closing.value.trim(),
+        accent: ev.accent, font: ev.font, format: format.value, perPhoto: Number(speed.value),
+        onProgress: (f, label) => { bar.value = f; status.textContent = label; },
+      });
+      if (lastFilm) URL.revokeObjectURL(lastFilm.url);
+      const ext = film.type.includes('mp4') ? 'mp4' : 'webm';
+      const name = `${ev.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || eventId}-highlights.${ext}`;
+      lastFilm = { url: URL.createObjectURL(film), file: new File([film], name, { type: film.type }) };
+      status.textContent = `Done: ${fmtBytes(film.size)}.`;
+      status.dataset.bytes = String(film.size);
+      const canShare = navigator.canShare && navigator.canShare({ files: [lastFilm.file] });
+      clear(out).append(
+        h('video', { controls: true, playsinline: true, src: lastFilm.url, class: 'film-preview' }),
+        h('div', { class: 'row' },
+          h('a', { class: 'btn primary', href: lastFilm.url, download: name }, 'Download video'),
+          canShare ? h('button', { class: 'btn', onclick: () => navigator.share({ files: [lastFilm.file], title: ev.name }).catch(() => {}) }, 'Share…') : null),
+        h('p', { class: 'small muted' }, ext === 'webm' ? 'Tip: WebM plays in browsers and on Android. For iPhones, make it in Safari to get an MP4.' : 'MP4 plays everywhere.'));
+    } catch (e) {
+      status.textContent = '';
+      toast(e.message || 'Couldn’t make the video.', 'error');
+    } finally { go.disabled = false; bar.hidden = true; }
+  });
+  bodyEl.append(h('div', { class: 'stack narrow' },
+    h('h2', null, 'Highlight video'),
+    h('p', null, 'A short film of the night to send the morning after: your favorites plus the best of the rest, guestbook messages and voice notes, with your logo and colours. Made on this computer; nothing is uploaded.'),
+    h('div', { class: 'grid-form' },
+      h('label', { class: 'field' }, h('span', null, 'Length'), count),
+      h('label', { class: 'field' }, h('span', null, 'Pace'), speed),
+      h('label', { class: 'field' }, h('span', null, 'Shape'), format)),
+    h('label', { class: 'check' }, withNotes, h('span', null, 'Include guestbook messages')),
+    h('label', { class: 'check' }, withVoices, h('span', null, 'Play voice messages over the photos')),
+    h('label', { class: 'field' }, h('span', null, 'Music (optional)'), music, h('small', null, 'A song file from this computer. Use music you’re allowed to share.')),
+    h('label', { class: 'field' }, h('span', null, 'Closing line'), closing),
+    est, h('div', { class: 'row' }, go), bar, status, out));
 }
 
 // ------------------------------------------------------------------ keepsakes (Koinos)

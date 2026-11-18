@@ -2,6 +2,7 @@
 import { urlCache, $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
 import { api } from './api.js';
 import { mediaBlob } from './crypto.js';
+import { applyBrand, logoEl } from './brand.js';
 
 const root = $('#app');
 const { q, f } = params();
@@ -25,7 +26,7 @@ async function boot() {
   try {
     ev = (await api(studio, 'event', { e: eventId })).event;
   } catch (e) { return fail(e.message); }
-  setAccent(ev.accent);
+  applyBrand(ev);
   setTitle(ev.name + ' wall');
   build();
   await poll();
@@ -51,7 +52,7 @@ function build() {
     h('p', { class: 'muted' }, 'Goes full screen and keeps this screen awake.')));
   clear(root).append(
     h('div', { class: 'tv-shell' }, els.stage,
-      h('aside', { class: 'tv-side' }, h('div', null, h('h1', { class: 'tv-name' }, ev.name), els.count), h('div', null, els.qr, els.qrCap), els.thumbs, h('div'))),
+      h('aside', { class: 'tv-side' }, h('div', null, logoEl(studio, eventId, ev, 'brand-logo tv-logo'), h('h1', { class: 'tv-name tv-title' }, ev.name), ev.tagline ? h('p', { class: 'tv-count' }, ev.tagline) : null, els.count), h('div', null, els.qr, els.qrCap), els.thumbs, h('div'))),
     els.banner, els.status, start);
   document.addEventListener('mousemove', () => { document.body.classList.add('cursor'); clearTimeout(els.curT); els.curT = setTimeout(() => document.body.classList.remove('cursor'), 2500); });
 }

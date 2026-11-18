@@ -10,6 +10,9 @@ const port = Number(process.argv[2] || 8787);
 const siteDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../site');
 const gas = createGas();
 gas.ctx.setup();
+// A second, never-set-up backend: stands in for a friend's own Apps Script deployment
+// (the e2e test routes https://script.google.com/macros/s/AKfy…/exec here).
+const byo = createGas();
 const adminKey = gas.logs.find((l) => l.includes('NEW ADMIN KEY')).split(': ').pop().trim();
 fs.writeFileSync('/tmp/photoshare-admin-key', adminKey);
 
@@ -19,6 +22,14 @@ const testConfig = `export default { appName: 'PhotoShare', backends: { main: '/
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/mock-byo') {
+    if (req.method === 'GET') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(byo.ctx.doGet().body); return; }
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(byo.ctx.doPost({ postData: { contents: body, length: body.length } }).body); });
+    return;
+  }
   if (url.pathname === '/mock-api' && req.method === 'POST') {
     let body = '';
     req.setEncoding('utf8');
@@ -48,12 +59,13 @@ http.createServer((req, res) => {
   }
   if (url.pathname.startsWith('/mock-drive/')) {
     const id = url.searchParams.get('id') || url.pathname.split('/')[4];
-    const f = gas.files.get(id);
+    const f = gas.files.get(id) || byo.files.get(id);
     if (!f || f.trashed || f.sharing !== 'ANYONE_WITH_LINK' || !f.blob) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': f.blob.mime });
     res.end(gas.unsigned(f.blob.bytes));
     return;
   }
+  if (url.pathname === '/backend/Code.gs.txt') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); res.end(fs.readFileSync(path.join(siteDir, '../backend/Code.gs'))); return; }
   if (url.pathname === '/config.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(testConfig); return; }
   let p = path.normalize(path.join(siteDir, decodeURIComponent(url.pathname)));
   if (!p.startsWith(siteDir)) { res.writeHead(403); res.end(); return; }

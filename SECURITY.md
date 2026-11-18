@@ -57,6 +57,14 @@ PhotoShare is built for a hostile internet: anyone can find a guest link, and th
 - Turn on 2-step verification for the Google account that owns the backend.
 - When updating the backend, read the diff to `backend/Code.gs` before pasting it into Apps Script.
 
+## Friends' own backends
+
+- A link may name a friend's backend with `?b=<deployment id>`. The site turns that into `https://script.google.com/macros/s/<id>/exec` and nothing else, so it only ever talks to Google Apps Script. It still never contacts any other server.
+- Admin keys are only ever sent to backends listed in `config.js` or set up on that device through `setup.html`. An `admin.html?b=…` link to an unknown backend is ignored with a warning, so a crafted link can't collect someone's admin key.
+- All keys are stored per backend, so one PhotoShare's keys are never sent to another.
+- A fresh backend can be claimed from the website exactly once (`claim`), and only while it has no admin key. The deploy URL is secret until it's shared, and once claimed it can't be claimed again.
+- Everything a backend returns is treated as untrusted. Text is rendered as text, links go through `safeUrl`, and media and logos are checked by their real file signature. SVG logos are refused.
+
 ## Private storage (per event, optional)
 
 - Files are encrypted on the guest's device with AES-256-GCM (format `PSE1` + 12-byte IV + ciphertext + tag) before upload. Drive only stores `.enc` blobs, never link-shared. EXIF can't be stripped server-side, so the camera never adds it (canvas re-encode).

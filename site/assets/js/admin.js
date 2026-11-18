@@ -1,32 +1,46 @@
 // Studio admin: create events, hand out host links, delete events.
-import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config } from './util.js';
-import { api, ping } from './api.js';
+import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
+import { api, ping, BACKEND_VERSION } from './api.js';
+import { copyBackendCode } from './backend-code.js';
 
 frameGuard();
 const root = $('#app');
-const studios = Object.keys(config.backends || {});
+// Studios this device may sign in to: the site's own (config.js) and ones set up on this device.
+// A studio named in a link is used only if it's already on that list, so a link can never steer
+// you into typing your admin key into someone else's backend.
+const studios = [...myStudios.list().map((x) => x.id), ...Object.keys(config.backends || {})];
+const studioName = (id) => (myStudios.list().find((x) => x.id === id) || {}).name || (id === Object.keys(config.backends || {})[0] ? 'Main' : id);
 let studio = studios[0];
+let foreignLink = false;
+{
+  const { q } = params();
+  const wanted = q.get('b') ? studioOfDeployment(q.get('b')) : q.get('s');
+  if (wanted && studios.includes(wanted)) studio = wanted;
+  else if (wanted) foreignLink = true;
+}
 let adminKey = '';
 let me = { name: '', role: '' };
 const KEY = () => `ps:ak:${studio}`;
 
 function login(msg) {
   const keyIn = h('input', { type: 'password', autocomplete: 'current-password', required: true, id: 'ak' });
-  const studioSel = studios.length > 1 ? h('select', { id: 'studio' }, studios.map((s) => h('option', { value: s, selected: s === studio }, s))) : null;
+  const studioSel = studios.length > 1 ? h('select', { id: 'studio' }, studios.map((s) => h('option', { value: s, selected: s === studio }, studioName(s)))) : null;
   const form = h('form', { class: 'narrow section stack' },
     h('h1', null, 'Studio sign-in'),
-    h('p', null, 'Use the admin key printed when you ran setup() in Google Apps Script.'),
+    foreignLink ? h('p', { class: 'callout warn' }, 'That link points to a PhotoShare that isn’t set up on this device, so it was ignored. Only sign in to a PhotoShare you set up yourself.') : null,
+    h('p', null, 'Use your admin key.'),
     studioSel ? h('label', { class: 'field' }, h('span', null, 'Studio'), studioSel) : null,
     h('label', { class: 'field' }, h('span', null, 'Admin key'), keyIn),
     msg ? h('p', { class: 'callout warn', role: 'alert' }, msg) : null,
     h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'),
-    h('p', { class: 'small muted', id: 'health', 'aria-live': 'polite' }, 'Checking the backend connection…'));
+    h('p', { class: 'small muted', id: 'health', 'aria-live': 'polite' }, 'Checking the backend connection…'),
+    h('p', { class: 'small' }, 'Want to host events with your own Google Drive? ', h('a', { href: 'setup.html' }, 'Set up your own PhotoShare'), '.'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (studioSel) studio = studioSel.value;
     adminKey = keyIn.value.trim();
     try {
-      me = (await api(studio, 'adminCheck', { k: adminKey }, { retries: 0 })).me || me;
+      { const c = await api(studio, 'adminCheck', { k: adminKey }, { retries: 0 }); me = { ...(c.me || me), version: c.version }; }
       store.set(KEY(), adminKey, sessionStorage);
       dashboard();
     } catch (err) {
@@ -38,7 +52,7 @@ function login(msg) {
   const check = async () => {
     const r = await ping(studio);
     const el = document.getElementById('health');
-    if (el) el.textContent = r.ok ? `Backend connected (version ${r.version}).` : r.message;
+    if (el) el.textContent = r.ok ? `Backend connected (version ${r.version}).${r.ready ? '' : ' It isn’t set up yet: finish on the setup page.'}` : r.message;
   };
   check();
   if (studioSel) studioSel.addEventListener('change', () => { studio = studioSel.value; check(); });
@@ -51,7 +65,7 @@ async function dashboard(created) {
     if (e.code === 'unauthorized') { store.del(KEY(), sessionStorage); return login('Please sign in again.'); }
     toast(e.message, 'error');
   }
-  if (!me.role) { try { me = (await api(studio, 'adminCheck', { k: adminKey })).me || me; } catch { /* handled below */ } }
+  if (!me.role) { try { const c = await api(studio, 'adminCheck', { k: adminKey }); me = { ...(c.me || me), version: c.version }; } catch { /* handled below */ } }
   clear(root).append(
     h('div', { class: 'row spread' }, h('h1', null, 'Events'),
       h('div', { class: 'row' }, h('span', { class: 'small muted' }, me.name ? `Signed in as ${me.name}` : ''), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
@@ -69,6 +83,7 @@ async function dashboard(created) {
           me.role === 'owner' ? h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder') : null,
           ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
           ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
+    me.version && me.version !== BACKEND_VERSION && me.role === 'owner' ? updatePanel(me.version) : null,
     problemsPanel(),
     me.role === 'owner' ? adminsPanel() : null,
     me.role === 'owner' ? keyBackupPanel() : null);
@@ -208,6 +223,18 @@ function adminsPanel() {
   loadAdmins();
   panel.append(listEl, form, result);
   return panel;
+}
+
+/** Shown when this studio's backend is older than the website. */
+function updatePanel(have) {
+  return h('section', { class: 'panel stack section callout' },
+    h('h2', null, 'Update your PhotoShare backend'),
+    h('p', null, `Your backend is version ${have}; this website expects ${BACKEND_VERSION}. Takes a minute:`),
+    h('ol', null,
+      h('li', null, h('button', { class: 'btn small', onclick: (e) => copyBackendCode(e.currentTarget) }, 'Copy the new code')),
+      h('li', null, 'Open ', h('a', { href: 'https://script.google.com/home', target: '_blank', rel: 'noopener' }, 'script.google.com'), ' → your PhotoShare project → Code.gs. Select all, paste, save (Ctrl+S).'),
+      h('li', null, 'Deploy → Manage deployments → pencil icon → Version: New version → Deploy.')),
+    h('p', { class: 'small muted' }, 'Your web address, events and photos stay the same.'));
 }
 
 function signOut() { store.del(KEY(), sessionStorage); adminKey = ''; me = { name: '', role: '' }; login(); }
