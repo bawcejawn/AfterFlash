@@ -1,4 +1,4 @@
--- Afterflash Cloud: accounts (hosts who bought a key), their events and everything guests add.
+-- AfterFlash Cloud: accounts (hosts who bought a key), their events and everything guests add.
 -- Photos themselves live in each host's own Google Drive; this database only indexes them.
 
 CREATE TABLE accounts (

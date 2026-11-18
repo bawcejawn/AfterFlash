@@ -25,7 +25,7 @@ The $10 month and $5 event plans split the same way (20% and 5% of what was paid
 
 ## The rules that keep this legal
 
-Tiered sales programs are legal only when the money comes from real customers, not from recruiting. The FTC's test is whether pay is based on actual sales to real customers. Afterflash enforces these rules in the code:
+Tiered sales programs are legal only when the money comes from real customers, not from recruiting. The FTC's test is whether pay is based on actual sales to real customers. AfterFlash enforces these rules in the code:
 
 1. **Joining is free.** Nobody ever has to buy anything to join or stay.
 2. **Inviting pays $0.** Money only comes from a real customer's purchase.
@@ -58,13 +58,13 @@ Before you push tier 2 and 3 hard, have a lawyer who knows direct selling or MLM
 
 ## Taxes
 
-- Get a **W-9** from each partner before you pay them, and store it privately (not in Afterflash or GitHub).
+- Get a **W-9** from each partner before you pay them, and store it privately (not in AfterFlash or GitHub).
 - **1099-NEC:** for payments made in 2026, file one for each partner you paid **$2,000 or more** in the year. Payments by card or a payment app are generally reported by the app on a 1099-K instead. Ask your accountant.
 - Each January, use **Download payouts for taxes (CSV)**.
 
 ## Partner agreement (for tier 1 partners you add; invited partners accept it on the join page)
 
-> **Afterflash partner agreement**
+> **AfterFlash partner agreement**
 >
 > 1. You're an independent contractor, not an employee or agent of [BUSINESS NAME]. You pay your own taxes. Before your first payout you'll give us a W-9.
 > 2. Your code gives buyers [10]% off. You earn [20]% of what each buyer actually pays with your code, including their later purchases with the same key.

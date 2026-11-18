@@ -1,4 +1,4 @@
-// Local Afterflash Cloud for the browser tests: the real worker + fake Google/Stripe on :8788.
+// Local AfterFlash Cloud for the browser tests: the real worker + fake Google/Stripe on :8788.
 // Usage: node cloud/test/server.mjs [port]  (prints the owner key)
 import http from 'node:http';
 import fs from 'node:fs';

@@ -59,7 +59,7 @@ export async function createCheckout(env, { plan, account = '', ref = null }) {
       ...(ref ? { 'metadata[ref]': ref.code, 'metadata[commission]': String(ref.commission) } : {}),
       'line_items[0][price_data][currency]': 'usd',
       'line_items[0][price_data][unit_amount]': String(amount),
-      'line_items[0][price_data][product_data][name]': 'Afterflash ' + PLAN_NAMES[plan] + (ref ? ` (${ref.discount}% off with code ${ref.code})` : ''),
+      'line_items[0][price_data][product_data][name]': 'AfterFlash ' + PLAN_NAMES[plan] + (ref ? ` (${ref.discount}% off with code ${ref.code})` : ''),
       'line_items[0][quantity]': '1',
       success_url: `${env.SITE_ORIGIN}/welcome.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${env.SITE_ORIGIN}/index.html#pricing`,

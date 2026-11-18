@@ -76,7 +76,7 @@ export function params() {
 }
 
 // ---------- studios
-// A studio is one Afterflash backend (a Google Apps Script web app in someone's own Google
+// A studio is one AfterFlash backend (a Google Apps Script web app in someone's own Google
 // account). Built-in studios are listed in config.js. Friends run their own: their links carry
 // ?b=<deployment id>, which can only ever mean https://script.google.com/macros/s/<id>/exec.
 export const DEPLOYMENT_ID = /^AKfy[A-Za-z0-9_-]{20,140}$/;
@@ -85,7 +85,7 @@ export const studioOfDeployment = (id) => (DEPLOYMENT_ID.test(id) ? 'b.' + id : 
 /** Studios this device has set up or signed in to as an organizer (never filled from a link). */
 export const myStudios = {
   list() { const l = store.get('ps:studios'); return Array.isArray(l) ? l.filter((x) => x && ownStudio(x.id)) : []; },
-  add(id, name) { if (!ownStudio(id)) return; const l = myStudios.list().filter((x) => x.id !== id); l.unshift({ id, name: String(name || 'My Afterflash').slice(0, 40), added: Date.now() }); store.set('ps:studios', l.slice(0, 10)); },
+  add(id, name) { if (!ownStudio(id)) return; const l = myStudios.list().filter((x) => x.id !== id); l.unshift({ id, name: String(name || 'My AfterFlash').slice(0, 40), added: Date.now() }); store.set('ps:studios', l.slice(0, 10)); },
   has(id) { return myStudios.list().some((x) => x.id === id); },
   remove(id) { store.set('ps:studios', myStudios.list().filter((x) => x.id !== id)); },
 };

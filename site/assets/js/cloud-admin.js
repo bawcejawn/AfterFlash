@@ -1,4 +1,4 @@
-// Afterflash Cloud parts of the admin page: sign in with a bought admin key, "Lost your key?"
+// AfterFlash Cloud parts of the admin page: sign in with a bought admin key, "Lost your key?"
 // via Google, connect Google Drive (where every photo is saved), storage meter, owner tools.
 import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params } from './util.js';
 import { api } from './api.js';
@@ -8,13 +8,13 @@ const STUDIO = 'main';
 
 const DRIVE_MSG = {
   connected: ['ok', 'Google Drive connected. New photos will save there.'],
-  noscope: ['warn', 'Google Drive wasn’t connected: on Google’s screen, tick the box that lets Afterflash save files to your Drive, then try again.'],
+  noscope: ['warn', 'Google Drive wasn’t connected: on Google’s screen, tick the box that lets AfterFlash save files to your Drive, then try again.'],
   cancelled: ['warn', 'Google Drive wasn’t connected. You can try again any time.'],
   error: ['warn', 'Google didn’t finish connecting. Please try again.'],
   expired: ['warn', 'That connection link expired. Please try again.'],
 };
 const RECOVER_MSG = {
-  unknown: 'That Google account isn’t connected to an Afterflash account. Use the Google account you connected to Afterflash (it’s shown on your admin page).',
+  unknown: 'That Google account isn’t connected to an AfterFlash account. Use the Google account you connected to AfterFlash (it’s shown on your admin page).',
   cancelled: 'Google sign-in was cancelled.',
   error: 'Google sign-in didn’t finish. Please try again.',
 };
@@ -33,13 +33,13 @@ export function cloudLogin({ root, msg, onKey }) {
   const err = msg || flash.recover;
   const form = h('form', { class: 'narrow section stack' },
     h('h1', null, 'Sign in'),
-    h('p', null, 'Use the admin key you got after buying Afterflash.'),
+    h('p', null, 'Use the admin key you got after buying AfterFlash.'),
     h('label', { class: 'field' }, h('span', null, 'Admin key'), keyIn),
     err ? h('p', { class: 'callout warn', role: 'alert' }, err) : null,
     h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'),
     h('p', { class: 'small' }, 'Lost your key? ', h('button', { class: 'linkbtn', type: 'button', onclick: recover }, 'Sign in with Google'),
       ' (the Google account you connected) to get a new one.'),
-    h('p', { class: 'small muted' }, 'Don’t have a key yet? ', h('a', { href: 'index.html#pricing' }, 'Get Afterflash'), '.'));
+    h('p', { class: 'small muted' }, 'Don’t have a key yet? ', h('a', { href: 'index.html#pricing' }, 'Get AfterFlash'), '.'));
   form.addEventListener('submit', (e) => { e.preventDefault(); onKey(keyIn.value.trim()); });
   clear(root).append(form);
   keyIn.focus();
@@ -61,7 +61,7 @@ export function cloudKeyScreen({ root, key, onContinue }) {
   saved.addEventListener('change', () => { go.disabled = !saved.checked; });
   clear(root).append(h('div', { class: 'narrow section stack' },
     h('h1', null, 'Your admin key'),
-    h('p', null, 'This is the password to your Afterflash. Save it in your password manager or notes now: it isn’t shown again.'),
+    h('p', null, 'This is the password to your AfterFlash. Save it in your password manager or notes now: it isn’t shown again.'),
     h('div', { class: 'keybox' }, key),
     h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => copy(key) }, 'Copy admin key')),
     h('label', { class: 'check' }, saved, h('span', null, 'I saved my admin key')),
@@ -85,9 +85,9 @@ export function drivePanel({ studio, adminKey, me }) {
   if (!me.drive) {
     return h('section', { class: 'panel stack drive-panel' },
       h('h2', null, 'Step 1: Connect your Google Drive'),
-      h('p', null, 'Every photo, video and voice message your guests take is saved straight into your own Google Drive, in a “Afterflash” folder. Google gives every account 15 GB free (about 3,000 photos).'),
+      h('p', null, 'Every photo, video and voice message your guests take is saved straight into your own Google Drive, in a “AfterFlash” folder. Google gives every account 15 GB free (about 3,000 photos).'),
       h('div', { class: 'row' }, h('button', { class: 'btn flash', onclick: (e) => connect(e.currentTarget) }, 'Connect Google Drive')),
-      h('p', { class: 'small muted' }, 'Afterflash can only see the files it creates for you, never anything else in your Drive.'),
+      h('p', { class: 'small muted' }, 'AfterFlash can only see the files it creates for you, never anything else in your Drive.'),
       h('details', null, h('summary', null, 'No Google account? Make one in 2 minutes'),
         h('ol', null,
           h('li', null, 'Open ', h('a', { href: 'https://accounts.google.com/signup', target: '_blank', rel: 'noopener' }, 'accounts.google.com/signup'), '.'),
@@ -105,7 +105,7 @@ export function drivePanel({ studio, adminKey, me }) {
       h('button', { class: 'btn small', onclick: (e) => connect(e.currentTarget) }, 'Use a different Google account')),
     h('details', null, h('summary', null, 'Running low on space?'),
       h('ul', null,
-        h('li', null, 'Buy more space from Google (100 GB is a few dollars a month). Afterflash keeps working with no changes.'),
+        h('li', null, 'Buy more space from Google (100 GB is a few dollars a month). AfterFlash keeps working with no changes.'),
         h('li', null, 'Or use a fresh free Google account: click “Use a different Google account”. New events save there; old events stay where they are.'),
         h('li', null, 'Or after an event: download the album (host dashboard → Share → Download all), then delete the event to free the space.'))));
   api(studio, 'driveStatus', { k: adminKey }).then((d) => {
