@@ -1,4 +1,4 @@
-// Afterflash Cloud: every API action. Same request/response shapes as the Apps Script backend
+// AfterFlash Cloud: every API action. Same request/response shapes as the Apps Script backend
 // (backend/Code.gs), so the website works with either. Hosts' photos go to THEIR Google Drive.
 import {
   err, b64encode, b64decode, randomKey, randomId, sha256Hex, safeEq, seal, unseal,
@@ -138,8 +138,8 @@ async function loadPublicEvent(c, id) {
 async function requireActivePlan(c, ev, forGuests) {
   const a = await accountOf(c, ev);
   if (expired(a)) {
-    throw forGuests ? err('paused', 'The host’s Afterflash plan has ended, so new photos are paused for now. They’ll upload once it’s renewed.')
-      : err('plan_expired', `This Afterflash plan ended on ${fmtDay(a.expires)}. Renew it on the admin page to keep hosting.`);
+    throw forGuests ? err('paused', 'The host’s AfterFlash plan has ended, so new photos are paused for now. They’ll upload once it’s renewed.')
+      : err('plan_expired', `This AfterFlash plan ended on ${fmtDay(a.expires)}. Renew it on the admin page to keep hosting.`);
   }
   return a;
 }
@@ -167,7 +167,7 @@ async function authAccount(c, req, { allowExpired = false } = {}) {
     const a = await c.one('SELECT * FROM accounts WHERE key_hash = ?', hash);
     if (a) {
       if (a.status !== 'active') throw err('forbidden', 'This account is turned off. Contact support.');
-      if (!allowExpired && expired(a)) throw err('plan_expired', a.plan === 'partner' ? 'This is a partner account. Buy a plan to host your own events.' : `Your Afterflash plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
+      if (!allowExpired && expired(a)) throw err('plan_expired', a.plan === 'partner' ? 'This is a partner account. Buy a plan to host your own events.' : `Your AfterFlash plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
       return a;
     }
   }
@@ -757,13 +757,13 @@ A.adminCreate = async (c, req) => {
   }
   const d = await driveFor(c.env, c.db, a);
   let root = a.root_folder;
-  if (!root) { root = await d.createFolder('Afterflash'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
+  if (!root) { root = await d.createFolder('AfterFlash'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
   const id = randomId(10);
   let folder;
   try { folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root); }
   catch (e) {
     if (e.code !== 'not_found') throw e;
-    root = await d.createFolder('Afterflash'); // the folder was deleted in Drive: make a new one
+    root = await d.createFolder('AfterFlash'); // the folder was deleted in Drive: make a new one
     await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id);
     folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root);
   }

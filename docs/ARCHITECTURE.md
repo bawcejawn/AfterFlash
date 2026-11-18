@@ -11,7 +11,7 @@
  └───────────────────────┘                                                  │  • Drive: one folder / event  │
  TV / album / host / admin ── same API ────────────────────────────────────▶│  • Sheets: index + per event  │
                                                                             └──────────────────────────────┘
- archive.html (Kondor) / scripts/archive-album.mjs ── sign ──▶ Koinos: Afterflash contract
+ archive.html (Kondor) / scripts/archive-album.mjs ── sign ──▶ Koinos: AfterFlash contract
  recover.html / scripts/recover.mjs ◀──── read-only ───────── (registry, fingerprint, keepsakes)
 ```
 
@@ -36,7 +36,7 @@
 - Instant hide on guest report, with the host deciding; host pause and delete.
 
 **Improved:**
-| PartyCam | Afterflash |
+| PartyCam | AfterFlash |
 |---|---|
 | Paid tiers by guest count ($15–$150) | $0 at any size; limits are yours to set |
 | Vague shot counts ("25 or more") | Exact, host-set shots per guest |

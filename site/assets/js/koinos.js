@@ -1,4 +1,4 @@
-// Thin wrapper around koilib (loaded as a vendored global) for the Afterflash contract.
+// Thin wrapper around koilib (loaded as a vendored global) for the AfterFlash contract.
 import { config } from './util.js';
 import abi from './photoshare-abi.js';
 

@@ -4,8 +4,8 @@ import { $, h, clear, frameGuard, config, setTitle } from './util.js';
 frameGuard();
 const root = $('#app');
 const c = config.cloud || {};
-const biz = c.business || config.appName || 'Afterflash';
-const app = config.appName || 'Afterflash';
+const biz = c.business || config.appName || 'AfterFlash';
+const app = config.appName || 'AfterFlash';
 const contact = c.support ? h('a', { href: 'mailto:' + c.support }, c.support) : 'the contact address on our home page';
 const updated = 'November 18, 2026';
 const sec = (title, ...paras) => [h('h2', null, title), ...paras.map((p) => (typeof p === 'string' ? h('p', null, p) : p))];
@@ -42,7 +42,7 @@ const PRIVACY = [
   h('h1', null, `${app} privacy policy`), h('p', { class: 'muted' }, `Last updated ${updated}. This explains what ${biz} collects and why.`),
   ...sec('Hosts (people who buy a key)',
     list('Your email address and payment details are handled by Stripe. We receive your email and the fact that you paid; we never see your card number.',
-      'When you connect Google, we receive your Google account’s email and a permission (encrypted on our servers) that lets us save and manage the files Afterflash creates in your Drive. Nothing else in your Drive is visible to us.',
+      'When you connect Google, we receive your Google account’s email and a permission (encrypted on our servers) that lets us save and manage the files AfterFlash creates in your Drive. Nothing else in your Drive is visible to us.',
       'Event settings you choose (name, date, logo, options) and a list of the files in each event.')),
   ...sec('Guests',
     list('No account or email is needed. A guest may type a name, shown next to their photos.',
@@ -53,7 +53,7 @@ const PRIVACY = [
   ...sec('Service providers',
     'We use Cloudflare to run the website and its database, Google for sign-in and Drive storage, and Stripe for payments. Each handles data under its own privacy terms.'),
   ...sec('Keeping and deleting data',
-    'If a host used a referral code, we record which code and the amount paid, so its owner can be paid a commission; the code owner never sees the buyer’s name or email. Event records stay until the host deletes the event or asks us to delete their account, or until 12 months after the host’s plan ends. Photos live in the host’s Google Drive and are under the host’s control. Hosts can disconnect Afterflash any time in their Google account settings (Security → Third-party access).'),
+    'If a host used a referral code, we record which code and the amount paid, so its owner can be paid a commission; the code owner never sees the buyer’s name or email. Event records stay until the host deletes the event or asks us to delete their account, or until 12 months after the host’s plan ends. Photos live in the host’s Google Drive and are under the host’s control. Hosts can disconnect AfterFlash any time in their Google account settings (Security → Third-party access).'),
   ...sec('Children', `${app} isn’t directed at children under 13. Hosts decide who attends their events and are responsible for appropriate consent.`),
   ...sec('Your rights and contact', h('p', null, 'To ask what we hold about you, or to delete it, contact ', contact, '.')),
 ];

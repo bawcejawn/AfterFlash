@@ -1,6 +1,6 @@
 {
-  "name": "Afterflash",
-  "short_name": "Afterflash",
+  "name": "AfterFlash",
+  "short_name": "AfterFlash",
   "start_url": "./index.html",
   "scope": "./",
   "id": "./",
