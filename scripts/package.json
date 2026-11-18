@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "koilib": "10.0.0",
-    "sharp": "0.34.5"
+    "sharp": "0.35.5"
   }
 }

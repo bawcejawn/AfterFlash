@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Backend unit tests (real Code.gs on mocked Google services)
@@ -32,7 +32,7 @@ jobs:
         run: git diff --exit-code -- contract/build/release/contract.wasm contract/build/release/contract.wasm.sha256 contract/abi/photoshare-abi.json site/assets/js/photoshare-abi.js
       - name: Vendored libraries match npm releases
         run: scripts/vendor.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: End-to-end browser test (fake camera)

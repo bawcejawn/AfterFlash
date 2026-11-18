@@ -231,10 +231,17 @@ with sync_playwright() as p:
     page.screenshot(path=f"{SHOTS}/09-team.png", full_page=True)
 
     # ---- legal pages
-    for name in ("terms", "privacy"):
+    for name in ("terms", "privacy", "help"):
         lp = host.new_page(); watch(lp, name)
         lp.goto(f"{BASE}/{name}.html")
         expect(lp.locator("h1")).to_contain_text("PhotoShare")
+        if name == "help":
+            lp.goto(f"{BASE}/help.html#camera")
+            expect(lp.locator("#camera")).to_have_attribute("open", "")
+            lp.fill("input[type=search]", "payout")
+            expect(lp.locator("#partner-paid")).to_be_visible()
+            expect(lp.locator("#camera")).to_be_hidden()
+            lp.screenshot(path=f"{SHOTS}/10-help.png", full_page=True)
         lp.close()
 
     browser.close()
