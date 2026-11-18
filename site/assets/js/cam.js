@@ -135,7 +135,7 @@ function closedScreen() {
 
 let stream = null, facing = 'environment', mode = 'photo', look, flashOn = false, recorder = null, recTimer = null;
 let beautyOn = true;
-const BEAUTY = 0.5;
+const BEAUTY = 0.3; // light touch: smooths skin a little, keeps detail
 // Photos are kept at up to 12 MP (4032 px), like a phone's own camera.
 const MAX_EDGE = 4032;
 let hdOn = false, hdChosen = false;
@@ -164,7 +164,7 @@ function updateQueuePill(text) { els.queue.textContent = text || ''; }
 async function startCamera() {
   const st = statusLine();
   if (st === 'closed') return closedScreen();
-  look = ev.look in LOOKS ? ev.look : 'classic';
+  look = ev.look in LOOKS ? ev.look : 'none';
   beautyOn = ev.beauty !== false && store.get('ps:beauty') !== 'off';
   const evKey = `${studio}:${eventId}`;
   pending = (await queue.list(evKey).catch(() => [])).length;
@@ -195,8 +195,8 @@ async function startCamera() {
   const fallbackInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden', onchange: (e) => fromFiles(e.target.files) });
   els.fallbackInput = fallbackInput;
   const libChip = ev.allowLibrary ? h('button', { class: 'chip', onclick: () => libInput.click() }, 'From library') : null;
-  // HD: on phones whose browser can't take full-resolution stills (iPhone), the shutter opens the
-  // phone's own camera app for full quality; looks and Beauty are applied afterwards.
+  // HD: on phones the shutter opens the phone's own camera app for full quality (see updateHd);
+  // looks and Beauty are applied afterwards.
   els.hdInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden', onchange: (e) => { fromCameraApp(e.target.files[0]); e.target.value = ''; } });
   els.hdChip = h('button', { class: 'chip', 'aria-pressed': 'false', hidden: true, onclick: () => setHd(!hdOn, true) }, 'HD');
   els.hdChip.setAttribute('aria-label', 'HD photos with your phone’s camera');
@@ -288,11 +288,16 @@ async function openStream() {
   updateHd();
 }
 
-/** HD is offered when the in-browser camera can't do full-quality stills. */
+/**
+ * HD: the shutter opens the phone's own camera app, which runs the phone's full photo
+ * processing (HDR, night mode, sharpening). Browsers can't use that processing, so on phones
+ * HD is offered and on by default. Elsewhere only when the in-browser camera is low-res.
+ */
+const PHONE = /android|iphone|ipod/i.test(navigator.userAgent) || (/ipad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 function updateHd() {
   const v = els.video;
   const lowRes = v.videoWidth * v.videoHeight < 5e6;
-  const offer = mode === 'photo' && !els.capture && lowRes;
+  const offer = mode === 'photo' && (PHONE || (!els.capture && lowRes));
   els.hdChip.hidden = !offer;
   if (!offer) { hdOn = false; return; }
   if (!hdChosen) setHd(true, false);
