@@ -25,7 +25,7 @@ jobs:
         run: git diff --exit-code -- contract/build/release/contract.wasm contract/build/release/contract.wasm.sha256 contract/abi/photoshare-abi.json site/assets/js/photoshare-abi.js
       - name: Vendored libraries match npm releases
         run: scripts/vendor.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: End-to-end browser test (fake camera)
