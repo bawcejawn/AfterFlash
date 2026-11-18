@@ -411,6 +411,93 @@ t('referral codes: discount, commission on every sale, partner view, payouts, vo
   assert.equal(last.amount, 1000); assert.equal(last.metadata.ref, undefined);
 });
 
+t('partner tiers: invites, overrides split up the team, payout requests, rules against self-dealing', async () => {
+  const s = await boot();
+  const owner = s.env.OWNER_KEY;
+  const day = 86400000;
+  // tier 1, added by the owner, partner-only key (no free hosting)
+  const t1 = await s.call({ a: 'ownerCodeCreate', k: owner, name: 'Ann Lee', code: 'ANN', email: 'ann@example.com' });
+  assert.ok(t1.adminKey); assert.equal(t1.lifetime, false);
+  let me = (await s.call({ a: 'adminCheck', k: t1.adminKey })).me;
+  assert.equal(me.plan, 'partner'); assert.equal(me.expired, true, 'partner keys can’t host');
+  assert.equal((await s.call({ a: 'adminCreate', k: t1.adminKey, settings: { name: 'x' } })).error, 'plan_expired');
+  assert.equal(me.partner.codes[0].tier, 1); assert.equal(me.partner.codes[0].canInvite, true);
+  // only partners can make invite links, and only the owner can make free keys
+  const host = await hostWithDrive(s, { plan: 'month', sub: 'not-a-partner' });
+  assert.equal((await s.call({ a: 'partnerInvite', k: host })).error, 'forbidden');
+  assert.ok(['forbidden', 'plan_expired'].includes((await s.call({ a: 'ownerCreateAccount', k: t1.adminKey })).error), 'partners can’t make free keys');
+  // Ann invites Bob (tier 2); the link works once
+  const inv = await s.call({ a: 'partnerInvite', k: t1.adminKey });
+  const token = inv.link.split('#invite=')[1];
+  assert.ok(token.length >= 20);
+  const info = await s.call({ a: 'partnerInviteInfo', invite: token });
+  assert.equal(info.inviter, 'Ann'); assert.equal(info.tier, 2); assert.equal(info.override, 5); assert.equal(info.canRecruit, true);
+  assert.equal((await s.call({ a: 'partnerJoin', invite: token, name: 'Bob', email: 'bob@example.com' })).error, 'bad_request', 'must accept the agreement');
+  const bob = await s.call({ a: 'partnerJoin', invite: token, name: 'Bob Ray', email: 'bob@example.com', agree: true });
+  assert.equal(bob.tier, 2); assert.match(bob.code, /^BOBRAY\d+$/);
+  assert.equal((await s.call({ a: 'partnerJoin', invite: token, name: 'Again', email: 'x@example.com', agree: true })).error, 'bad_invite', 'single use');
+  assert.equal((await s.call({ a: 'partnerInviteInfo', invite: 'x'.repeat(30) })).error, 'bad_invite');
+  // Bob invites Cat (tier 3); Cat can sell but not invite
+  const t3 = (await s.call({ a: 'partnerInvite', k: bob.adminKey })).link.split('#invite=')[1];
+  const cat = await s.call({ a: 'partnerJoin', invite: t3, name: 'Cat', email: 'cat@example.com', agree: true });
+  assert.equal(cat.tier, 3);
+  assert.equal((await s.call({ a: 'partnerInvite', k: cat.adminKey })).error, 'forbidden', '3 tiers deep, no more');
+  const catMe = (await s.call({ a: 'adminCheck', k: cat.adminKey })).me.partner.codes[0];
+  assert.equal(catMe.canInvite, false); assert.equal(catMe.discount, 10); assert.equal(catMe.commission, 20);
+  // a real customer buys 12 months with Cat's code: $27 paid
+  await hostWithDrive(s, { plan: 'year', ref: cat.code, sub: 'cust-1' });
+  const earned = (k) => s.call({ a: 'adminCheck', k }).then((r) => r.me.partner.codes[0]);
+  let [a1, b1, c1] = [await earned(t1.adminKey), await earned(bob.adminKey), await earned(cat.adminKey)];
+  assert.equal(c1.earned, 540, 'seller: 20% of $27');
+  assert.equal(b1.earned, 67); assert.equal(a1.earned, 67, '5% ($1.35) split evenly between the 2 partners above');
+  assert.equal(b1.teamEarned, 67); assert.equal(b1.sales, 0, 'overrides are not sales');
+  const annTeam = (await s.call({ a: 'adminCheck', k: t1.adminKey })).me.partner.codes[0].team;
+  assert.deepEqual(annTeam.map((m) => [m.name, m.tier, m.sales]), [['Bob Ray', 2, 0], ['Cat', 3, 1]]);
+  // Bob sells one month: Bob 20% of $9, Ann gets the whole 5%
+  await hostWithDrive(s, { plan: 'month', ref: bob.code, sub: 'cust-2' });
+  [a1, b1] = [await earned(t1.adminKey), await earned(bob.adminKey)];
+  assert.equal(b1.earned, 67 + 180); assert.equal(a1.earned, 67 + 45);
+  // Ann sells directly: nobody above her (the owner isn't paid overrides)
+  await hostWithDrive(s, { plan: 'year', ref: 'ANN', sub: 'cust-3' });
+  assert.equal((await earned(t1.adminKey)).earned, 67 + 45 + 540);
+  assert.equal(s.env.DB.raw.prepare("SELECT COUNT(*) n FROM commissions WHERE kind = 'override'").get().n, 3);
+  // partners buying (signed in, or anonymously with their own email) earn nobody anything
+  const own = (await s.call({ a: 'checkoutStart', plan: 'month', k: cat.adminKey, ref: cat.code })).url.split('/').pop();
+  assert.equal([...s.fk.sessions.values()].pop().amount, 1000, 'partners pay full price'); s.fk.pay(own);
+  await s.call({ a: 'claimPurchase', session_id: own });
+  assert.equal((await earned(cat.adminKey)).earned, 540);
+  assert.equal((await s.call({ a: 'adminCheck', k: cat.adminKey })).me.expired, false, 'a partner who buys can host');
+  // payout requests: need $25 ready (past 14 days)
+  assert.equal((await s.call({ a: 'partnerRequestPayout', k: t1.adminKey, method: 'Venmo', handle: '@ann' })).error, 'bad_request', 'not ready yet');
+  s.env.DB.raw.prepare('UPDATE commissions SET created = ?').run(Date.now() - 15 * day);
+  assert.equal((await s.call({ a: 'partnerRequestPayout', k: cat.adminKey, method: 'Venmo', handle: '@cat' })).error, 'bad_request', '$5.40 is under $25');
+  assert.equal((await s.call({ a: 'partnerRequestPayout', k: t1.adminKey, method: 'Bitcoin', handle: 'x' })).error, 'bad_request');
+  // give Ann enough: a cash sale credited to her
+  await s.call({ a: 'ownerCashSale', k: owner, plan: 'year', amount: '100', code: 'ANN' });
+  s.env.DB.raw.prepare('UPDATE commissions SET created = ?').run(Date.now() - 15 * day);
+  const req1 = await s.call({ a: 'partnerRequestPayout', k: t1.adminKey, method: 'Venmo', handle: '@ann-lee' });
+  assert.equal(req1.amount, 67 + 45 + 540 + 2000);
+  assert.equal((await s.call({ a: 'partnerRequestPayout', k: t1.adminKey, method: 'Venmo', handle: '@ann-lee' })).error, 'bad_request', 'one request at a time');
+  let oc = await s.call({ a: 'ownerCodes', k: owner });
+  assert.equal(oc.requests.length, 1); assert.equal(oc.requests[0].handle, '@ann-lee'); assert.equal(oc.requests[0].name, 'Ann Lee');
+  assert.ok(['forbidden', 'plan_expired'].includes((await s.call({ a: 'ownerPayRequest', k: t1.adminKey, id: oc.requests[0].id, paid: true })).error));
+  assert.equal((await s.call({ a: 'ownerPayRequest', k: owner, id: oc.requests[0].id, paid: true })).ok, true);
+  assert.equal((await s.call({ a: 'ownerPayRequest', k: owner, id: oc.requests[0].id, paid: true })).error, 'not_found', 'can’t pay twice');
+  const annNow = await earned(t1.adminKey);
+  assert.equal(annNow.paid, req1.amount); assert.equal(annNow.owed, 0); assert.equal(annNow.requests[0].status, 'paid');
+  // a chargeback voids the seller's commission and the team overrides together
+  oc = await s.call({ a: 'ownerCodes', k: owner });
+  const catSale = oc.sales.find((x) => x.code === cat.code && x.kind === 'sale');
+  await s.call({ a: 'ownerVoidSale', k: owner, id: catSale.id });
+  assert.equal((await earned(cat.adminKey)).earned, 0); assert.equal((await earned(bob.adminKey)).earned, 180);
+  // goodwill days for a customer
+  const accts = (await s.call({ a: 'ownerAccounts', k: owner })).accounts;
+  const cust = accts.find((x) => x.plan === 'month' && x.kind === 'paid');
+  const before = cust.expires;
+  assert.ok((await s.call({ a: 'ownerAddDays', k: owner, id: cust.id, days: 7 })).expires >= before + 7 * day - 1000);
+  assert.equal((await s.call({ a: 'ownerAddDays', k: owner, id: accts.find((x) => x.plan === 'partner').id, days: 7 })).error, 'bad_request');
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

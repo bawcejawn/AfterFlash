@@ -148,8 +148,15 @@ export function ownerPanel({ studio, adminKey }) {
           h('tbody', null, accounts.map((a) => h('tr', null,
             h('td', null, h('b', null, a.email || a.note || a.id), h('div', { class: 'small muted' }, a.google_email || '')),
             h('td', null, a.kind + (a.ref ? ` (${a.ref})` : '')), h('td', null, a.plan === 'lifetime' && !a.expires ? 'Lifetime' : `${PLAN_NAMES[a.plan] || a.plan}, ${a.expires < Date.now() ? 'ended' : 'until'} ${day(a.expires)}`), h('td', null, a.drive ? 'Connected' : 'Not yet'), h('td', null, String(a.events)), h('td', null, fmtWhen(a.created)),
-            h('td', null, h('button', { class: 'btn small' + (a.status === 'active' ? ' danger' : ''), onclick: () => setStatus(a) }, a.status === 'active' ? 'Turn off' : 'Turn on')))))) : null);
+            h('td', null, h('div', { class: 'row' },
+              a.expires && a.plan !== 'partner' ? h('button', { class: 'btn small', onclick: () => addDays(a) }, 'Add days') : null,
+              h('button', { class: 'btn small' + (a.status === 'active' ? ' danger' : ''), onclick: () => setStatus(a) }, a.status === 'active' ? 'Turn off' : 'Turn on'))))))) : null);
     } catch (err) { clear(list).append(h('p', null, err.message)); }
+  }
+  async function addDays(a) {
+    const d = prompt(`Add how many days to ${a.email || a.note || a.id}? (e.g. 7 to make up for a problem)`, '7');
+    if (d == null) return;
+    try { await api(studio, 'ownerAddDays', { k: adminKey, id: a.id, days: Number(d) }); toast('Days added.'); load(); } catch (err) { toast(err.message, 'error'); }
   }
   async function setStatus(a) {
     const off = a.status === 'active';
@@ -160,7 +167,7 @@ export function ownerPanel({ studio, adminKey }) {
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: accounts'), make, result, list);
 }
 
-const PLAN_NAMES = { event: '1-event plan', month: '1-month plan', year: '12-month plan', lifetime: 'Lifetime' };
+const PLAN_NAMES = { event: '1-event plan', month: '1-month plan', year: '12-month plan', lifetime: 'Lifetime', partner: 'Partner only' };
 const day = (t) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 const usd = (c) => '$' + (Number(c || 0) / 100).toFixed(2);
 
@@ -168,6 +175,16 @@ const usd = (c) => '$' + (Number(c || 0) / 100).toFixed(2);
 export function planPanel({ studio, adminKey, me }) {
   if (me.role === 'owner' || (me.plan === 'lifetime' && !me.expires)) {
     return me.role === 'owner' ? null : h('p', { class: 'small muted' }, 'Plan: Lifetime. Thank you!');
+  }
+  if (me.plan === 'partner') {
+    const ps = ((config.cloud && config.cloud.plans) || []).filter((p) => p.on);
+    return h('section', { class: 'panel stack plan-status' }, h('h2', null, 'Partner account'),
+      h('p', null, 'This key shows your sales and payouts. To host your own events, buy a plan (partners pay full price, and their own purchases don’t earn commission).'),
+      ps.length ? h('div', { class: 'row' }, ps.map((p) => h('button', { class: 'btn small', onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        try { const { url } = await api(studio, 'checkoutStart', { plan: p.id, k: adminKey }, { retries: 1 }); if (!/^https:\/\/checkout\.stripe\.com\//.test(url)) throw new Error('Unexpected checkout address.'); location.href = url; }
+        catch (err) { toast(err.message, 'error'); }
+      } }, `${p.name} (${p.price})`))) : null);
   }
   const left = Math.ceil((me.expires - Date.now()) / 86400000);
   const unlimitedActive = me.plan !== 'event' && !me.expired;
@@ -192,19 +209,65 @@ export function planPanel({ studio, adminKey, me }) {
       p.id === 'event' ? `Add 1 event (${p.price})` : `Add ${p.name} (${p.price})`))) : null);
 }
 
-/** A referral partner's own code, link and earnings. */
-export function partnerPanel({ me }) {
+/** A referral partner's own code, link, earnings, team, invite links and payout requests. */
+export function partnerPanel({ studio, adminKey, me }) {
   if (!me.partner || !me.partner.codes || !me.partner.codes.length) return null;
-  return h('section', { class: 'panel stack section' }, h('h2', null, 'Your referral code'),
-    me.partner.codes.map((c) => h('div', { class: 'stack' },
-      h('p', null, h('b', null, c.code), c.active ? ` gives buyers ${c.discount}% off. You earn ${c.commission}% of every sale made with it, renewals included.` : ' is turned off right now.'),
+  const box = h('section', { class: 'panel stack section' });
+  const draw = (p) => {
+    clear(box).append(h('h2', null, 'Your partner page'));
+    for (const c of p.codes) box.append(codeBlock(p, c));
+  };
+  const reload = async () => {
+    try { const r = await api(studio, 'adminCheck', { k: adminKey }); if (r.me && r.me.partner) draw(r.me.partner); } catch (err) { toast(err.message, 'error'); }
+  };
+  const codeBlock = (p, c) => {
+    const pending = c.requests.find((r) => r.status === 'pending');
+    const inviteOut = h('div');
+    const invite = async (btn) => {
+      btn.disabled = true;
+      try {
+        const r = await api(studio, 'partnerInvite', { k: adminKey, code: c.code });
+        clear(inviteOut).append(h('div', { class: 'panel stack' },
+          h('p', null, `Send this link to one person who wants to join your team. It works once, until ${day(r.expires)}.`),
+          h('div', { class: 'keybox partner-link' }, r.link), h('button', { class: 'btn small', onclick: () => copy(r.link) }, 'Copy invite link')));
+      } catch (err) { toast(err.message, 'error'); }
+      btn.disabled = false;
+    };
+    const method = h('select', { 'aria-label': 'How to pay you' }, p.methods.map((m) => h('option', { value: m }, m)));
+    const handle = h('input', { type: 'text', maxlength: 80, placeholder: 'Username, email or phone (address for a check)' });
+    const reqForm = h('form', { class: 'row' }, method, handle, h('button', { class: 'btn primary', type: 'submit' }, `Request ${usd(c.ready)}`));
+    reqForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await api(studio, 'partnerRequestPayout', { k: adminKey, code: c.code, method: method.value, handle: handle.value.trim() }); toast('Payout requested.'); reload(); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+    return h('div', { class: 'stack' },
+      h('p', null, h('b', null, c.code), ` (tier ${c.tier})`, c.active ? ` gives buyers ${c.discount}% off. You earn ${c.commission}% of every sale made with it, renewals included.` : ' is turned off right now.'),
       h('div', { class: 'row' }, h('span', { class: 'keybox partner-link' }, c.link), h('button', { class: 'btn small', onclick: () => copy(c.link) }, 'Copy link'), h('button', { class: 'btn small', onclick: () => copy(c.code) }, 'Copy code')),
-      h('p', null, `${c.sales} sale${c.sales === 1 ? '' : 's'}. Earned ${usd(c.earned)}, paid to you ${usd(c.paid)}, still owed ${usd(c.owed)}.`),
-      h('p', { class: 'small muted' }, 'Earnings are paid after a 14-day refund window. Refunded sales don’t earn.'),
-      c.recent.length ? h('table', { class: 'list' },
-        h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Plan'), h('th', null, 'Sale'), h('th', null, 'You earn'))),
-        h('tbody', null, c.recent.map((r) => h('tr', null, h('td', null, day(r.created)), h('td', null, PLAN_NAMES[r.plan] || r.plan),
-          h('td', null, usd(r.paid)), h('td', null, r.status === 'void' ? 'Refunded' : usd(r.amount)))))) : null)));
+      h('p', { class: 'small muted' }, 'When you share it, say you earn a commission (for example: “I get a small commission if you use my code”).'),
+      h('div', { class: 'stats' },
+        h('div', null, h('b', null, usd(c.earned)), h('span', null, 'earned')),
+        h('div', null, h('b', null, usd(c.teamEarned)), h('span', null, 'of it from your team')),
+        h('div', null, h('b', null, usd(c.paid)), h('span', null, 'paid to you')),
+        h('div', null, h('b', null, usd(c.ready)), h('span', null, 'ready to pay'))),
+      pending ? h('p', { class: 'callout' }, `Payout of ${usd(pending.amount)} by ${pending.method} requested on ${day(pending.created)}. You’ll be paid soon.`)
+        : c.ready >= p.minPayout ? reqForm
+          : h('p', { class: 'small muted' }, `You can request a payout once ${usd(p.minPayout)} is ready. Sales count after 14 days.`),
+      c.canInvite ? h('div', { class: 'stack' }, h('h3', null, 'Grow your team'),
+        h('p', { class: 'small muted' }, `Invite people who want to sell too. When your team sells, you share a ${c.override}% team bonus. Inviting earns nothing by itself, and never promise anyone earnings.`),
+        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: (e) => invite(e.currentTarget) }, 'Make an invite link')), inviteOut) : null,
+      c.team.length ? h('details', null, h('summary', null, `Your team (${c.team.length})`), h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Partner'), h('th', null, 'Tier'), h('th', null, 'Sales'))),
+        h('tbody', null, c.team.map((m) => h('tr', null, h('td', null, m.name + (m.under ? ' (via ' + m.under + ')' : '') + (m.active ? '' : ' (off)')), h('td', null, String(m.tier)), h('td', null, String(m.sales))))))) : null,
+      c.recent.length ? h('details', null, h('summary', null, 'Recent earnings'), h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'From'), h('th', null, 'Sale'), h('th', null, 'You earn'))),
+        h('tbody', null, c.recent.map((r) => h('tr', null, h('td', null, day(r.created)), h('td', null, (r.kind === 'override' ? 'Team: ' : 'You: ') + (PLAN_NAMES[r.plan] || r.plan)),
+          h('td', null, usd(r.paid)), h('td', null, r.status === 'void' ? 'Reversed' : usd(r.amount))))))) : null,
+      c.requests.length ? h('details', null, h('summary', null, 'Payout history'), h('table', { class: 'list' },
+        h('tbody', null, c.requests.map((r) => h('tr', null, h('td', null, day(r.created)), h('td', null, usd(r.amount)), h('td', null, r.method), h('td', null, r.status === 'paid' ? `Paid ${day(r.done)}` : r.status)))))) : null);
+  };
+  draw(me.partner);
+  return box;
 }
 
 /** Owner: referral partners, their earnings and payouts, and cash sales. */
@@ -222,7 +285,7 @@ export function partnersPanel({ studio, adminKey }) {
   const create = h('form', { class: 'stack' },
     h('div', { class: 'row' }, f.name, f.email, f.code),
     h('div', { class: 'row' }, h('label', null, f.discount, ' % off for buyers'), h('label', null, f.commission, ' % commission'),
-      h('label', null, f.withKey, ' Also give them a free lifetime admin key')),
+      h('label', null, f.withKey, ' Free lifetime hosting key (otherwise a partner-only key: earnings and payouts, no hosting)')),
     h('button', { class: 'btn primary', type: 'submit' }, 'Add partner'));
   create.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -231,9 +294,9 @@ export function partnersPanel({ studio, adminKey }) {
         discount: Number(f.discount.value), commission: Number(f.commission.value), withKey: f.withKey.checked });
       f.name.value = ''; f.email.value = ''; f.code.value = '';
       clear(result).append(h('div', { class: 'panel stack' }, h('h3', null, `Partner code ${r.code}`),
-        h('p', null, 'Send these privately. The admin key is shown only once; on their admin page they’ll see their code, link and earnings.'),
+        h('p', null, 'Send these privately, with the partner agreement (docs/PARTNERS.md). The key is shown only once; with it they see their code, link, earnings and team, and request payouts.'),
         h('div', { class: 'keybox partner-link' }, r.link), h('button', { class: 'btn small', onclick: () => copy(r.link) }, 'Copy link'),
-        r.adminKey ? h('div', { class: 'keybox' }, r.adminKey) : null, r.adminKey ? h('button', { class: 'btn small', onclick: () => copy(r.adminKey) }, 'Copy admin key') : null));
+        h('div', { class: 'keybox' }, r.adminKey), h('button', { class: 'btn small', onclick: () => copy(r.adminKey) }, r.lifetime ? 'Copy lifetime key' : 'Copy partner key')));
       load();
     } catch (err) { toast(err.message, 'error'); }
   });
@@ -263,14 +326,23 @@ export function partnersPanel({ studio, adminKey }) {
   const act = async (fn) => { try { await fn(); load(); } catch (err) { toast(err.message, 'error'); } };
   async function load() {
     try {
-      const { codes, sales, payouts } = await api(studio, 'ownerCodes', { k: adminKey });
+      const { codes, sales, payouts, requests, override } = await api(studio, 'ownerCodes', { k: adminKey });
       const owed = codes.reduce((t, c) => t + c.owed, 0), ready = codes.reduce((t, c) => t + c.ready, 0);
       clear(body).append(
-        h('p', null, `${codes.length} partner${codes.length === 1 ? '' : 's'}. You owe ${usd(owed)} in total; ${usd(ready)} is past the 14-day refund window and ready to pay.`),
+        requests.length ? h('div', { class: 'panel stack callout' }, h('h3', null, `Payout requests (${requests.length})`),
+          h('p', { class: 'small' }, 'Send the money with the app they chose, then click Paid. Payouts are recorded for their 1099.'),
+          h('table', { class: 'list' }, h('tbody', null, requests.map((q) => h('tr', null,
+            h('td', null, h('b', null, q.name || q.code), h('div', { class: 'small muted' }, q.code + (q.email ? ' · ' + q.email : ''))),
+            h('td', null, h('b', null, usd(q.amount))), h('td', null, q.method, h('div', { class: 'small' }, q.handle)), h('td', null, day(q.created)),
+            h('td', null, h('div', { class: 'row' },
+              h('button', { class: 'btn small primary', onclick: () => { if (confirm(`Did you send ${usd(q.amount)} to ${q.handle} by ${q.method}?`)) act(() => api(studio, 'ownerPayRequest', { k: adminKey, id: q.id, paid: true })); } }, 'Paid'),
+              h('button', { class: 'btn small', onclick: () => { const n = prompt('Reason (they’ll be able to request again):', ''); if (n != null) act(() => api(studio, 'ownerPayRequest', { k: adminKey, id: q.id, paid: false, note: n })); } }, 'Decline')))))))) : null,
+        h('p', null, `${codes.length} partner${codes.length === 1 ? '' : 's'}. You owe ${usd(owed)} in total; ${usd(ready)} is past the 14-day window and ready to pay. Team bonus: ${override}% of each sale, split among the partners above the seller.`),
         codes.length ? h('table', { class: 'list' },
-          h('thead', null, h('tr', null, h('th', null, 'Partner'), h('th', null, 'Deal'), h('th', null, 'Sales'), h('th', null, 'Earned'), h('th', null, 'Paid'), h('th', null, 'Ready to pay'), h('th', null, ''))),
+          h('thead', null, h('tr', null, h('th', null, 'Partner'), h('th', null, 'Tier'), h('th', null, 'Deal'), h('th', null, 'Sales'), h('th', null, 'Earned'), h('th', null, 'Paid'), h('th', null, 'Ready to pay'), h('th', null, ''))),
           h('tbody', null, codes.map((c) => h('tr', null,
             h('td', null, h('b', null, c.code), h('div', { class: 'small muted' }, c.name + (c.email ? ' · ' + c.email : '') + (c.active ? '' : ' (off)'))),
+            h('td', null, String(c.tier), c.parent ? h('div', { class: 'small muted' }, 'under ' + c.parent) : null),
             h('td', null, `${c.discount}% off, ${c.commission}%`),
             h('td', null, `${c.sales} (${usd(c.revenue)})`), h('td', null, usd(c.earned)), h('td', null, usd(c.paid), h('div', { class: 'small muted' }, `${usd(c.paidThisYear)} this year`)), h('td', null, usd(c.ready)),
             h('td', null, h('div', { class: 'row' },
@@ -278,10 +350,10 @@ export function partnersPanel({ studio, adminKey }) {
               h('button', { class: 'btn small', onclick: () => copy(c.link) }, 'Copy link'),
               h('button', { class: 'btn small' + (c.active ? ' danger' : ''), onclick: () => act(() => api(studio, 'ownerCodeUpdate', { k: adminKey, code: c.code, active: !c.active })) }, c.active ? 'Turn off' : 'Turn on'))))))) : null,
         sales.length ? h('details', null, h('summary', null, `Sales with codes (${sales.length})`), h('table', { class: 'list' },
-          h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Code'), h('th', null, 'Plan'), h('th', null, 'Paid'), h('th', null, 'Commission'), h('th', null, ''))),
-          h('tbody', null, sales.map((x) => h('tr', null, h('td', null, day(x.created)), h('td', null, x.code), h('td', null, (PLAN_NAMES[x.plan] || x.plan) + (x.method === 'cash' ? ' (cash)' : '')),
+          h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Earner'), h('th', null, 'Plan'), h('th', null, 'Paid'), h('th', null, 'Commission'), h('th', null, ''))),
+          h('tbody', null, sales.map((x) => h('tr', null, h('td', null, day(x.created)), h('td', null, x.code, x.kind === 'override' ? h('div', { class: 'small muted' }, 'team bonus, sold by ' + x.seller) : null), h('td', null, (PLAN_NAMES[x.plan] || x.plan) + (x.method === 'cash' ? ' (cash)' : '')),
             h('td', null, usd(x.paid)), h('td', null, x.status === 'void' ? 'Voided' : usd(x.amount)),
-            h('td', null, h('button', { class: 'btn small', title: 'Use after refunding this sale', onclick: () => act(() => api(studio, 'ownerVoidSale', { k: adminKey, id: x.id, restore: x.status === 'void' })) }, x.status === 'void' ? 'Restore' : 'Void (refunded)'))))))) : null,
+            h('td', null, h('button', { class: 'btn small', title: 'Use after a chargeback or refund; also reverses the team bonuses', onclick: () => act(() => api(studio, 'ownerVoidSale', { k: adminKey, id: x.id, restore: x.status === 'void' })) }, x.status === 'void' ? 'Restore' : 'Void (chargeback)'))))))) : null,
         payouts.length ? h('details', null, h('summary', null, `Payouts (${payouts.length})`),
           h('button', { class: 'btn small', onclick: () => csv(payouts, codes) }, 'Download payouts for taxes (CSV)'),
           h('table', { class: 'list' }, h('tbody', null, payouts.map((x) => h('tr', null, h('td', null, day(x.created)), h('td', null, x.code), h('td', null, usd(x.amount)), h('td', null, x.method), h('td', null, x.note)))))) : null);
@@ -304,6 +376,6 @@ export function partnersPanel({ studio, adminKey }) {
   }
   load();
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: referral partners'),
-    h('p', { class: 'small muted' }, 'Each partner gets a code and a link. Buyers get the discount; the partner earns the commission on every sale with their code, renewals included. You pay partners yourself, then record it here.'),
+    h('p', { class: 'small muted' }, 'Each partner gets a code and a link. Buyers get the discount; the seller earns the commission on every sale with their code, renewals included, and the partners above them (up to 2 tiers) split the team bonus. Partners in tiers 1 and 2 can invite people to their team. Partners request payouts at $25; you pay them and click Paid.'),
     create, result, h('h3', null, 'Cash sale'), h('p', { class: 'small muted' }, 'Sold a key in person? Record it here to make their admin key and credit the partner.'), cashForm, cashResult, body);
 }

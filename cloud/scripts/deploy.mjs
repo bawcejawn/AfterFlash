@@ -55,6 +55,7 @@ const vars = {
   PRICE_EVENT: env.PRICE_EVENT || '5',
   PRICE_MONTH: env.PRICE_MONTH || '10',
   PRICE_YEAR: env.PRICE_YEAR || '30',
+  OVERRIDE_PCT: env.OVERRIDE_PCT || '5',
 };
 let toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8')
   .replace(/database_id = "[^"]*"/, `database_id = "${dbId}"`)
