@@ -6,7 +6,7 @@ import { api } from './api.js';
 frameGuard();
 const root = $('#app');
 const token = (/(?:^#|&)invite=([A-Za-z0-9_-]{20,80})/.exec(location.hash) || [])[1] || '';
-const biz = (config.cloud && config.cloud.business) || config.appName || 'AfterFlash';
+const biz = (config.cloud && config.cloud.business) || config.appName || 'Rememberoll';
 const usd = (c) => '$' + (c / 100).toFixed(2);
 
 function fail(msg) {

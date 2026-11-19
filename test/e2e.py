@@ -311,7 +311,49 @@ with sync_playwright() as p:
     dl.value.save_as(f"{SHOTS}/highlight.{dl.value.suggested_filename.rsplit('.', 1)[-1]}")
     host.screenshot(path=f"{SHOTS}/16-highlight.png", full_page=True)
 
-    # ---- a friend sets up their own AfterFlash (their own backend, their own Drive)
+    # ---- invitations: host turns it on, a guest RSVPs with a selfie, edits it, host sees it in the CSV
+    host.goto(host_url)
+    host.click("role=tab[name=Invitations]")
+    host.click("text=Turn on invitation")
+    expect(host.get_by_text("Invitation link", exact=True)).to_be_visible()
+    host.fill("input[name=venue]", "Rose Hall"); host.fill("input[name=startsAt]", "2027-06-12T17:00")
+    host.check("input[name=plusOnes]"); host.check("input[name=askMeal]"); host.fill("input[name=meal0]", "Chicken"); host.fill("input[name=meal1]", "Fish")
+    host.click("text=Save invitation")
+    expect(host.locator("text=Invitation saved")).to_be_visible()
+    invite_url = host.locator(".linkline input").first.input_value()
+    ictx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    inv = ictx.new_page(); watch(inv, "invite")
+    inv.goto(invite_url)
+    expect(inv.locator("text=Rose Hall").first).to_be_visible()
+    inv.fill("input[name=name]", "Pat Doe"); inv.click("text=Yes, I’ll be there")
+    inv.select_option("select.meal >> nth=0", "Fish"); inv.select_option("select[name=size]", "2")
+    inv.fill("input[placeholder='Their name']", "Lee Doe"); inv.select_option("select.meal >> nth=1", "Chicken")
+    inv.evaluate("""async () => {
+      const c = document.createElement('canvas'); c.width = 600; c.height = 800; const x = c.getContext('2d'); x.fillStyle = '#e0a080'; x.fillRect(0, 0, 600, 800);
+      const b = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+      const dt = new DataTransfer(); dt.items.add(new File([b], 'me.jpg', { type: 'image/jpeg' }));
+      const input = document.querySelector('input[type=file][accept="image/*"]'); input.files = dt.files; input.dispatchEvent(new Event('change'));
+    }""")
+    expect(inv.locator(".rsvp-photo-preview img")).to_be_visible()
+    inv.click("text=Send my RSVP")
+    expect(inv.locator("text=You’re on the list!")).to_be_visible(timeout=20000)
+    inv.screenshot(path=f"{SHOTS}/14-invite.png", full_page=True)
+    private_link = inv.locator(".invite-private input").input_value()
+    inv.click("text=Change my answer"); inv.click("text=Maybe"); inv.click("text=Update my RSVP")
+    expect(inv.locator("text=noted a maybe")).to_be_visible()
+    other = browser.new_context().new_page(); watch(other, "invite2")
+    other.goto(private_link)
+    expect(other.locator("text=noted a maybe")).to_be_visible()
+    assert "#r=" not in other.url, "private token stays out of the address bar"
+    host.click("text=Refresh")
+    expect(host.locator(".rsvp-row", has_text="Pat Doe")).to_contain_text("Lee Doe (Chicken)")
+    expect(host.locator(".rsvp-row img.thumb")).to_be_visible(timeout=10000)
+    with host.expect_download() as dl:
+        host.click("text=Download guest list (CSV)")
+    csv_text = open(dl.value.path(), encoding="utf-8-sig").read()
+    assert "Pat Doe (Fish); Lee Doe (Chicken)" in csv_text and "Maybe" in csv_text, csv_text
+
+    # ---- a friend sets up their own Rememberoll (their own backend, their own Drive)
     friend = browser.new_context(viewport={"width": 1100, "height": 900}, permissions=["clipboard-read", "clipboard-write"])
     friend.route(re.compile(r"^https://script\.google\.com/macros/s/AKfy[A-Za-z0-9_-]+/exec"), lambda route: route.fulfill(response=route.fetch(url=BASE + "/mock-byo")))
     fp = friend.new_page(); watch(fp, "setup")
@@ -337,7 +379,7 @@ with sync_playwright() as p:
     fh_url = fp.locator(".keybox").first.inner_text().strip()
     assert "b=AKfyFRIEND" in fh_url, fh_url
     f_id = re.search(r"e=([A-Za-z0-9]+)", fh_url).group(1)
-    # the owner's admin key is useless on the friend's AfterFlash and vice versa
+    # the owner's admin key is useless on the friend's Rememberoll and vice versa
     assert '"unauthorized"' in fp.evaluate(f"fetch('{BASE}/mock-byo', {{method: 'POST', body: JSON.stringify({{a: 'adminCheck', k: '{ADMIN_KEY}'}})}}).then(r => r.text())")
     # a guest of the friend's event uploads to the friend's backend
     gctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, permissions=["camera", "microphone"])
@@ -353,7 +395,7 @@ with sync_playwright() as p:
     ev2 = desk.new_page(); watch(ev2, "phish")
     ev2.goto(BASE + "/admin.html?b=AKfyEVIL00000000000000000000000000000")
     expect(ev2.locator(".callout")).to_contain_text("isn’t set up on this device")
-    # the friend's home page lists their AfterFlash
+    # the friend's home page lists their Rememberoll
     fp.goto(BASE + "/index.html")
     expect(fp.locator("#my-studios")).to_contain_text("Jordan's parties")
 

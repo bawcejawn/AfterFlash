@@ -30,14 +30,14 @@ function login(msg) {
   const studioSel = studios.length > 1 ? h('select', { id: 'studio' }, studios.map((s) => h('option', { value: s, selected: s === studio }, studioName(s)))) : null;
   const form = h('form', { class: 'narrow section stack' },
     h('h1', null, 'Studio sign-in'),
-    foreignLink ? h('p', { class: 'callout warn' }, 'That link points to an AfterFlash that isn’t set up on this device, so it was ignored. Only sign in to an AfterFlash you set up yourself.') : null,
+    foreignLink ? h('p', { class: 'callout warn' }, 'That link points to an Rememberoll that isn’t set up on this device, so it was ignored. Only sign in to an Rememberoll you set up yourself.') : null,
     h('p', null, 'Use your admin key.'),
     studioSel ? h('label', { class: 'field' }, h('span', null, 'Studio'), studioSel) : null,
     h('label', { class: 'field' }, h('span', null, 'Admin key'), keyIn),
     msg ? h('p', { class: 'callout warn', role: 'alert' }, msg) : null,
     h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'),
     h('p', { class: 'small muted', id: 'health', 'aria-live': 'polite' }, 'Checking the backend connection…'),
-    h('p', { class: 'small' }, 'Want to host events with your own Google Drive? ', h('a', { href: 'setup.html' }, 'Set up your own AfterFlash'), '.'));
+    h('p', { class: 'small' }, 'Want to host events with your own Google Drive? ', h('a', { href: 'setup.html' }, 'Set up your own Rememberoll'), '.'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (studioSel) studio = studioSel.value;
@@ -190,7 +190,7 @@ function problemsPanel() {
 // ---------------------------------------------------------------- admins (owner only)
 function keyBackupPanel() {
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Private event keys'),
-    h('p', null, CLOUD ? 'Private events are locked with a key that AfterFlash keeps for you. Download a backup after creating a private event and keep it somewhere safe and offline. With it, you can always unlock those files, even without AfterFlash.' : 'Private events are locked with a key kept by your backend. Download a backup after creating a private event and store it somewhere safe and offline (for example a USB stick). Without it, the locked files in Drive can’t be opened if the backend is ever deleted.'),
+    h('p', null, CLOUD ? 'Private events are locked with a key that Rememberoll keeps for you. Download a backup after creating a private event and keep it somewhere safe and offline. With it, you can always unlock those files, even without Rememberoll.' : 'Private events are locked with a key kept by your backend. Download a backup after creating a private event and store it somewhere safe and offline (for example a USB stick). Without it, the locked files in Drive can’t be opened if the backend is ever deleted.'),
     h('div', { class: 'row' }, h('button', { class: 'btn', onclick: async () => {
       try {
         const r = await api(studio, 'adminExportKeys', { k: adminKey });
@@ -251,11 +251,11 @@ function adminsPanel() {
 /** Shown when this studio's backend is older than the website. */
 function updatePanel(have) {
   return h('section', { class: 'panel stack section callout' },
-    h('h2', null, 'Update your AfterFlash backend'),
+    h('h2', null, 'Update your Rememberoll backend'),
     h('p', null, `Your backend is version ${have}; this website expects ${BACKEND_VERSION}. Takes a minute:`),
     h('ol', null,
       h('li', null, h('button', { class: 'btn small', onclick: (e) => copyBackendCode(e.currentTarget) }, 'Copy the new code')),
-      h('li', null, 'Open ', h('a', { href: 'https://script.google.com/home', target: '_blank', rel: 'noopener' }, 'script.google.com'), ' → your AfterFlash project → Code.gs. Select all, paste, save (Ctrl+S).'),
+      h('li', null, 'Open ', h('a', { href: 'https://script.google.com/home', target: '_blank', rel: 'noopener' }, 'script.google.com'), ' → your Rememberoll project → Code.gs. Select all, paste, save (Ctrl+S).'),
       h('li', null, 'Deploy → Manage deployments → pencil icon → Version: New version → Deploy.')),
     h('p', { class: 'small muted' }, 'Your web address, events and photos stay the same.'));
 }

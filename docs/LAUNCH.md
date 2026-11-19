@@ -1,4 +1,4 @@
-# Launch AfterFlash (the paid version)
+# Launch Rememberoll (the paid version)
 
 Everything is built and tested. What's left needs **your** accounts, so only you can do it: Cloudflare (runs the site), Google (the "Connect Google Drive" button) and Stripe (payments). Do the parts in order. Plan on about 1½–2 hours the first time. Screens change now and then, so if a button name is slightly different, look for the closest match.
 
@@ -30,7 +30,7 @@ Everything is built and tested. What's left needs **your** accounts, so only you
 This is *your* admin key. It shows the owner tools (all accounts, free keys for friends).
 
 1. Make a random password of at least **40 letters and numbers**. Your password manager's generator is perfect: turn symbols off.
-2. Save it in your password manager as "AfterFlash owner key".
+2. Save it in your password manager as "Rememberoll owner key".
 
 ## Part 3: Put the settings in GitHub and deploy
 
@@ -43,9 +43,9 @@ This is *your* admin key. It shows the owner tools (all accounts, free keys for 
    | `CLOUDFLARE_ACCOUNT_ID` | the Account ID from Part 1, step 4 |
    | `OWNER_KEY` | your owner key from Part 2 |
 
-3. Go to the repo's **Actions** tab → **Deploy AfterFlash Cloud** (left list) → **Run workflow** → **Run workflow**.
+3. Go to the repo's **Actions** tab → **Deploy Rememberoll Cloud** (left list) → **Run workflow** → **Run workflow**.
 4. Wait for the green check (2–3 minutes). Click the run → **deploy** → the **Deploy** step. The last lines say:
-   `✔ AfterFlash Cloud is live at https://photoshare.<yourname>.workers.dev`
+   `✔ Rememberoll Cloud is live at https://photoshare.<yourname>.workers.dev`
    Open that address: you'll see the sales page with "Sales open soon". That's expected until Part 6.
 
 ## Part 4: Your own domain (recommended; Google needs it for a smooth sign-in)
@@ -53,7 +53,7 @@ This is *your* admin key. It shows the owner tools (all accounts, free keys for 
 1. Cloudflare dashboard → **Domain Registration** → **Register Domains**. Search a name (e.g. `photosharecam.com`), buy it (about $10–15/year).
 2. **Workers & Pages** → **photoshare** → **Settings** → **Domains & Routes** → **+ Add** → **Custom domain** → type your domain (e.g. `photosharecam.com`) → **Add domain**. Wait until it says **Active** (a few minutes).
 3. GitHub → **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**: `SITE_ORIGIN` = `https://photosharecam.com` (your domain, no slash at the end).
-4. **Actions** → **Deploy AfterFlash Cloud** → **Run workflow** again. Your site now lives at your domain.
+4. **Actions** → **Deploy Rememberoll Cloud** → **Run workflow** again. Your site now lives at your domain.
 
 (Skipping this? Everything still works on the workers.dev address, but Google may refuse to verify it in Part 5, step 7.)
 
@@ -61,10 +61,10 @@ This is *your* admin key. It shows the owner tools (all accounts, free keys for 
 
 Use the Google account you want to own the app (a business Gmail is fine). Below, `YOUR-SITE` means your address from Part 4 (or Part 3).
 
-1. Go to **console.cloud.google.com** → top bar project picker → **New project** → name it `AfterFlash` → **Create** → make sure it's selected.
+1. Go to **console.cloud.google.com** → top bar project picker → **New project** → name it `Rememberoll` → **Create** → make sure it's selected.
 2. Search bar: **Google Drive API** → open it → **Enable**.
 3. Left menu (☰) → **Google Auth Platform** (it may also be under **APIs & Services → OAuth consent screen**) → **Get started**:
-   - App name: `AfterFlash` (or your brand); User support email: your email → **Next**.
+   - App name: `Rememberoll` (or your brand); User support email: your email → **Next**.
    - Audience: **External** → **Next**.
    - Contact information: your email → **Next** → agree → **Create**.
 4. **Branding** (left menu):
@@ -74,23 +74,23 @@ Use the Google account you want to own the app (a business Gmail is fine). Below
    - **Authorized domains → + Add domain**: your domain (e.g. `photosharecam.com`) → **Save**.
 5. **Data access** (left menu) → **Add or remove scopes**. Tick `.../auth/drive.file`, `openid` and `.../auth/userinfo.email` → **Update** → **Save**. All three are "non-sensitive", so no security audit is needed.
 6. **Clients** (left menu) → **+ Create client**:
-   - Application type: **Web application**; Name: `AfterFlash web`.
+   - Application type: **Web application**; Name: `Rememberoll web`.
    - **Authorized redirect URIs → + Add URI**: `https://YOUR-SITE/oauth/callback` (exactly).
    - **Create**, then copy the **Client ID** and **Client secret**.
 7. Prove you own the site (needed for Google's brand check):
    1. Go to **search.google.com/search-console** → **Add property** → **URL prefix** → `https://YOUR-SITE/` → **Continue**.
    2. Choose **HTML file**. Note the file name it shows, like `google1a2b3c4d5e.html`. You don't need to download it.
    3. GitHub → **Variables** → **New repository variable**: `GOOGLE_SITE_VERIFICATION` = that file name.
-   4. Run **Deploy AfterFlash Cloud** again, then back in Search Console click **Verify**.
+   4. Run **Deploy Rememberoll Cloud** again, then back in Search Console click **Verify**.
 8. GitHub → **Secrets and variables → Actions**:
    - **Variables** → `GOOGLE_CLIENT_ID` = the Client ID.
    - **Secrets** → `GOOGLE_CLIENT_SECRET` = the Client secret.
 9. Google Auth Platform → **Audience** → **Publish app** → **Confirm**. **Don't skip this:** while an app is in "Testing", Google disconnects everyone's Drive after 7 days. If Google asks for verification, follow its prompts (for these scopes it's a quick brand check of your name, home page and privacy page).
-10. Run **Deploy AfterFlash Cloud** again.
+10. Run **Deploy Rememberoll Cloud** again.
 
 ## Part 6: Stripe (payments)
 
-You don't need to create products in Stripe: AfterFlash sets the prices itself, which is what makes referral discounts exact.
+You don't need to create products in Stripe: Rememberoll sets the prices itself, which is what makes referral discounts exact.
 
 1. **dashboard.stripe.com** → sign up. Stay in **Test mode** (toggle at the top) for now.
 2. **Developers** → **API keys** → copy the **Secret key** (starts `sk_test_`).
@@ -98,8 +98,8 @@ You don't need to create products in Stripe: AfterFlash sets the prices itself, 
    - **Secrets** → `STRIPE_SECRET_KEY` = the secret key.
    - **Variables** → `SUPPORT_EMAIL` = the email customers should write to.
    - Prices are $5 (1 event), $10 (1 month) and $30 (12 months). To change one, add a variable `PRICE_EVENT`, `PRICE_MONTH` or `PRICE_YEAR` with the dollar amount, e.g. `15`.
-4. Run **Deploy AfterFlash Cloud**. The site shows the yellow **Test mode** bar and three plans. Buy each one with card `4242 4242 4242 4242`.
-5. Optional, after you go live (Part 8): **Settings → Payments → Payment methods** → turn on **Crypto**, so people can pay in USDC stablecoin. The fee is 1.5% instead of 2.9% + 30¢, and you get dollars. Only US businesses can turn it on, and only on a live (activated) account. Nothing to change in AfterFlash.
+4. Run **Deploy Rememberoll Cloud**. The site shows the yellow **Test mode** bar and three plans. Buy each one with card `4242 4242 4242 4242`.
+5. Optional, after you go live (Part 8): **Settings → Payments → Payment methods** → turn on **Crypto**, so people can pay in USDC stablecoin. The fee is 1.5% instead of 2.9% + 30¢, and you get dollars. Only US businesses can turn it on, and only on a live (activated) account. Nothing to change in Rememberoll.
 
 **How plans work:**
 - **1 event** ($5): one event, usable for 30 days from purchase. Deleting it doesn't give the event back.
@@ -116,7 +116,7 @@ You don't need to create products in Stripe: AfterFlash sets the prices itself, 
 1. Open your site → **Get your admin key** → pay with card **4242 4242 4242 4242**, any future date, any CVC, any ZIP.
 2. You land on **Thank you! Here's your admin key** → copy it → tick **I saved my admin key** → **Continue**.
 3. **Connect Google Drive** → pick a Google account → **Continue/Allow**. Make sure the Drive box is ticked.
-4. Create an event → open the guest link on your phone → take two photos → check they appear in **Google Drive → AfterFlash → (your event)**.
+4. Create an event → open the guest link on your phone → take two photos → check they appear in **Google Drive → Rememberoll → (your event)**.
 5. Open the TV wall on a laptop, try the album, and make a highlight video.
 6. Sign out → **Lost your key? Sign in with Google** → you should get a new key.
 7. Sign in with your **owner key** → **Owner: accounts** lists the test purchase. Use **Create a free key** for friends.

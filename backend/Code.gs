@@ -1,5 +1,5 @@
 /**
- * AfterFlash backend — Google Apps Script web app.
+ * Rememberoll backend — Google Apps Script web app.
  *
  * Stores event photos/videos in the deploying account's Google Drive and
  * keeps per-event indexes in Google Sheets. Costs nothing on a personal
@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.10.0';
+var APP_VERSION = '1.11.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -43,13 +43,19 @@ var LIMITS = {
   AUDIO_BYTES: 3 * 1024 * 1024,
   PHOTOS_PER_EVENT_PER_MIN: 120,
   BLUR_THRESHOLD: 40,
-  THUMBS_PER_EVENT_PER_MIN: 900
+  THUMBS_PER_EVENT_PER_MIN: 900,
+  RSVP_PHOTO_BYTES: 1024 * 1024,
+  COVER_BYTES: 700 * 1024,
+  MAX_RSVPS: 3000,
+  RSVPS_PER_EVENT_PER_MIN: 60,
+  MAX_PARTY: 10
 };
 
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
   'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav'];
 var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status', 'clientId', 'dur'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
+var RSVP_COLS = ['id', 'tokenHash', 'name', 'status', 'party', 'kids', 'diet', 'song', 'message', 'photoId', 'clientId', 'createdAt', 'updatedAt', 'deleted'];
 var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
 
 // ---------------------------------------------------------------- entry points
@@ -100,6 +106,9 @@ var ACTIONS = {
   guestbookList: aGuestbookList,
   noteAudio: aNoteAudio,
   me: aMe,
+  invite: aInvite,
+  rsvp: aRsvp,
+  cover: aCover,
   // host (host key, or an admin's own key for events they manage)
   hostGet: aHostGet,
   hostUpdate: aHostUpdate,
@@ -117,6 +126,10 @@ var ACTIONS = {
   hostRecover: aHostRecover,
   hostGuestbook: aHostGuestbook,
   hostGuestbookModerate: aHostGuestbookModerate,
+  hostSetCover: aHostSetCover,
+  hostRsvps: aHostRsvps,
+  hostRsvpPhoto: aHostRsvpPhoto,
+  hostRsvpDelete: aHostRsvpDelete,
   // admin
   adminCheck: aAdminCheck,
   adminProblems: aAdminProblems,
@@ -144,15 +157,15 @@ function setup() {
   }
 }
 
-/** Creates the AfterFlash folder and the events index sheet in this Google account's Drive (once). */
+/** Creates the Rememberoll folder and the events index sheet in this Google account's Drive (once). */
 function ensureStorage_() {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ROOT_FOLDER_ID')) {
-    var folder = DriveApp.createFolder('AfterFlash');
+    var folder = DriveApp.createFolder('Rememberoll');
     props.setProperty('ROOT_FOLDER_ID', folder.getId());
   }
   if (!props.getProperty('INDEX_SHEET_ID')) {
-    var ss = SpreadsheetApp.create('AfterFlash index');
+    var ss = SpreadsheetApp.create('Rememberoll index');
     DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(props.getProperty('ROOT_FOLDER_ID')));
     var sh = ss.getSheets()[0];
     sh.setName('events');
@@ -171,7 +184,7 @@ function aClaim(req) {
   var key = randomKey_(32);
   withLock_(function () {
     var props = PropertiesService.getScriptProperties();
-    if (props.getProperty('ADMIN_KEY_HASH')) throw err_('already_set_up', 'This AfterFlash is already set up. Sign in with its admin key.');
+    if (props.getProperty('ADMIN_KEY_HASH')) throw err_('already_set_up', 'This Rememberoll is already set up. Sign in with its admin key.');
     ensureStorage_();
     props.setProperty('ADMIN_KEY_HASH', sha256Hex_(key));
   });
@@ -589,6 +602,277 @@ function aHostGuestbookModerate(req) {
   return { changed: changed };
 }
 
+// ---------------------------------------------------------------- invitations + RSVPs
+// Anyone with the invite link can RSVP. Answers and the optional selfie (never shared) are
+// for the host only. Guests change their answer with a private token their browser makes;
+// only its SHA-256 is stored. Same request/response shapes as the Cloud version.
+
+/** Text that keeps line breaks (the invitation note). Same safety rules as cleanText_. */
+function cleanLines_(v, max) {
+  if (v == null) return '';
+  return String(v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f<>]/g, '')
+    .split('\n').map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).join('\n')
+    .replace(/\n{3,}/g, '\n\n').trim().replace(/^[=+\-@\s]+/, '').slice(0, max);
+}
+
+function sanitizeInvite_(v) {
+  v = v && typeof v === 'object' ? v : {};
+  var iso = function (x) { if (!x) return ''; var t = Date.parse(x); return isNaN(t) ? '' : new Date(t).toISOString(); };
+  var meals = Array.isArray(v.meals) ? v.meals.map(function (m) { return cleanText_(m, 40); }).filter(Boolean).slice(0, 4) : [];
+  return {
+    on: v.on === true,
+    hosts: cleanText_(v.hosts, 80),
+    startsAt: iso(v.startsAt), endsAt: iso(v.endsAt),
+    tz: /^[A-Za-z][A-Za-z0-9_+\-\/]{1,40}$/.test(String(v.tz || '')) ? String(v.tz) : '',
+    venue: cleanText_(v.venue, 100), address: cleanText_(v.address, 200),
+    dress: cleanText_(v.dress, 80), note: cleanLines_(v.note, 1000),
+    deadline: iso(v.deadline),
+    cap: int_(v.cap, 0, LIMITS.MAX_GUESTS, 0),
+    photo: v.photo !== false,
+    plusOnes: v.plusOnes === true, maxParty: int_(v.maxParty, 1, LIMITS.MAX_PARTY, 2), kids: v.kids === true,
+    askMeal: v.askMeal === true && meals.length > 0, meals: meals,
+    diet: v.diet === true, song: v.song === true, message: v.message !== false,
+    whoComing: v.whoComing === true
+  };
+}
+
+function rsvpSheet_(ev) {
+  var ss = SpreadsheetApp.openById(ev.sheetId);
+  var sh = ss.getSheetByName('rsvps');
+  if (!sh) {
+    sh = ss.insertSheet('rsvps');
+    sh.getRange(1, 1, 1, RSVP_COLS.length).setValues([RSVP_COLS]);
+  }
+  return sh;
+}
+
+function readRsvps_(ev) {
+  var data = rsvpSheet_(ev).getDataRange().getValues();
+  var out = [];
+  for (var r = 1; r < data.length; r++) {
+    var o = rowObj_(RSVP_COLS, data[r]);
+    if (o.deleted === true || !o.id) continue;
+    o.id = String(o.id); o.rowIndex = r + 1;
+    out.push(o);
+  }
+  return out;
+}
+
+function partyOf_(r) { var p = parseJson_(r.party); return Array.isArray(p) ? p : []; }
+function headcount_(r) { return Math.max(1, partyOf_(r).length) + (Number(r.kids) || 0); }
+function shortName_(n) {
+  var w = String(n || '').trim().split(/\s+/);
+  return w.length > 1 ? w[0] + ' ' + w[w.length - 1].charAt(0) + '.' : (w[0] || 'Guest');
+}
+
+function rsvpView_(r) {
+  return { id: r.id, name: String(r.name), status: r.status, party: partyOf_(r), kids: Number(r.kids) || 0, diet: String(r.diet || ''),
+    song: String(r.song || ''), message: String(r.message || ''), hasPhoto: !!r.photoId, created: Number(r.createdAt), updated: Number(r.updatedAt) };
+}
+
+function inviteView_(ev) {
+  var s = ev.settings, i = s.invite;
+  return {
+    id: ev.id, name: s.name, date: s.date, accent: s.accent, font: s.font, tagline: s.tagline,
+    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '',
+    hosts: i.hosts, startsAt: i.startsAt, endsAt: i.endsAt, tz: i.tz, venue: i.venue, address: i.address, dress: i.dress, note: i.note,
+    deadline: i.deadline, closed: !!i.deadline && Date.now() > Date.parse(i.deadline),
+    photo: i.photo && !s.encrypted, plusOnes: i.plusOnes, maxParty: i.plusOnes ? i.maxParty : 1, kids: i.kids,
+    askMeal: i.askMeal, meals: i.askMeal ? i.meals : [], diet: i.diet, song: i.song, message: i.message,
+    capped: i.cap > 0, opensAt: s.opensAt, needsPin: !!ev.pinHash, now: Date.now()
+  };
+}
+
+function openInviteEvent_(req) {
+  var ev = loadEvent_(req.e);
+  if (!ev.settings.invite.on) throw err_('not_found', 'This invitation isn’t open. Check the link with your host.');
+  return ev;
+}
+
+function rsvpByToken_(rows, id, token) {
+  var r = null;
+  for (var x = 0; x < rows.length; x++) if (rows[x].id === String(id)) r = rows[x];
+  if (!r || !token || !safeEq_(String(r.tokenHash), sha256Hex_(String(token).slice(0, 200)))) throw err_('unauthorized', 'This RSVP link isn’t valid any more. You can reply again below.');
+  return r;
+}
+
+function aInvite(req) {
+  var ev = openInviteEvent_(req);
+  if (!rateOk_('inv:' + ev.id, LIMITS.THUMBS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
+  var i = ev.settings.invite;
+  var rows = readRsvps_(ev);
+  var yes = rows.filter(function (r) { return r.status === 'yes'; });
+  var out = { invite: inviteView_(ev) };
+  if (i.cap > 0) out.spotsLeft = Math.max(0, i.cap - yes.reduce(function (n, r) { return n + headcount_(r); }, 0));
+  if (i.whoComing) out.coming = yes.map(function (r) { return shortName_(r.name); });
+  if (req.r && req.rt) {
+    try { out.mine = rsvpView_(rsvpByToken_(rows, str_(req.r, 40), req.rt)); } catch (x) { out.mine = null; }
+  }
+  return out;
+}
+
+function aRsvp(req) {
+  var ev = openInviteEvent_(req);
+  var s = ev.settings, i = s.invite;
+  if (i.deadline && Date.now() > Date.parse(i.deadline)) throw err_('closed', 'RSVPs for this event have closed. Contact your host if your plans changed.');
+  if (!rateOk_('rsvp:' + ev.id, LIMITS.RSVPS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Lots of replies right now. Try again in a minute.');
+  var status = ['yes', 'maybe', 'no'].indexOf(req.status) >= 0 ? req.status : '';
+  if (!status) throw err_('bad_request', 'Choose Yes, Maybe or No.');
+  var name = cleanText_(req.name, 60);
+  if (!name) throw err_('bad_request', 'Please add your name.');
+  var token = String(req.rt || '');
+  if (!/^[A-Za-z0-9_-]{24,64}$/.test(token)) throw err_('needs_update', 'Please reload the invitation and try again.');
+  var meal = function (m) { var c = cleanText_(m, 40); return i.askMeal && i.meals.indexOf(c) >= 0 ? c : ''; };
+  var party = [{ n: name, m: status === 'no' ? '' : meal(req.meal) }];
+  if (status !== 'no' && i.plusOnes && Array.isArray(req.party)) {
+    req.party.slice(0, i.maxParty - 1).forEach(function (p) {
+      var n = cleanText_(p && p.n, 60);
+      party.push({ n: n || 'Guest of ' + shortName_(name), m: meal(p && p.m) });
+    });
+  }
+  var kids = status !== 'no' && i.kids ? int_(req.kids, 0, 10, 0) : 0;
+  var diet = i.diet && status !== 'no' ? cleanText_(req.diet, 300) : '';
+  var song = i.song && status !== 'no' ? cleanText_(req.song, 120) : '';
+  var message = i.message ? cleanText_(req.message, 500) : '';
+  var clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+  var newPhoto = null;
+  if (req.photo) {
+    if (!i.photo || s.encrypted) throw err_('bad_request', 'Photos aren’t part of this invitation.');
+    var bytes = decodeB64_(req.photo);
+    if (!bytes.length || bytes.length > LIMITS.RSVP_PHOTO_BYTES) throw err_('too_large', 'That photo is too big. Try another one.');
+    if (sniffMime_(bytes) !== 'image/jpeg') throw err_('bad_type', 'Photos must be JPEG.');
+    newPhoto = stripJpegMeta_(bytes);
+  }
+  // Save the selfie before taking the lock, so the lock is held only for the sheet write.
+  var newPhotoId = '';
+  if (newPhoto) {
+    var f = subFolder_(ev, 'RSVP photos (private)').createFile(Utilities.newBlob(newPhoto, 'image/jpeg', 'rsvp_' + randomId_(10) + '.jpg'));
+    newPhotoId = f.getId();
+  }
+  var trash = function (id) { if (id) { try { DriveApp.getFileById(String(id)).setTrashed(true); } catch (x) { /* already gone */ } } };
+  var saved;
+  try {
+    saved = withLock_(function () {
+      var rows = readRsvps_(ev);
+      var row = null;
+      if (req.r) row = rsvpByToken_(rows, str_(req.r, 40), token);
+      else if (clientId) {
+        var prev = rows.filter(function (r) { return String(r.clientId) === clientId; })[0];
+        if (prev && safeEq_(String(prev.tokenHash), sha256Hex_(token))) row = prev;
+      }
+      if (!row && rows.length >= LIMITS.MAX_RSVPS) throw err_('full', 'This invitation has reached its reply limit.');
+      if (status === 'yes' && i.cap > 0) {
+        var others = rows.filter(function (r) { return r.status === 'yes' && (!row || r.id !== row.id); }).reduce(function (n, r) { return n + headcount_(r); }, 0);
+        if (others + party.length + kids > i.cap) {
+          var left = Math.max(0, i.cap - others);
+          throw err_('full', left ? 'Only ' + left + (left === 1 ? ' spot is' : ' spots are') + ' left. Reply for fewer people, or contact your host.' : 'Sorry, the guest list is full. Contact your host.');
+        }
+      }
+      var photoId = row ? String(row.photoId || '') : '';
+      if (newPhotoId) { trash(photoId); photoId = newPhotoId; }
+      else if (req.removePhoto === true && photoId) { trash(photoId); photoId = ''; }
+      var now = Date.now();
+      var sh = rsvpSheet_(ev);
+      var id = row ? row.id : randomId_(12);
+      var values = [id, row ? row.tokenHash : sha256Hex_(token), txt_(name), status, JSON.stringify(party), kids, txt_(diet), txt_(song), txt_(message), photoId, clientId, row ? Number(row.createdAt) : now, now, false];
+      if (row) sh.getRange(row.rowIndex, 1, 1, RSVP_COLS.length).setValues([values]);
+      else sh.appendRow(values);
+      return rowObj_(RSVP_COLS, [id, '', name, status, JSON.stringify(party), kids, diet, song, message, photoId, clientId, values[11], now, false]);
+    });
+  } catch (x) {
+    trash(newPhotoId);
+    throw x;
+  }
+  return { r: saved.id, rsvp: rsvpView_(saved) };
+}
+
+function readCover_(eventId) {
+  var x = parseJson_(PropertiesService.getScriptProperties().getProperty('COVER:' + eventId) || '');
+  return x && x.id && x.v ? x : null;
+}
+
+function aHostSetCover(req) {
+  var ev = authHost_(req);
+  var old = ev.cover;
+  var rec = null;
+  if (req.data) {
+    var bytes = decodeB64_(req.data);
+    if (bytes.length > LIMITS.COVER_BYTES) throw err_('too_large', 'That photo is too big. Try a smaller one.');
+    var mime = sniffImage_(bytes);
+    if (!mime) throw err_('bad_type', 'Use a PNG, JPEG or WebP image.');
+    if (mime === 'image/jpeg') bytes = stripJpegMeta_(bytes);
+    var f = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(bytes, mime, 'invitation-cover.' + mime.split('/')[1]));
+    rec = { id: f.getId(), v: randomId_(8), mime: mime };
+    PropertiesService.getScriptProperties().setProperty('COVER:' + ev.id, JSON.stringify(rec));
+  } else {
+    PropertiesService.getScriptProperties().deleteProperty('COVER:' + ev.id);
+  }
+  if (old) { try { DriveApp.getFileById(old.id).setTrashed(true); } catch (x) { /* already gone */ } }
+  dropEventCache_(ev.id);
+  bumpVersion_(ev.id);
+  return { coverV: rec ? rec.v : '' };
+}
+
+function aCover(req) {
+  var ev = loadEvent_(req.e);
+  if (!ev.cover) throw err_('not_found', 'No cover photo');
+  var cache = CacheService.getScriptCache();
+  var ck = 'cover:' + ev.id + ':' + ev.cover.v;
+  var data = cache.get(ck);
+  if (!data) {
+    if (!rateOk_('cover:' + ev.id, 120, 60)) throw err_('rate_limited', 'Busy, try again.');
+    var bytes = DriveApp.getFileById(ev.cover.id).getBlob().getBytes();
+    if (bytes.length > LIMITS.COVER_BYTES || sniffImage_(bytes) !== ev.cover.mime) throw err_('not_found', 'No cover photo');
+    data = Utilities.base64Encode(bytes);
+    if (data.length < 95000) cache.put(ck, data, 21600);
+  }
+  return { mime: ev.cover.mime, v: ev.cover.v, data: data };
+}
+
+function aHostRsvps(req) {
+  var ev = authHost_(req);
+  var rows = readRsvps_(ev);
+  var t = { yes: 0, maybe: 0, no: 0, yesPeople: 0, yesKids: 0, maybePeople: 0, meals: {} };
+  rows.forEach(function (r) {
+    if (t[r.status] == null) return;
+    t[r.status]++;
+    if (r.status === 'yes') {
+      t.yesPeople += headcount_(r); t.yesKids += Number(r.kids) || 0;
+      partyOf_(r).forEach(function (p) { if (p.m) t.meals[p.m] = (t.meals[p.m] || 0) + 1; });
+    }
+    if (r.status === 'maybe') t.maybePeople += headcount_(r);
+  });
+  return { rsvps: rows.map(rsvpView_), totals: t, cap: ev.settings.invite.cap };
+}
+
+function aHostRsvpPhoto(req) {
+  var ev = authHost_(req);
+  var id = str_(req.id, 40);
+  var r = readRsvps_(ev).filter(function (x) { return x.id === id; })[0];
+  if (!r || !r.photoId) throw err_('not_found', 'No photo');
+  var bytes = DriveApp.getFileById(String(r.photoId)).getBlob().getBytes();
+  if (bytes.length > LIMITS.RSVP_PHOTO_BYTES || sniffMime_(bytes) !== 'image/jpeg') throw err_('not_found', 'No photo');
+  return { mime: 'image/jpeg', data: Utilities.base64Encode(bytes) };
+}
+
+function aHostRsvpDelete(req) {
+  var ev = authHost_(req);
+  var wanted = Object.create(null);
+  (Array.isArray(req.ids) ? req.ids.slice(0, 200) : []).forEach(function (x) { wanted[str_(x, 40)] = true; });
+  var changed = 0;
+  withLock_(function () {
+    var sh = rsvpSheet_(ev);
+    readRsvps_(ev).forEach(function (r) {
+      if (!wanted[r.id]) return;
+      if (r.photoId) { try { DriveApp.getFileById(String(r.photoId)).setTrashed(true); } catch (x) { /* already gone */ } }
+      sh.getRange(r.rowIndex, RSVP_COLS.indexOf('photoId') + 1).setValue('');
+      sh.getRange(r.rowIndex, RSVP_COLS.indexOf('deleted') + 1).setValue(true);
+      changed++;
+    });
+  });
+  return { changed: changed };
+}
+
 // ---------------------------------------------------------------- branding (logo)
 
 var LOGO_BYTES = 200 * 1024;
@@ -1000,7 +1284,7 @@ function aAdminCreate(req) {
   var hostKey = randomKey_(32);
   var root = DriveApp.getFolderById(prop_('ROOT_FOLDER_ID'));
   var folder = root.createFolder(settings.name.replace(/[\\/:*?"<>|]/g, ' ') + ' (' + id + ')');
-  var ss = SpreadsheetApp.create('AfterFlash ' + id);
+  var ss = SpreadsheetApp.create('Rememberoll ' + id);
   DriveApp.getFileById(ss.getId()).moveTo(folder);
   var media = ss.getSheets()[0];
   media.setName('media');
@@ -1123,7 +1407,7 @@ function loadEvent_(id) {
     var row = findEventRow_(id);
     if (!row || row.row[8] === true) throw err_('not_found', 'Event not found');
     var r = row.row;
-    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '', logo: readLogo_(String(r[0])) };
+    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '', logo: readLogo_(String(r[0])), cover: readCover_(String(r[0])) };
     cache.put('e:' + id, JSON.stringify(ev), 300);
   }
   return ev;
@@ -1180,7 +1464,8 @@ function sanitizeSettings_(s) {
     dateStamp: s.dateStamp === true,
     accent: color,
     font: ['modern', 'elegant', 'script'].indexOf(s.font) >= 0 ? s.font : 'modern',
-    tagline: cleanText_(s.tagline, 80)
+    tagline: cleanText_(s.tagline, 80),
+    invite: sanitizeInvite_(s.invite)
   };
 }
 
@@ -1197,7 +1482,8 @@ function publicEvent_(ev) {
     opensAt: s.opensAt, closesAt: s.closesAt, shotsPerGuest: s.shotsPerGuest, allowVideo: s.allowVideo,
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
-    accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now()
+    accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now(),
+    invite: s.invite.on, coverV: ev.cover ? ev.cover.v : ''
   };
 }
 
@@ -1459,7 +1745,7 @@ function decodeB64_(s) {
 
 function u8_(b) { return b < 0 ? b + 256 : b; }
 
-/** Identify content by magic bytes. Only formats AfterFlash accepts are recognised. */
+/** Identify content by magic bytes. Only formats Rememberoll accepts are recognised. */
 function sniffMime_(bytes) {
   if (bytes.length < 12) return '';
   var b = [];

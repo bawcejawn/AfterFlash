@@ -190,7 +190,7 @@ t('private storage: key kept out of Drive, files stay encrypted and private', ()
   const plain = makeEvent(env, { name: 'Plain' });
   const key = env.gas.props.get('EK:' + ev.id);
   assert.ok(key && key.length >= 40);
-  const indexSheet = [...env.gas.sheets.values()].find((x) => x.name === 'AfterFlash index');
+  const indexSheet = [...env.gas.sheets.values()].find((x) => x.name === 'Rememberoll index');
   assert.ok(!JSON.stringify(indexSheet.sheets[0].rows).includes(key), 'key is not in the Drive spreadsheet');
   const g = joinGuest(env, ev.id);
   assert.equal(g.r.key, key);
@@ -454,7 +454,7 @@ t('markArchived validates tx ids; manifest reflects archive index', () => {
   env.post({ a: 'hostMarkArchived', e: ev.id, k: ev.hostKey, items: [{ id: up.id, index: 4, tx: '0x1220abcdef' }] });
   m = env.post({ a: 'hostManifest', e: ev.id, k: ev.hostKey });
   assert.equal(m.items[0].archIndex, 4);
-  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'AfterFlash ' + ev.id).getSheetByName('media');
+  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'Rememberoll ' + ev.id).getSheetByName('media');
   assert.ok(!String(sh.rows[1][16]).startsWith('='));
 });
 
@@ -490,7 +490,7 @@ t('per-event storage cap stops someone filling the Drive', () => {
   const g = joinGuest(env, ev.id);
   assert.equal(upload(env, ev.id, g).ok, true);
   // pretend 100 MB is already used
-  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'AfterFlash ' + ev.id).getSheetByName('media');
+  const sh = [...env.gas.sheets.values()].find((x) => x.name === 'Rememberoll ' + ev.id).getSheetByName('media');
   sh.rows[1][6] = 100 * 1024 * 1024;
   assert.equal(upload(env, ev.id, g).error, 'full');
 });
@@ -775,6 +775,46 @@ t('branding: logo upload is host-only, image-only, and served publicly; font and
   assert.equal(env.post({ a: 'event', e: ev.id }).event.logoV, set.logoV);
   assert.equal(env.post({ a: 'hostSetLogo', e: ev.id, k: ev.hostKey }).logoV, '');
   assert.equal(env.post({ a: 'logo', e: ev.id }).error, 'not_found');
+});
+
+t('invitations: RSVP with private edit token, caps, meals, deadline, host-only selfie', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const crypto = await_import_crypto();
+  const tok = () => crypto.randomBytes(24).toString('base64url');
+  assert.equal(env.post({ a: 'invite', e: ev.id }).error, 'not_found');
+  const inv = { on: true, venue: 'Rose Hall', cap: 3, plusOnes: true, maxParty: 2, kids: true, askMeal: true, meals: ['Chicken', 'Fish'], diet: true, whoComing: true, note: 'a\n\n\n\nb' };
+  const up = env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { invite: inv } });
+  assert.equal(up.event.settings.invite.note, 'a\n\nb');
+  const pub = env.post({ a: 'invite', e: ev.id });
+  assert.equal(pub.invite.venue, 'Rose Hall'); assert.equal(pub.spotsLeft, 3);
+  const rt = tok(), myClient = cid();
+  const r1 = env.post({ a: 'rsvp', e: ev.id, name: 'Pat Doe', status: 'yes', meal: 'Fish', party: [{ n: 'Lee', m: 'Steak' }, { n: 'X' }], kids: 1, diet: '=cmd()', rt, clientId: myClient, photo: b64(jpegWithExif()) });
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.equal(r1.rsvp.party.length, 2); assert.equal(r1.rsvp.party[1].m, '', 'unknown meal dropped'); assert.equal(r1.rsvp.diet, 'cmd()', 'formula stripped');
+  const photo = [...env.gas.files.values()].find((f) => f.getName && /^rsvp_/.test(f.getName()));
+  assert.ok(photo && photo.sharing === 'PRIVATE'); assert.ok(!Buffer.from(photo.blob.getBytes()).includes('GPS-SECRET'));
+  const again = env.post({ a: 'rsvp', e: ev.id, name: 'Pat Doe', status: 'yes', meal: 'Fish', rt, clientId: myClient });
+  assert.equal(env.post({ a: 'hostRsvps', e: ev.id, k: ev.hostKey }).rsvps.length, 1, 'retry with same browser id updates, not duplicates');
+  assert.equal(again.r, r1.r);
+  assert.equal(env.post({ a: 'rsvp', e: ev.id, name: 'Big group', status: 'yes', party: [{ n: 'a' }], kids: 5, rt: tok() }).error, 'full');
+  assert.equal(env.post({ a: 'rsvp', e: ev.id, r: r1.r, name: 'Evil', status: 'no', rt: tok() }).error, 'unauthorized');
+  const mine = env.post({ a: 'invite', e: ev.id, r: r1.r, rt });
+  assert.equal(mine.mine.name, 'Pat Doe'); assert.deepEqual(mine.coming, ['Pat D.']);
+  const pic = env.post({ a: 'hostRsvpPhoto', e: ev.id, k: ev.hostKey, id: r1.r });
+  assert.equal(pic.mime, 'image/jpeg');
+  assert.equal(env.post({ a: 'hostRsvpPhoto', e: ev.id, k: 'wrong', id: r1.r }).error, 'unauthorized');
+  const tot = env.post({ a: 'hostRsvps', e: ev.id, k: ev.hostKey }).totals;
+  assert.equal(tot.yes, 1); assert.equal(tot.meals.Fish, 1);
+  assert.equal(env.post({ a: 'hostRsvpDelete', e: ev.id, k: ev.hostKey, ids: [r1.r] }).changed, 1);
+  assert.ok(photo.trashed);
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { invite: { ...inv, deadline: '2001-01-01T00:00:00Z' } } });
+  assert.equal(env.post({ a: 'rsvp', e: ev.id, name: 'Late', status: 'yes', rt: tok() }).error, 'closed');
+  assert.equal(env.post({ a: 'hostSetCover', e: ev.id, k: ev.hostKey, data: b64(html()) }).error, 'bad_type');
+  const cv = env.post({ a: 'hostSetCover', e: ev.id, k: ev.hostKey, data: b64(png()) });
+  assert.ok(cv.coverV);
+  assert.equal(env.post({ a: 'cover', e: ev.id }).mime, 'image/png');
+  assert.equal(env.post({ a: 'event', e: ev.id }).event.coverV, cv.coverV);
 });
 
 // tiny helper so the test above can stay sync

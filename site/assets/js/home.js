@@ -73,13 +73,13 @@ if (studioBox) {
   const list = myStudios.list();
   if (list.length) {
     studioBox.hidden = false;
-    clear(studioBox).append(h('h2', null, 'Your AfterFlash'),
+    clear(studioBox).append(h('h2', null, 'Your Rememberoll'),
       h('ul', { class: 'my-events' }, list.map((s) => h('li', null, h('b', null, s.name),
         h('a', { class: 'btn small primary', href: link('admin.html', { s: s.id }) }, 'Open my events')))));
   }
 }
 
-// ---- AfterFlash Cloud: sales sections, price, checkout
+// ---- Rememberoll Cloud: sales sections, price, checkout
 const cloud = config.cloud;
 for (const el of document.querySelectorAll('[data-only]')) el.hidden = (el.dataset.only === 'cloud') !== !!cloud;
 if (cloud) {

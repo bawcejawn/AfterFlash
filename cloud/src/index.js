@@ -1,4 +1,4 @@
-// AfterFlash Cloud worker: serves the website (static assets from ../site), the JSON API at
+// Rememberoll Cloud worker: serves the website (static assets from ../site), the JSON API at
 // /api, the Google "Connect Drive" callback at /oauth/callback, and a config.js built from
 // this deployment's settings.
 import { ACTIONS, VERSION, makeCtx, nightly } from './actions.js';
@@ -84,7 +84,7 @@ export async function handleOAuth(request, env) {
     await c.run('UPDATE accounts SET refresh_enc = ?, google_sub = ?, google_email = ? WHERE id = ?', await sealRefresh(env, t.refresh), t.sub, t.email, row.account);
     return back('/admin.html?drive=connected');
   }
-  // recover: the Google account must be one already connected to an AfterFlash account
+  // recover: the Google account must be one already connected to an Rememberoll account
   const acct = await c.one("SELECT id FROM accounts WHERE google_sub = ? AND status = 'active' AND kind != 'owner' ORDER BY created DESC LIMIT 1", t.sub);
   if (!acct) return back('/admin.html?recover=unknown');
   const ticket = randomKey(24);
@@ -100,14 +100,14 @@ function plansFor(env) {
 
 export function configJs(env) {
   const cfg = {
-    appName: env.APP_NAME || 'AfterFlash',
+    appName: env.APP_NAME || 'Rememberoll',
     backends: { main: '/api' },
     cloud: {
       plans: plansFor(env),
       price: money(planPrices(env).event),
       holdMonths: 12,
       support: env.SUPPORT_EMAIL || '',
-      business: env.BUSINESS_NAME || env.APP_NAME || 'AfterFlash',
+      business: env.BUSINESS_NAME || env.APP_NAME || 'Rememberoll',
       testMode: String(env.STRIPE_SECRET_KEY || '').startsWith('sk_test_'),
       payments: !!env.STRIPE_SECRET_KEY,
       google: !!env.GOOGLE_CLIENT_ID,

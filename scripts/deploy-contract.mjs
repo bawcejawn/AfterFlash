@@ -1,4 +1,4 @@
-// Deploy (or upgrade) the AfterFlash contract to Koinos.
+// Deploy (or upgrade) the Rememberoll contract to Koinos.
 //
 //   node deploy-contract.mjs --new-key           # create a fresh contract account key (prints it once)
 //   CONTRACT_WIF=... PAYER_WIF=... node deploy-contract.mjs [--rpc https://api.koinos.io]

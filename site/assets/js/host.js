@@ -10,6 +10,7 @@ import { mediaBlob } from './crypto.js';
 import { applyBrand, logoEl, logoBlob, prepareLogo, FONTS } from './brand.js';
 import { ownStudio, blobToBase64 } from './util.js';
 import { installButton, rememberPlace } from './install.js';
+import { invitationsTab } from './host-invite.js';
 
 frameGuard();
 const root = $('#app');
@@ -101,7 +102,7 @@ function renderHeader() {
       h('div', { class: 'stat' }, h('b', null, fmtBytes(bytes)), 'in Drive'))));
 }
 
-const TABS = [['share', 'Share'], ['photos', 'Photos'], ['highlights', 'Highlight video'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['security', 'Access']];
+const TABS = [['share', 'Share'], ['invite', 'Invitations'], ['photos', 'Photos'], ['highlights', 'Highlight video'], ['guestbook', 'Guestbook'], ['guests', 'Guests'], ['settings', 'Settings'], ['security', 'Access']];
 function renderTabs() {
   const c = counts();
   clear(tabsEl).append(...TABS.map(([id, label]) => {
@@ -112,12 +113,16 @@ function renderTabs() {
 }
 
 function renderTab() {
-  const map = { share: shareTab, photos: photosTab, highlights: highlightsTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, security: securityTab };
+  const map = { share: shareTab, invite: inviteTab, photos: photosTab, highlights: highlightsTab, guestbook: guestbookTab, guests: guestsTab, settings: settingsTab, security: securityTab };
   clear(bodyEl);
   map[tab]();
 }
 
 // ------------------------------------------------------------------ share
+function inviteTab() {
+  invitationsTab({ studio, eventId, key, body: bodyEl, getEv: () => ev, setEv: (x) => { ev = x; applyBrand(ev); }, rerender: () => { tab = 'invite'; renderTabs(); renderTab(); } });
+}
+
 function linkRow(label, url, help) {
   return h('div', { class: 'stack' },
     h('label', { class: 'field' }, h('span', null, label),
@@ -138,11 +143,12 @@ function shareTab() {
       h('div', null, h('span', { class: 'small muted' }, 'Event code'), h('div', { class: 'row' }, h('span', { class: 'event-code' }, eventId), h('button', { class: 'btn small', onclick: () => copy(eventId) }, 'Copy')),
         ownStudio(studio) ? null : h('small', { class: 'muted' }, `Guests can also type this at ${link('index.html').replace(/index\.html$/, '')}`)),
       linkRow('Guest link', guestUrl(), 'This is what the QR code opens. Share it in texts or on the invitation.'),
+      ev.settings.invite && ev.settings.invite.on ? linkRow('Invitation link', link('invite.html', { e: eventId, s: studio }), 'Guests RSVP here. See the Invitations tab for replies.') : null,
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
       ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them. ',
         h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : h('p', null, h('button', { class: 'btn small', onclick: downloadAll }, 'Download all photos and videos'), ' ', h('span', { class: 'small muted' }, 'Zipped in your browser; works for co-hosts too.')),
-      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs AfterFlash can open it.)'),
+      h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs Rememberoll can open it.)'),
       h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
 }
 

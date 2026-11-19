@@ -49,7 +49,7 @@ export async function sendOps(prov, ownerSigner, payerSigner, calls) {
   return { id: tx.transaction.id, receipt };
 }
 
-/** POST to an AfterFlash Apps Script backend (same protocol as the site). */
+/** POST to an Rememberoll Apps Script backend (same protocol as the site). */
 export async function backend(url, action, payload) {
   url = String(url).trim().replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
   if (!/^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) throw new Error('Backend URL must be an Apps Script /exec URL');

@@ -1,4 +1,4 @@
-// AfterFlash Cloud: every API action. Same request/response shapes as the Apps Script backend
+// Rememberoll Cloud: every API action. Same request/response shapes as the Apps Script backend
 // (backend/Code.gs), so the website works with either. Hosts' photos go to THEIR Google Drive.
 import {
   err, b64encode, b64decode, randomKey, randomId, sha256Hex, safeEq, seal, unseal,
@@ -16,6 +16,7 @@ const LIMITS = {
   BAD_KEY_PER_10MIN: 30, REPORTS_PER_GUEST: 15, NOTES_PER_GUEST: 5, NOTE_TEXT: 500, BLUR_THRESHOLD: 40,
   READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60, REF_LOOKUPS_PER_10MIN: 300,
   HOLD_MS: 365 * 86400000, PAYOUT_WAIT_MS: 14 * 86400000, MAX_PCT: 50, MAX_CASH_CENTS: 100000,
+  RSVP_PHOTO_BYTES: 1024 * 1024, COVER_BYTES: 700 * 1024, MAX_RSVPS: 3000, RSVPS_PER_EVENT_PER_MIN: 60, MAX_PARTY: 10,
   MAX_TIER: 3, MIN_PAYOUT: 2500, MAX_TEAM: 100, MAX_OPEN_INVITES: 20, INVITE_MS: 14 * 86400000, JOINS_PER_10MIN: 60,
 };
 
@@ -94,6 +95,34 @@ function sanitizeSettings(s) {
     accent: /^#[0-9a-fA-F]{6}$/.test(String(s.accent)) ? String(s.accent) : '#0f7c7a',
     font: ['modern', 'elegant', 'script'].includes(s.font) ? s.font : 'modern',
     tagline: cleanText(s.tagline, 80),
+    invite: sanitizeInvite(s.invite),
+  };
+}
+/** Text that keeps line breaks (for the invitation note). Same safety rules as cleanText. */
+function cleanLines(v, max) {
+  if (v == null) return '';
+  return String(v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f<>]/g, '')
+    .split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/^[=+\-@\s]+/, '').slice(0, max);
+}
+/** The invitation part of an event's settings (same shape in backend/Code.gs). */
+function sanitizeInvite(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const iso = (x) => { if (!x) return ''; const t = Date.parse(x); return isNaN(t) ? '' : new Date(t).toISOString(); };
+  const meals = Array.isArray(v.meals) ? v.meals.map((m) => cleanText(m, 40)).filter(Boolean).slice(0, 4) : [];
+  return {
+    on: v.on === true,
+    hosts: cleanText(v.hosts, 80),
+    startsAt: iso(v.startsAt), endsAt: iso(v.endsAt),
+    tz: /^[A-Za-z][A-Za-z0-9_+\-/]{1,40}$/.test(String(v.tz || '')) ? String(v.tz) : '',
+    venue: cleanText(v.venue, 100), address: cleanText(v.address, 200),
+    dress: cleanText(v.dress, 80), note: cleanLines(v.note, 1000),
+    deadline: iso(v.deadline),
+    cap: int(v.cap, 0, LIMITS.MAX_GUESTS, 0),
+    photo: v.photo !== false,
+    plusOnes: v.plusOnes === true, maxParty: int(v.maxParty, 1, LIMITS.MAX_PARTY, 2), kids: v.kids === true,
+    askMeal: v.askMeal === true && meals.length > 0, meals,
+    diet: v.diet === true, song: v.song === true, message: v.message !== false,
+    whoComing: v.whoComing === true,
   };
 }
 function isRevealed(s) {
@@ -110,6 +139,7 @@ function publicEvent(ev) {
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
     accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted,
     enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pin_hash, revealed: isRevealed(s), now: Date.now(),
+    invite: s.invite.on, coverV: ev.cover ? ev.cover.v : '',
   };
 }
 async function wallKey(ev) { return (await sha256Hex(ev.host_hash + ':wall')).slice(0, 32); }
@@ -132,6 +162,8 @@ async function loadEvent(c, id) {
   row.settings = sanitizeSettings(parseJson(row.settings));
   row.logo = row.logo ? parseJson(row.logo) : null;
   if (row.logo && !row.logo.id) row.logo = null;
+  row.cover = row.cover ? parseJson(row.cover) : null;
+  if (row.cover && !row.cover.id) row.cover = null;
   return row;
 }
 async function accountOf(c, ev) {
@@ -155,8 +187,8 @@ async function loadPublicEvent(c, id) {
 async function requireActivePlan(c, ev, forGuests) {
   const a = await accountOf(c, ev);
   if (expired(a)) {
-    throw forGuests ? err('paused', 'The host’s AfterFlash plan has ended, so new photos are paused for now. They’ll upload once it’s renewed.')
-      : err('plan_expired', `This AfterFlash plan ended on ${fmtDay(a.expires)}. Renew it on the admin page to keep hosting.`);
+    throw forGuests ? err('paused', 'The host’s Rememberoll plan has ended, so new photos are paused for now. They’ll upload once it’s renewed.')
+      : err('plan_expired', `This Rememberoll plan ended on ${fmtDay(a.expires)}. Renew it on the admin page to keep hosting.`);
   }
   return a;
 }
@@ -184,7 +216,7 @@ async function authAccount(c, req, { allowExpired = false } = {}) {
     const a = await c.one('SELECT * FROM accounts WHERE key_hash = ?', hash);
     if (a) {
       if (a.status !== 'active') throw err('forbidden', 'This account is turned off. Contact support.');
-      if (!allowExpired && expired(a)) throw err('plan_expired', a.plan === 'partner' ? 'This is a partner account. Buy a plan to host your own events.' : `Your AfterFlash plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
+      if (!allowExpired && expired(a)) throw err('plan_expired', a.plan === 'partner' ? 'This is a partner account. Buy a plan to host your own events.' : `Your Rememberoll plan ended on ${fmtDay(a.expires)}. Renew to keep hosting; your events and photos are safe.`);
       return a;
     }
   }
@@ -777,13 +809,13 @@ A.adminCreate = async (c, req) => {
   }
   const d = await driveFor(c.env, c.db, a);
   let root = a.root_folder;
-  if (!root) { root = await d.createFolder('AfterFlash'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
+  if (!root) { root = await d.createFolder('Rememberoll'); await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id); }
   const id = randomId(10);
   let folder;
   try { folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root); }
   catch (e) {
     if (e.code !== 'not_found') throw e;
-    root = await d.createFolder('AfterFlash'); // the folder was deleted in Drive: make a new one
+    root = await d.createFolder('Rememberoll'); // the folder was deleted in Drive: make a new one
     await c.run('UPDATE accounts SET root_folder = ? WHERE id = ?', root, a.id);
     folder = await d.createFolder(`${settings.name.replace(/[\\/:*?"<>|]/g, ' ')} (${id})`, root);
   }
@@ -1189,6 +1221,197 @@ A.ownerCashSale = async (c, req) => {
   return acct;
 };
 
+// ================================================================= invitations + RSVPs
+// Anyone with the invite link can RSVP. Answers (and the optional selfie, which is never shared
+// publicly) are visible only to the host. Guests change their answer with a private edit token
+// that their own browser makes; only its SHA-256 is stored.
+const RSVP_STATUS = ['yes', 'maybe', 'no'];
+const partyOf = (r) => { const p = parseJson(r.party); return Array.isArray(p) ? p : []; };
+const headcount = (r) => Math.max(1, partyOf(r).length) + (Number(r.kids) || 0);
+const shortName = (n) => { const w = String(n || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : w[0] || 'Guest'; };
+function inviteView(ev) {
+  const s = ev.settings, i = s.invite;
+  return {
+    id: ev.id, name: s.name, date: s.date, accent: s.accent, font: s.font, tagline: s.tagline,
+    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '',
+    hosts: i.hosts, startsAt: i.startsAt, endsAt: i.endsAt, tz: i.tz, venue: i.venue, address: i.address, dress: i.dress, note: i.note,
+    deadline: i.deadline, closed: !!i.deadline && Date.now() > Date.parse(i.deadline),
+    photo: i.photo && !s.encrypted, plusOnes: i.plusOnes, maxParty: i.plusOnes ? i.maxParty : 1, kids: i.kids,
+    askMeal: i.askMeal, meals: i.askMeal ? i.meals : [], diet: i.diet, song: i.song, message: i.message,
+    capped: i.cap > 0, opensAt: s.opensAt, needsPin: !!ev.pin_hash, now: Date.now(),
+  };
+}
+const rsvpView = (r) => ({ id: r.id, name: r.name, status: r.status, party: partyOf(r), kids: Number(r.kids) || 0, diet: r.diet, song: r.song, message: r.message, hasPhoto: !!r.photo, created: r.created, updated: r.updated });
+const rsvpRows = (c, ev) => S(c, ev).all('SELECT * FROM rsvps WHERE event = ? AND deleted = 0 ORDER BY created', ev.id);
+async function rsvpByToken(c, ev, id, token) {
+  const r = id && await S(c, ev).one('SELECT * FROM rsvps WHERE event = ? AND id = ? AND deleted = 0', ev.id, str(id, 40));
+  if (!r || !token || !safeEq(r.token_hash, await sha256Hex(String(token).slice(0, 200)))) throw err('unauthorized', 'This RSVP link isn’t valid any more. You can reply again below.');
+  return r;
+}
+async function openInviteEvent(c, req) {
+  const ev = await loadPublicEvent(c, req.e);
+  if (!ev.settings.invite.on) throw err('not_found', 'This invitation isn’t open. Check the link with your host.');
+  return ev;
+}
+
+A.invite = async (c, req) => {
+  const ev = await openInviteEvent(c, req);
+  if (!(await rateOk(c, 'read:' + ev.id, LIMITS.READS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Busy, try again.');
+  const i = ev.settings.invite;
+  const rows = await rsvpRows(c, ev);
+  const yes = rows.filter((r) => r.status === 'yes');
+  const out = { invite: inviteView(ev) };
+  if (i.cap > 0) out.spotsLeft = Math.max(0, i.cap - yes.reduce((n, r) => n + headcount(r), 0));
+  if (i.whoComing) out.coming = yes.map((r) => shortName(r.name));
+  if (req.r && req.rt) {
+    try { out.mine = rsvpView(await rsvpByToken(c, ev, req.r, req.rt)); } catch { out.mine = null; }
+  }
+  return out;
+};
+
+A.rsvp = async (c, req) => {
+  const ev = await openInviteEvent(c, req);
+  const s = ev.settings, i = s.invite;
+  try { await requireActivePlan(c, ev, true); } catch { throw err('paused', 'RSVPs are paused for now. Please try again later or contact your host.'); }
+  if (i.deadline && c.now() > Date.parse(i.deadline)) throw err('closed', 'RSVPs for this event have closed. Contact your host if your plans changed.');
+  if (!(await rateOk(c, 'rsvp:' + ev.id, LIMITS.RSVPS_PER_EVENT_PER_MIN, 60))) throw err('rate_limited', 'Lots of replies right now. Try again in a minute.');
+  const status = RSVP_STATUS.includes(req.status) ? req.status : '';
+  if (!status) throw err('bad_request', 'Choose Yes, Maybe or No.');
+  const name = cleanText(req.name, 60);
+  if (!name) throw err('bad_request', 'Please add your name.');
+  const token = String(req.rt || '');
+  if (!/^[A-Za-z0-9_-]{24,64}$/.test(token)) throw err('needs_update', 'Please reload the invitation and try again.');
+  const meal = (m) => (i.askMeal && i.meals.includes(cleanText(m, 40)) ? cleanText(m, 40) : '');
+  const party = [{ n: name, m: status === 'no' ? '' : meal(req.meal) }];
+  if (status !== 'no' && i.plusOnes && Array.isArray(req.party)) {
+    for (const p of req.party.slice(0, i.maxParty - 1)) {
+      const n = cleanText(p && p.n, 60);
+      party.push({ n: n || `Guest of ${shortName(name)}`, m: meal(p && p.m) });
+    }
+  }
+  const kids = status !== 'no' && i.kids ? int(req.kids, 0, 10, 0) : 0;
+  const fields = {
+    diet: i.diet && status !== 'no' ? cleanText(req.diet, 300) : '',
+    song: i.song && status !== 'no' ? cleanText(req.song, 120) : '',
+    message: i.message ? cleanText(req.message, 500) : '',
+  };
+  const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+
+  // Existing answer: by its id (edit link) or by this browser's retry id.
+  let row = null;
+  if (req.r) row = await rsvpByToken(c, ev, req.r, token);
+  else if (clientId) {
+    const prev = await S(c, ev).one('SELECT * FROM rsvps WHERE event = ? AND client = ? AND deleted = 0', ev.id, clientId);
+    if (prev && safeEq(prev.token_hash, await sha256Hex(token))) row = prev;
+  }
+  const rows = await rsvpRows(c, ev);
+  if (!row && rows.length >= LIMITS.MAX_RSVPS) throw err('full', 'This invitation has reached its reply limit.');
+  if (status === 'yes' && i.cap > 0) {
+    const others = rows.filter((r) => r.status === 'yes' && (!row || r.id !== row.id)).reduce((n, r) => n + headcount(r), 0);
+    const mine = party.length + kids;
+    if (others + mine > i.cap) {
+      const left = Math.max(0, i.cap - others);
+      throw err('full', left ? `Only ${left} ${left === 1 ? 'spot is' : 'spots are'} left. Reply for fewer people, or contact your host.` : 'Sorry, the guest list is full. Contact your host.');
+    }
+  }
+
+  // Optional selfie: JPEG only, location data stripped, kept private in the host's Drive.
+  let photo = row ? row.photo : '';
+  let newPhoto = null;
+  if (req.photo) {
+    if (!i.photo || s.encrypted) throw err('bad_request', 'Photos aren’t part of this invitation.');
+    let bytes = b64decode(req.photo);
+    if (!bytes.length || bytes.length > LIMITS.RSVP_PHOTO_BYTES) throw err('too_large', 'That photo is too big. Try another one.');
+    if (sniffMime(bytes) !== 'image/jpeg') throw err('bad_type', 'Photos must be JPEG.');
+    newPhoto = stripJpegMeta(bytes);
+  }
+  const id = row ? row.id : randomId(12);
+  const d = (newPhoto || (req.removePhoto && photo)) ? await drive(c, ev) : null;
+  if (newPhoto) {
+    const fid = await d.upload({ name: `rsvp_${id}_${randomId(4)}.jpg`, mime: 'image/jpeg', parent: await subFolder(c, ev, 'rsvp_folder', 'RSVP photos (private)'), bytes: newPhoto });
+    if (photo) await d.trash(photo).catch(() => {});
+    photo = fid;
+  } else if (req.removePhoto === true && photo) { await d.trash(photo).catch(() => {}); photo = ''; }
+  const now = c.now();
+  if (row) {
+    await S(c, ev).run('UPDATE rsvps SET name = ?, status = ?, party = ?, kids = ?, diet = ?, song = ?, message = ?, photo = ?, updated = ? WHERE event = ? AND id = ?',
+      name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, now, ev.id, id);
+  } else {
+    try {
+      await S(c, ev).run('INSERT INTO rsvps (event, id, token_hash, name, status, party, kids, diet, song, message, photo, client, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ev.id, id, await sha256Hex(token), name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, clientId, now, now);
+    } catch (e) {
+      if (newPhoto && photo) await d.trash(photo).catch(() => {});
+      throw err('busy', 'That didn’t save. Please try again.');
+    }
+  }
+  const saved = await S(c, ev).one('SELECT * FROM rsvps WHERE event = ? AND id = ?', ev.id, id);
+  return { r: id, rsvp: rsvpView(saved) };
+};
+
+A.cover = async (c, req) => {
+  const ev = await loadPublicEvent(c, req.e);
+  if (!ev.cover) throw err('not_found', 'No cover photo');
+  if (!(await rateOk(c, 'cover:' + ev.id, 240, 60))) throw err('rate_limited', 'Busy, try again.');
+  const bytes = await (await drive(c, ev)).download(ev.cover.id);
+  if (bytes.length > LIMITS.COVER_BYTES || sniffImage(bytes) !== ev.cover.mime) throw err('not_found', 'No cover photo');
+  return { mime: ev.cover.mime, v: ev.cover.v, data: b64encode(bytes) };
+};
+
+A.hostSetCover = async (c, req) => {
+  const ev = await authHost(c, req);
+  const d = await drive(c, ev);
+  const old = ev.cover;
+  let rec = null;
+  if (req.data) {
+    let bytes = b64decode(req.data);
+    if (bytes.length > LIMITS.COVER_BYTES) throw err('too_large', 'That photo is too big. Try a smaller one.');
+    const mime = sniffImage(bytes);
+    if (!mime) throw err('bad_type', 'Use a PNG, JPEG or WebP image.');
+    if (mime === 'image/jpeg') bytes = stripJpegMeta(bytes);
+    const fid = await d.upload({ name: 'invitation-cover.' + mime.split('/')[1], mime, parent: ev.folder, bytes });
+    rec = { id: fid, v: randomId(8), mime };
+  }
+  await c.run('UPDATE events SET cover = ?, v = ? WHERE id = ?', rec ? JSON.stringify(rec) : '', randomId(8), ev.id);
+  if (old) await d.trash(old.id).catch(() => {});
+  return { coverV: rec ? rec.v : '' };
+};
+
+A.hostRsvps = async (c, req) => {
+  const ev = await authHost(c, req);
+  const rows = await rsvpRows(c, ev);
+  const t = { yes: 0, maybe: 0, no: 0, yesPeople: 0, yesKids: 0, maybePeople: 0, meals: {} };
+  for (const r of rows) {
+    t[r.status]++;
+    if (r.status === 'yes') { t.yesPeople += headcount(r); t.yesKids += Number(r.kids) || 0; for (const p of partyOf(r)) if (p.m) t.meals[p.m] = (t.meals[p.m] || 0) + 1; }
+    if (r.status === 'maybe') t.maybePeople += headcount(r);
+  }
+  return { rsvps: rows.map(rsvpView), totals: t, cap: ev.settings.invite.cap };
+};
+
+A.hostRsvpPhoto = async (c, req) => {
+  const ev = await authHost(c, req);
+  const r = await S(c, ev).one('SELECT photo FROM rsvps WHERE event = ? AND id = ? AND deleted = 0', ev.id, str(req.id, 40));
+  if (!r || !r.photo) throw err('not_found', 'No photo');
+  const bytes = await (await drive(c, ev)).download(r.photo);
+  if (bytes.length > LIMITS.RSVP_PHOTO_BYTES || sniffMime(bytes) !== 'image/jpeg') throw err('not_found', 'No photo');
+  return { mime: 'image/jpeg', data: b64encode(bytes) };
+};
+
+A.hostRsvpDelete = async (c, req) => {
+  const ev = await authHost(c, req);
+  const ids = Array.isArray(req.ids) ? req.ids.slice(0, 200).map((x) => str(x, 40)) : [];
+  let d = null, changed = 0;
+  for (const id of ids) {
+    const r = await S(c, ev).one('SELECT photo FROM rsvps WHERE event = ? AND id = ? AND deleted = 0', ev.id, id);
+    if (!r) continue;
+    if (r.photo) { d = d || await drive(c, ev); await d.trash(r.photo).catch(() => {}); }
+    await S(c, ev).run("UPDATE rsvps SET deleted = 1, photo = '' WHERE event = ? AND id = ?", ev.id, id);
+    changed++;
+  }
+  return { changed };
+};
+
 export const ACTIONS = A;
 
 // ================================================================= nightly cleanup
@@ -1210,7 +1433,7 @@ export async function nightly(env, { batch = 200 } = {}) {
   out.more = evs.length > batch;
   for (const ev of evs.slice(0, batch)) {
     const db = c.shard(ev.shard || '');
-    for (const t of ['media', 'notes', 'guests']) out.rows += (await db.run(`DELETE FROM ${t} WHERE event = ?`, ev.id)).meta.changes || 0;
+    for (const t of ['media', 'notes', 'guests', 'rsvps']) out.rows += (await db.run(`DELETE FROM ${t} WHERE event = ?`, ev.id)).meta.changes || 0;
     await c.run('UPDATE events SET purged = ? WHERE id = ?', now, ev.id);
     out.albums++;
   }
