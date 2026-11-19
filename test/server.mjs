@@ -18,7 +18,7 @@ fs.writeFileSync('/tmp/photoshare-admin-key', adminKey);
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain' };
 
-const testConfig = `export default { appName: 'AfterFlash', backends: { main: '/mock-api', alt: '/mock-api' }, koinos: { rpc: 'https://api.koinos.io', contract: '1ESUaEUU6SEvsTfCSvfPZ7AHVfpFhdGubx', explorer: 'https://koinosblocks.com' }, driveBase: '/mock-drive', imageBase: '/mock-lh3' };\n`;
+const testConfig = `export default { appName: 'Rememberoll', backends: { main: '/mock-api', alt: '/mock-api' }, koinos: { rpc: 'https://api.koinos.io', contract: '1ESUaEUU6SEvsTfCSvfPZ7AHVfpFhdGubx', explorer: 'https://koinosblocks.com' }, driveBase: '/mock-drive', imageBase: '/mock-lh3' };\n`;
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');

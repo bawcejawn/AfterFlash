@@ -1,6 +1,6 @@
-name: Deploy AfterFlash Cloud
+name: Deploy Rememberoll Cloud
 # Publishes the paid version (website + API) to Cloudflare. Runs when you start it by hand
-# (Actions → Deploy AfterFlash Cloud → Run workflow) and after each change once it's set up.
+# (Actions → Deploy Rememberoll Cloud → Run workflow) and after each change once it's set up.
 on:
   workflow_dispatch:
   push:

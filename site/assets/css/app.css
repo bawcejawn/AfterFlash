@@ -1,4 +1,4 @@
-/* AfterFlash — "photo lab envelope" design system.
+/* Rememberoll — "photo lab envelope" design system.
    Cool print-paper, deep developer-ink navy, flashbulb yellow for the one thing that matters
    (the shutter / the call to act). Event accent colour is injected per event via --accent. */
 
@@ -347,7 +347,7 @@ img.img-failed { min-height: 120px; background: var(--paper-2); }
 .my-events li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 0.75rem; }
 .dark-panel ol { padding-left: 1.2rem; }
 
-/* ---------- set up your own AfterFlash */
+/* ---------- set up your own Rememberoll */
 .setup-steps { counter-reset: step; list-style: none; padding: 0; display: grid; gap: 1.1rem; }
 .setup-step { counter-increment: step; position: relative; padding-left: 3rem; }
 .setup-step::before { content: counter(step); position: absolute; left: 0; top: 0; width: 2.1rem; height: 2.1rem; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700; }
@@ -372,7 +372,7 @@ html[data-font="elegant"] h1, html[data-font="elegant"] h2 { letter-spacing: 0.0
 .film-progress { width: 100%; height: 10px; }
 .film-preview { width: 100%; max-height: 70vh; background: #000; border-radius: var(--radius-s); }
 
-/* ---------- AfterFlash Cloud: storage meter, pricing */
+/* ---------- Rememberoll Cloud: storage meter, pricing */
 .meter { height: 12px; border-radius: 999px; background: var(--paper-2); overflow: hidden; }
 .meter span { display: block; height: 100%; width: 0; background: var(--accent, #0f7c7a); transition: width 0.6s ease; }
 .meter.full span { background: #c0392b; }
@@ -411,3 +411,61 @@ input.mid { width: 10rem; }
 .help input[type=search] { width: 100%; max-width: 28rem; }
 .faq-item ol { margin: 0.5rem 0 1rem; }
 .faq-item li { margin-bottom: 0.4rem; }
+
+/* ---------- invitation + RSVP (invite.html) */
+.invite-wrap { width: min(600px, 100% - 1.5rem); }
+body:has(.invite-wrap) { background: var(--paper); background: color-mix(in srgb, var(--accent) 9%, var(--paper)); }
+.invite-page { padding: 1.25rem 0 3rem; display: grid; gap: 1.25rem; }
+.invite-card { background: var(--card); border-radius: var(--radius-l); overflow: hidden; box-shadow: 0 1px 0 var(--line), 0 18px 40px -24px rgba(29, 36, 51, 0.45); border-top: 6px solid var(--accent); }
+.invite-cover { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; }
+.invite-body { padding: 1.75rem 1.5rem 1.5rem; text-align: center; }
+.invite-body .brand-logo { max-height: 72px; margin-inline: auto; }
+.invite-kicker { margin: 0 auto; color: var(--ink-2); font-size: var(--step-0); }
+.invite-title { font-size: clamp(2.2rem, 9vw, 3.4rem); margin: 0.1em auto 0; overflow-wrap: anywhere; }
+.invite-tagline { margin: 0 auto; color: var(--muted); }
+.invite-facts { display: grid; gap: 1rem; margin: 1.5rem 0 0; text-align: center; }
+.invite-facts dt { font-size: var(--step--1); color: var(--muted); }
+.invite-facts dd { margin: 0.15rem 0 0; display: grid; gap: 0.1rem; justify-items: center; }
+.invite-facts dd b { font-size: var(--step-1); font-family: var(--display); }
+.invite-map { font-size: var(--step--1); margin-top: 0.25rem; }
+.invite-note { border-top: 1px solid var(--line); padding-top: 1.25rem; margin-top: 1.5rem; text-align: center; }
+.invite-note p { margin-inline: auto; }
+.invite-cal { justify-content: center; margin-top: 1.25rem; }
+.invite-section { background: var(--card); border-radius: var(--radius-l); padding: 1.5rem; border: 1px solid var(--line); }
+.invite-section h2 { margin-bottom: 0.25rem; }
+.invite-camera { background: var(--ink); color: var(--paper); border-radius: var(--radius-l); padding: 1.5rem; text-align: center; }
+.invite-camera p { margin-inline: auto; color: var(--paper-2); }
+.btn.big { min-height: 56px; padding-inline: 1.6rem; font-size: var(--step-1); }
+.rsvp-choices { display: grid; gap: 0.5rem; grid-template-columns: repeat(3, 1fr); }
+.rsvp-choice { appearance: none; border: 2px solid var(--line); background: #fff; color: var(--ink); border-radius: var(--radius-m); padding: 0.85rem 0.5rem; font: 700 var(--step--1)/1.2 var(--body); cursor: pointer; min-height: 64px; }
+.rsvp-choice:hover { border-color: var(--ink-2); }
+.rsvp-choice[aria-checked=true] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.rsvp-person { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; padding: 0.75rem; border-radius: var(--radius-m); background: var(--paper); }
+@media (max-width: 480px) { .rsvp-person { grid-template-columns: 1fr; } .rsvp-choices { grid-template-columns: 1fr; } }
+.rsvp-photo-preview { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.rsvp-photo-preview img { width: 96px; height: 96px; object-fit: cover; border-radius: var(--radius-m); }
+.form-error { color: var(--danger); font-weight: 700; margin: 0; }
+.rsvp-pill { display: inline-block; padding: 0.3rem 0.75rem; border-radius: 999px; font-weight: 700; font-size: var(--step--1); background: var(--paper-2); }
+.rsvp-pill.rsvp-yes { background: #d9f0e2; color: #14552f; }
+.rsvp-pill.rsvp-maybe { background: #fbf0cc; color: #5c4600; }
+.rsvp-pill.rsvp-no { background: #f3dcdd; color: #7a1a20; }
+.invite-lines { margin: 0; padding-left: 1.2rem; }
+.invite-private { border-top: 1px solid var(--line); padding-top: 1rem; }
+.invite-coming { margin: 0; }
+.invite-foot { text-align: center; margin-inline: auto; }
+
+/* ---------- host: invitations tab */
+.rsvp-totals { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.rsvp-totals > div { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 0.9rem 1rem; }
+.rsvp-totals b { display: block; font: 800 var(--step-2)/1.1 var(--display); }
+.rsvp-totals span { font-size: var(--step--1); color: var(--muted); }
+.rsvp-list { display: grid; gap: 0.6rem; }
+.rsvp-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 0.9rem; align-items: start; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 0.75rem; }
+.rsvp-row .thumb { width: 64px; height: 64px; border-radius: var(--radius-s); background: var(--paper-2); object-fit: cover; display: grid; place-items: center; font: 800 var(--step-1) var(--display); color: var(--muted); }
+.rsvp-row p { margin: 0.15rem 0 0; font-size: var(--step--1); color: var(--ink-2); }
+.rsvp-row h3 { font-size: var(--step-0); margin: 0; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.meal-list { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+div.field > span { display: block; font-weight: 700; margin-bottom: 0.3rem; }
+div.field > small { display: block; color: var(--muted); margin-top: 0.25rem; }
+.invite-host > * + * { margin-top: 1.75rem; }
+.invite-host .stack > .row.spread h2 { margin: 0; }

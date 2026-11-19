@@ -4,7 +4,7 @@
 import { config, ownStudio } from './util.js';
 
 /** Backend version this website expects (kept in step with APP_VERSION in backend/Code.gs by CI). */
-export const BACKEND_VERSION = '1.10.0';
+export const BACKEND_VERSION = '1.11.0';
 
 // Personal accounts: /macros/s/ID/exec. Google Workspace accounts: /a/macros/DOMAIN/s/ID/exec.
 const PROD_URL = /^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
@@ -15,7 +15,7 @@ export class ApiError extends Error {
 
 export function backendUrl(studio) {
   if (ownStudio(studio)) return `https://script.google.com/macros/s/${studio.slice(2)}/exec`;
-  // AfterFlash Cloud: the API lives on this same site.
+  // Rememberoll Cloud: the API lives on this same site.
   if (config.cloud && (config.backends || {})[studio] === '/api') return '/api';
   // Chrome inserts /u/<n>/ when several Google accounts are signed in; the clean URL is what works for guests.
   const url = String((config.backends || {})[studio] || '').trim().replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
@@ -79,7 +79,7 @@ export async function ping(studio) {
     const res = await fetch(url, { method: 'GET', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
     const data = await res.json();
     if (data && data.ok && data.app === 'photoshare') return { ok: true, version: data.version, ready: data.ready !== false };
-    return { ok: false, message: 'That URL answered, but it isn’t an AfterFlash backend.' };
+    return { ok: false, message: 'That URL answered, but it isn’t an Rememberoll backend.' };
   } catch {
     return { ok: false, message: 'Can’t reach the backend. Check the URL in config.js and that the deployment’s access is “Anyone”.' };
   }

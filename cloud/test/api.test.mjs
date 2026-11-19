@@ -1,4 +1,4 @@
-// AfterFlash Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
+// Rememberoll Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { makeEnv, d1 } from './harness.mjs';
@@ -106,7 +106,7 @@ t('creating events needs Google Drive connected; connect stores an encrypted tok
   const ev = await s.call({ a: 'adminCreate', k: adminKey, settings: { name: 'Sam & Alex' } });
   assert.equal(ev.ok, true);
   const folders = [...s.fk.drive.values()].filter((f) => f.mime === 'application/vnd.google-apps.folder').map((f) => f.name);
-  assert.deepEqual(folders.sort(), ['AfterFlash', `Sam & Alex (${ev.id})`].sort());
+  assert.deepEqual(folders.sort(), ['Rememberoll', `Sam & Alex (${ev.id})`].sort());
 });
 
 t('guest flow: join, upload to the host’s Drive (metadata stripped, shared), list, thumb, report', async () => {
@@ -567,6 +567,58 @@ t('scaling: events can live in an extra database; nightly cleanup; owner health'
   assert.ok(rec.added >= 1, JSON.stringify(rec));
   assert.equal(main.prepare("SELECT COUNT(*) n FROM media WHERE event = ? AND status = 'pending'").get(evA.id).n, rec.added);
   assert.equal((await s.call({ a: 'hostGet', e: evA.id, k: 'admin:' + k })).event.purged, false);
+});
+
+t('invitations: open link RSVPs with private edit token, caps, deadline, host-only selfies', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Sam & Alex' } });
+  const hk = 'admin:' + k;
+  assert.equal((await s.call({ a: 'invite', e: ev.id })).error, 'not_found', 'closed until the host turns it on');
+  const inv = { on: true, hosts: 'The Lees', venue: 'Rose Hall', address: '1 Main St', note: 'Line one\nLine two <b>', cap: 3, plusOnes: true, maxParty: 2,
+    kids: true, askMeal: true, meals: ['Chicken', 'Fish', '=HYPERLINK("x")'], diet: true, song: true, whoComing: true, tz: 'America/New_York', startsAt: '2027-06-12T22:00:00Z' };
+  const up = await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { invite: inv } });
+  assert.equal(up.event.settings.invite.note, 'Line one\nLine two b', 'line breaks kept, tags stripped');
+  assert.deepEqual(up.event.settings.invite.meals, ['Chicken', 'Fish', 'HYPERLINK("x")']);
+  const pub = await s.call({ a: 'invite', e: ev.id });
+  assert.equal(pub.invite.venue, 'Rose Hall'); assert.equal(pub.spotsLeft, 3); assert.deepEqual(pub.coming, []);
+  assert.equal(pub.invite.photo, true);
+  const rt = crypto.randomBytes(24).toString('base64url');
+  const bad = await s.call({ a: 'rsvp', e: ev.id, name: 'Pat Doe', status: 'yes', rt: 'short' });
+  assert.equal(bad.error, 'needs_update');
+  const r1 = await s.call({ a: 'rsvp', e: ev.id, name: 'Pat Doe', status: 'yes', meal: 'Fish', party: [{ n: 'Lee Doe', m: 'Chicken' }, { n: 'Extra', m: 'Fish' }], kids: 1, diet: 'No nuts', song: 'Dancing Queen', message: 'Yay', rt, clientId: cid(), photo: b64(jpegWithExif()) });
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.equal(r1.rsvp.party.length, 2, 'max party size enforced'); assert.equal(r1.rsvp.party[0].m, 'Fish'); assert.equal(r1.rsvp.hasPhoto, true);
+  const photoFile = [...s.fk.drive.values()].find((f) => /^rsvp_/.test(f.name));
+  assert.ok(photoFile && !photoFile.public, 'selfie stays private'); assert.ok(!Buffer.from(photoFile.bytes).includes('GPSDATA'), 'EXIF stripped');
+  const pub2 = await s.call({ a: 'invite', e: ev.id, r: r1.r, rt });
+  assert.equal(pub2.spotsLeft, 0); assert.deepEqual(pub2.coming, ['Pat D.']); assert.equal(pub2.mine.diet, 'No nuts');
+  assert.equal((await s.call({ a: 'invite', e: ev.id, r: r1.r, rt: 'x'.repeat(30) })).mine, null, 'wrong token sees nothing');
+  const full = await s.call({ a: 'rsvp', e: ev.id, name: 'Late', status: 'yes', rt: crypto.randomBytes(24).toString('base64url') });
+  assert.equal(full.error, 'full');
+  const maybe = await s.call({ a: 'rsvp', e: ev.id, name: 'Late', status: 'maybe', rt: crypto.randomBytes(24).toString('base64url') });
+  assert.equal(maybe.ok, true, 'maybe does not use a spot');
+  const forged = await s.call({ a: 'rsvp', e: ev.id, r: r1.r, name: 'Hacker', status: 'no', rt: crypto.randomBytes(24).toString('base64url') });
+  assert.equal(forged.error, 'unauthorized', 'cannot edit someone else’s RSVP');
+  const edit = await s.call({ a: 'rsvp', e: ev.id, r: r1.r, name: 'Pat Doe', status: 'no', rt, removePhoto: true });
+  assert.equal(edit.rsvp.status, 'no'); assert.equal(edit.rsvp.hasPhoto, false); assert.equal(edit.rsvp.kids, 0);
+  assert.ok(photoFile.trashed, 'old selfie removed');
+  assert.equal((await s.call({ a: 'hostRsvps', e: ev.id, k: 'nope' })).error, 'unauthorized');
+  const list = await s.call({ a: 'hostRsvps', e: ev.id, k: hk });
+  assert.equal(list.rsvps.length, 2); assert.equal(list.totals.no, 1); assert.equal(list.totals.maybe, 1);
+  assert.equal((await s.call({ a: 'hostRsvpPhoto', e: ev.id, k: hk, id: edit.r })).error, 'not_found');
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { invite: { ...inv, deadline: '2001-01-01T00:00:00Z' } } });
+  assert.equal((await s.call({ a: 'rsvp', e: ev.id, name: 'Too late', status: 'yes', rt: crypto.randomBytes(24).toString('base64url') })).error, 'closed');
+  assert.equal((await s.call({ a: 'invite', e: ev.id })).invite.closed, true);
+  const del = await s.call({ a: 'hostRsvpDelete', e: ev.id, k: hk, ids: [maybe.r] });
+  assert.equal(del.changed, 1);
+  assert.equal((await s.call({ a: 'hostRsvps', e: ev.id, k: hk })).rsvps.length, 1);
+  // Cover photo: public, image types only.
+  assert.equal((await s.call({ a: 'hostSetCover', e: ev.id, k: hk, data: b64(Buffer.from('<svg onload=alert(1)>'.padEnd(64))) })).error, 'bad_type');
+  const cv = await s.call({ a: 'hostSetCover', e: ev.id, k: hk, data: b64(jpegWithExif()) });
+  assert.ok(cv.coverV);
+  assert.equal((await s.call({ a: 'cover', e: ev.id })).mime, 'image/jpeg');
+  assert.equal((await s.call({ a: 'event', e: ev.id })).event.coverV, cv.coverV);
 });
 
 let passed = 0;

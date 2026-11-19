@@ -7,16 +7,15 @@ Your to-do list, in order. Tick items off as you go. Step-by-step instructions a
 - [x] **Free website decided (Nov 18): repo is public again.** The free site is back at **https://bawcejawn.github.io/AfterFlash/**. Anyone can read the code, but it holds no secrets. If you go private later, the free site turns off (GitHub Pro, $4/month, keeps it on).
 - [x] **Old branches deleted.**
 - [x] **Automatic branch cleanup turned on.**
-- [ ] **Put AfterFlash on your phone:** open the site in Safari (iPhone) or Chrome (Android), sign in to your studio admin page, tap **Add to home screen**. Help article: **/help.html#home-screen-host**.
+- [ ] **Put Rememberoll on your phone:** open the site in Safari (iPhone) or Chrome (Android), sign in to your studio admin page, tap **Add to home screen**. Help article: **/help.html#home-screen-host**.
 
-## The name (before you recruit partners or print anything)
+## The name: Rememberoll (before you recruit partners or print anything)
 
-- [ ] Search **AfterFlash** at **tmsearch.uspto.gov**. Look for anything live, especially in classes 9 or 42, or anything photo- or event-related.
-- [ ] Google "AfterFlash photo booth" and "AfterFlash photos". A photo booth listing on logo.com uses the name; find out whether it's a real business.
-- [ ] Check the domain in Cloudflare (**Domain Registration → Register Domains**): `afterflash.com`, or `getafterflash.com` / `afterflash.app`. Buy one (about $10–15 a year).
-- [ ] Get a trademark attorney's clearance search, then file the AfterFlash trademark yourself.
-- [ ] If the name isn't safe, pick another. It's a one-PR rename.
-- [x] Repo renamed to **AfterFlash** (Nov 18). Old `/PhotoShare/` site links no longer work.
+- [x] Name chosen: **Rememberoll** (Nov 19). AfterFlash was dropped because an "Afterflash" camera app already exists.
+- [ ] Buy **rememberoll.com** and **rememberroll.com** (double r, because people will type it that way) in Cloudflare: **Domain Registration → Register Domains**. Turn on auto-renew.
+- [ ] Search **Rememberoll** at **tmsearch.uspto.gov** (classes 9 and 42).
+- [ ] Get a trademark attorney's clearance search. Mention "Memory Roll" (getmemoryroll.com), the closest name found. Then file the Rememberoll trademark.
+- [ ] Optional: rename the GitHub repo to **Rememberoll** (**Settings → Repository name**). The free site's address changes to `bawcejawn.github.io/Rememberoll/`, so do it before you share links, and tell Claude so the docs get updated.
 
 ## Try it with friends first ($0)
 
@@ -35,7 +34,7 @@ Your to-do list, in order. Tick items off as you go. Step-by-step instructions a
 
 - [ ] **Part 1:** Cloudflare account, the **Workers Paid plan ($5/month)**, Account ID and API token. The free plan's 10 ms limit per request is too short for photo uploads.
 - [ ] **Part 2:** make your owner key and save it in your password manager.
-- [ ] **Part 3:** add the GitHub secrets and run **Deploy AfterFlash Cloud**.
+- [ ] **Part 3:** add the GitHub secrets and run **Deploy Rememberoll Cloud**.
 - [ ] **Part 4:** connect your domain and set the `SITE_ORIGIN` variable.
 - [ ] **Part 5:** Google Cloud project, Drive API, sign-in screen, client ID and secret, site verification. Then **Publish app**. If you skip publishing, customers' Drive connections stop after 7 days.
 - [ ] **Part 6:** Stripe in test mode: add the secret key as a GitHub secret. Prices are already set ($5 / $10 / $30).

@@ -7,16 +7,16 @@ This takes about 20 minutes. You need a Google account (a personal Gmail or a Wo
 The backend receives uploads and saves them to **your** Google Drive.
 
 1. Go to <https://script.google.com> and sign in with the Google account whose Drive should hold the photos. For a business, use the business Workspace account.
-2. Click **New project** and rename it to `AfterFlash`.
+2. Click **New project** and rename it to `Rememberoll`.
 3. Open **Project Settings** (the gear icon) and turn on **Show "appsscript.json" manifest file in editor**.
 4. Back in the **Editor**:
    - Replace the contents of `Code.gs` with [`backend/Code.gs`](../backend/Code.gs).
    - Replace the contents of `appsscript.json` with [`backend/appsscript.json`](../backend/appsscript.json).
    - Click **Save**.
 5. In the function dropdown at the top, choose **`setup`** and click **Run**.
-   - Google asks for permission. Click **Review permissions**, choose your account, then **Advanced → Go to AfterFlash (unsafe) → Allow**. The "unsafe" warning appears because it's your own unpublished script. It only asks for Drive and Sheets access.
+   - Google asks for permission. Click **Review permissions**, choose your account, then **Advanced → Go to Rememberoll (unsafe) → Allow**. The "unsafe" warning appears because it's your own unpublished script. It only asks for Drive and Sheets access.
    - Open **Execution log**. It prints `NEW ADMIN KEY …`. **Copy that key into a password manager.** It's shown once and only a hash of it is stored. (If you lose it, run `rotateAdminKey` to print a new one.)
-   - A `AfterFlash` folder now exists in your Drive.
+   - A `Rememberoll` folder now exists in your Drive.
 6. Click **Deploy → New deployment**:
    - Type: **Web app**
    - Execute as: **Me**

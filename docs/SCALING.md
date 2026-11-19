@@ -1,4 +1,4 @@
-# Scaling AfterFlash Cloud
+# Scaling Rememberoll Cloud
 
 Everything here is already built. Nothing needs doing until the **Owner: system health** panel on your admin page asks you to.
 
@@ -31,7 +31,7 @@ The panel shows each database's size out of 10 GB. At **70%** it says "add one s
 1. GitHub → **Settings → Secrets and variables → Actions → Variables**:
    - `SHARDS` = `1` (how many extra databases to have)
    - `ACTIVE_SHARD` = `SHARD_1` (where **new** events go)
-2. **Actions → Deploy AfterFlash Cloud → Run workflow.** The deploy creates the database, sets up its tables and connects it.
+2. **Actions → Deploy Rememberoll Cloud → Run workflow.** The deploy creates the database, sets up its tables and connects it.
 3. Check **Owner: system health**: the new database is listed as "new events go here".
 
 Next time: `SHARDS` = `2`, `ACTIVE_SHARD` = `SHARD_2`, and so on, up to 20.

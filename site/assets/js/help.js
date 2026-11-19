@@ -5,7 +5,7 @@ import { $, h, frameGuard, config } from './util.js';
 frameGuard();
 const cloud = !!config.cloud;
 const support = cloud && config.cloud.support;
-const app = config.appName || 'AfterFlash';
+const app = config.appName || 'Rememberoll';
 
 // cloud: only on the paid site; self: only on self-hosted sites
 const GUESTS = [
@@ -36,6 +36,12 @@ const GUESTS = [
     'iPhone: it must be Safari. Tap the Share button (the square with an arrow) → “Add to Home Screen” → “Add”.',
     'Android: Chrome’s menu (⋮) → “Add to Home screen” or “Install app”.',
     'The icon opens the event you used last. Tap the logo at the top to see all your events.'] },
+  { id: 'rsvp', q: 'RSVP to an invitation, or change my answer', steps: [
+    'Open the invitation link from your host, type your name and choose Yes, Maybe or No.',
+    'Add your party, meals and anything else the host asks, then tap “Send my RSVP”.',
+    'To change it later, open the same link on the same phone and tap “Change my answer”.',
+    'On another phone? Use the private link shown after you reply. Keep it to yourself: anyone with it can change your answer.',
+    'Your reply and photo go only to the host.'] },
 ];
 
 const HOSTS = [
@@ -44,7 +50,7 @@ const HOSTS = [
     'Use the same Google account you connected for photos. You’ll get a new key straight away (the old one stops working).'] },
   { id: 'drive-connect', q: 'Connecting Google Drive didn’t work', cloud: true, steps: [
     'Click “Connect Google Drive” again.',
-    'On Google’s screen, tick the box that lets AfterFlash save files to your Drive. If you skip it, nothing can be saved.',
+    'On Google’s screen, tick the box that lets Rememberoll save files to your Drive. If you skip it, nothing can be saved.',
     'No Google account? Make a free one at accounts.google.com, then connect it.'] },
   { id: 'drive-full', q: 'My Google Drive is full', steps: [
     'Your admin page shows how much space is used.',
@@ -72,12 +78,18 @@ const HOSTS = [
     'Album links stay online for 12 months after a plan ends.'] },
   { id: 'problems', q: 'Something else went wrong', steps: [
     'If something failed, your admin page shows a “Recent problems” list with what went wrong and when. It often says exactly what to fix.',
-    support ? `Still stuck? Email ${support} with your event name and what happened.` : 'Still stuck? Contact whoever set up your AfterFlash.'] },
+    support ? `Still stuck? Email ${support} with your event name and what happened.` : 'Still stuck? Contact whoever set up your Rememberoll.'] },
   { id: 'home-screen-host', q: 'Open my dashboard from my phone’s home screen', steps: [
     'Hosts: open your host link, go to the Access tab, tick “Remember me on this device”, then tap “Add to home screen”. Only do this on your own phone.',
     'Studio admins: sign in, then tap “Add to home screen” next to Sign out. You’ll sign in each time you open it; your admin key is never saved on the phone.',
     'The icon opens whatever you used last on that phone. Tap the logo at the top to switch to another event.',
     'Lost your phone? Make a new host link (Access tab) so the old one stops working.'] },
+  { id: 'invitations', q: 'Send an invitation and collect RSVPs', steps: [
+    'Open your host dashboard and go to the Invitations tab, then tap “Turn on invitation”.',
+    'Fill in the time, place, dress code and a note, and pick the questions to ask (plus-ones, meals, dietary needs, song requests).',
+    'Share the invitation link by text or email, or print its QR code on paper invitations.',
+    'Replies appear on the same tab with totals and meal counts. Tap “Download guest list (CSV)” for your caterer or seating chart.',
+    'On the event day, the same link shows guests a big “Open the camera” button.'] },
 ];
 
 const PARTNERS = [

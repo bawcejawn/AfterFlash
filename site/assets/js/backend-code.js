@@ -1,5 +1,5 @@
 // The backend source, served by this website (copied from backend/Code.gs when the site is
-// published), so friends can set up or update their own AfterFlash without visiting GitHub.
+// published), so friends can set up or update their own Rememberoll without visiting GitHub.
 import { toast } from './util.js';
 
 export const CODE_URL = 'backend/Code.gs.txt';

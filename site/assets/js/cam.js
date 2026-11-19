@@ -89,7 +89,9 @@ const IN_APP = /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|BytedanceWebview|Sn
 function welcome(errMsg) {
   const st = statusLine();
   if (st === 'closed') return closedScreen();
-  const name = h('input', { type: 'text', maxlength: 24, autocomplete: 'given-name', placeholder: 'Optional', id: 'gname' });
+  let rsvpName = '';
+  try { rsvpName = localStorage.getItem(`ps:rsvpname:${studio}:${eventId}`) || ''; } catch { /* private mode */ }
+  const name = h('input', { type: 'text', maxlength: 24, autocomplete: 'given-name', placeholder: 'Optional', id: 'gname', value: rsvpName.slice(0, 24) || null });
   const pin = ev.needsPin ? h('input', { type: 'text', inputmode: 'numeric', maxlength: 8, class: 'code-input', id: 'gpin', autocomplete: 'off', value: f.get('p') || '' }) : null;
   const go = h('button', { class: 'btn flash block', type: 'submit' }, 'Open the camera');
   const form = h('form', { class: 'stack' },

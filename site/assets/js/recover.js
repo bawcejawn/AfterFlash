@@ -123,7 +123,7 @@ async function loadManifest(file, out) {
     const hash = bytesToHex(await sha256(bytes));
     const onChain = String(rec.manifest_hash || '').replace(/^0x/, '');
     const m = JSON.parse(new TextDecoder().decode(bytes));
-    if (!m || m.app !== 'photoshare' || !Array.isArray(m.items)) throw new Error('Not an AfterFlash manifest');
+    if (!m || m.app !== 'photoshare' || !Array.isArray(m.items)) throw new Error('Not an Rememberoll manifest');
     const hashes = m.items.map((x) => String(x.h)).filter((x) => /^[0-9a-f]{64}$/.test(x));
     const root = bytesToHex(await merkleRoot(hashes));
     const rootOk = root === String(rec.album_root || '').replace(/^0x/, '');

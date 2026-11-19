@@ -1,4 +1,4 @@
-# AfterFlash: handoff for the next chat
+# Rememberoll: handoff for the next chat
 
 Last updated: Nov 18, 2026 (home screen + repo rename). Read this first, then docs/CHECKLIST.md (the owner's to-dos).
 
@@ -10,16 +10,16 @@ Last updated: Nov 18, 2026 (home screen + repo rename). Read this first, then do
 - Their wife is a wedding planner: a likely first customer and sales channel.
 - The repo is **public** again and renamed **bawcejawn/AfterFlash** (Nov 18). The free site is at https://bawcejawn.github.io/AfterFlash/.
 
-## What AfterFlash is
+## What Rememberoll is
 
 A PartyCam-style event camera. Guests scan a QR code and shoot a limited "roll" in their phone's browser, with film looks, Beauty and a date stamp. There's a live TV photo wall, a guestbook with voice notes, moderation, and a highlight video. **Photos are saved to the host's own Google Drive.**
 
 Two ways to run it, from one codebase:
 
-1. **Free self-hosted:** the static site in `site/` on GitHub Pages, with a Google Apps Script backend (`backend/Code.gs`, version 1.10.0) in the host's own Google account. Friends can self-host through `setup.html`.
-2. **AfterFlash Cloud (paid):** a Cloudflare Worker in `cloud/` that serves `site/` plus `/api`, with a D1 database (SQLite), the Google Drive API (`drive.file` scope only) and Stripe Checkout (no webhooks; the thank-you page verifies the session). The site switches to cloud mode via `config.cloud`.
+1. **Free self-hosted:** the static site in `site/` on GitHub Pages, with a Google Apps Script backend (`backend/Code.gs`, version 1.11.0) in the host's own Google account. Friends can self-host through `setup.html`.
+2. **Rememberoll Cloud (paid):** a Cloudflare Worker in `cloud/` that serves `site/` plus `/api`, with a D1 database (SQLite), the Google Drive API (`drive.file` scope only) and Stripe Checkout (no webhooks; the thank-you page verifies the session). The site switches to cloud mode via `config.cloud`.
 
-The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live US trademark (Switchmate Home LLC, reg. 6720657, classes 9/42). Only display text changed. Internal ids stay `photoshare` on purpose: worker name, D1 names `photoshare` and `photoshare-shard-N`, `ps:` localStorage keys, health id `app: 'photoshare'`. The repo itself was renamed to `AfterFlash`. Before the owner recruits partners or prints anything, "AfterFlash" still needs a USPTO search and an attorney clearance; a logo.com profile shows an "afterflash" photo booth, possibly inactive.
+Naming history: **PhotoShare** → **AfterFlash** (Nov 18) → **Rememberoll** (Nov 19). PhotoShare was dropped because "PHOTOSHARE" is a live US trademark (Switchmate Home LLC, reg. 6720657, classes 9/42). AfterFlash was dropped because an "Afterflash" photo/camera app launched in the App Store in Sept 2026, plus an "AFTERFLASH®" browser photo booth and a German AfterFlash skincare mark. FizzRoll was rejected (Fizz Social sues over "Fizz" in event apps); Unityroll was runner-up. Closest name to Rememberoll found: "Memory Roll" (getmemoryroll.com, a competing event camera). The owner should buy rememberoll.com and rememberroll.com and get an attorney's clearance before printing or recruiting partners. Only display text changed. Internal ids stay `photoshare` on purpose: worker name, D1 names `photoshare` and `photoshare-shard-N`, `ps:` localStorage keys, health id `app: 'photoshare'`. The GitHub repo is still named `AfterFlash` (renaming it changes the free site's address).
 
 ## Business model (as decided with the owner)
 
@@ -54,6 +54,15 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
 - `backend/Code.gs`: the Apps Script backend (self-host mode).
 - `docs/`: LAUNCH (paid setup, Parts 1–8), PARTNERS, SCALING, CHECKLIST, SETUP/README (self-host), ARCHITECTURE. `contract/` and KOINOS.md are a leftover Koinos feature, removed from the UI.
 
+## Invitations + RSVPs (built Nov 19)
+
+- **Host:** the **Invitations** tab on the host dashboard. Turn it on, fill in hosted by, start/end time, venue + address (Maps button), dress code, a note (line breaks kept), cover photo, RSVP deadline and a guest limit (counts plus-ones and children). Questions the host can turn on: selfie with the reply (default on, host-only), plus-ones with names (max party 1–10), children count, a meal per person (up to 4 choices), dietary needs, song request, a message. Optional "Who's coming" shows first name + last initial of Yes guests (never photos). Replies list with totals, meal counts, search, filters, delete, and CSV (formula-injection guarded).
+- **Guest:** `invite.html?e=…`. Anyone with the link can RSVP (Yes / Maybe / No). The browser makes a private edit token (`rt`); only its SHA-256 is stored. The private link `invite.html#r=<id>.<token>` lets them edit from another device (moved into localStorage, then removed from the address bar). Calendar buttons (.ics download + Google Calendar). From 2 hours before the start (or once the camera opens) the page shows a big "Open the camera" button. The guest's RSVP name pre-fills the camera's name box.
+- **Server rules (both backends):** invite must be on; deadline blocks new replies and edits; the guest limit is checked against other Yes replies; 60 RSVPs per event per minute; 3,000 replies per event; selfies are JPEG only, ≤ 1 MB, EXIF stripped, saved private in `RSVP photos (private)` in the host's Drive, and never shown to anyone but the host; no selfies on private-storage (encrypted) events; retries with the same browser id update instead of duplicating.
+- **Storage:** Cloud: `rsvps` table (main DB migration 0006 + shard migration 0002), `events.rsvp_folder`, `events.cover`; nightly cleanup purges `rsvps` with the rest. Self-host: an `rsvps` tab in each event's sheet; cover in Script Properties (`COVER:<id>`).
+- **Actions:** public `invite`, `rsvp`, `cover`; host `hostRsvps`, `hostRsvpPhoto`, `hostRsvpDelete`, `hostSetCover`. Settings live in `settings.invite` (sanitized by `sanitizeInvite`).
+- **Not built yet:** emailing or texting invitations and reminders (needs an email provider), per-household private links (the owner chose open links).
+
 ## Scaling (built Nov 18; see docs/SCALING.md)
 
 - Each event has `events.shard`: `''` means the main DB; `SHARD_1`…`SHARD_99` are extra D1 databases bound to the worker. All guests, media and notes queries go through `S(c, ev)`. New events go to `ACTIVE_SHARD` if that database is bound.
@@ -72,7 +81,7 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
   - `node test/server.mjs 8787 &` then `python3 test/e2e.py`: self-host browser test.
 - **Commits:** `git -c user.name="bawcejawn" -c user.email="bawcejawn@users.noreply.github.com" commit`, ending with the Co-Authored-By / Claude-Session lines the session gives you.
 - **Push:** `git -c push.negotiate=true push -u origin BRANCH`. Always branch from a **fresh** `origin/main`: `git fetch origin '+refs/heads/main:refs/remotes/origin/main'`. A plain `git fetch` once returned a stale main.
-- **PRs:** `gh api repos/bawcejawn/AfterFlash/pulls -f title=… -f head=… -f base=main -F body=@file`. Wait for CI to pass, then `gh api -X PUT …/pulls/N/merge -f merge_method=squash`. Then check that **Deploy AfterFlash Cloud** and **Deploy site to GitHub Pages** succeed.
+- **PRs:** `gh api repos/bawcejawn/AfterFlash/pulls -f title=… -f head=… -f base=main -F body=@file`. Wait for CI to pass, then `gh api -X PUT …/pulls/N/merge -f merge_method=squash`. Then check that **Deploy Rememberoll Cloud** and **Deploy site to GitHub Pages** succeed.
 - **Never reuse a branch that was already squash-merged** (it causes conflicts). Make a new one.
 - **The proxy blocks:** deleting branches, changing repo settings and reading Pages settings. Ask the owner to do those.
 - **Security habits already in place:**
@@ -84,25 +93,26 @@ The name was **PhotoShare** until Nov 18. Renamed because "PHOTOSHARE" is a live
 ## Next in line (suggested order)
 
 1. **Help the owner through docs/CHECKLIST.md**: free-site decision, branch cleanup, name clearance, LLC, then LAUNCH.md Parts 1–8. Walk through it step by step when asked.
-2. **Their own storage (asked Nov 18):** customers who already pay for Dropbox or OneDrive could link those instead of Google Drive.
+2. **Email/text invitations and reminders:** send the invite and RSVP reminders by email (Resend) or text. Pairs with item 5.
+3. **Their own storage (asked Nov 18):** customers who already pay for Dropbox or OneDrive could link those instead of Google Drive.
    - Both have APIs with app-folder-only access: Dropbox "App folder" permission; OneDrive `Files.ReadWrite.AppFolder` and `approot`.
    - iCloud and Amazon Photos have no public upload API, so they can't be supported.
    - The work: a storage-provider interface in `cloud/src` (today it's `google.js`), per-provider OAuth plus upload, share and list calls, a provider picker in the Drive panel, and each provider's developer app registration and review (Dropbox production approval; Microsoft publisher verification).
    - Do Dropbox first, and only once customers ask.
-3. **Stripe Connect** for automatic partner payouts and 1099s, once there are more than about 20–30 partners. It costs $2 per active partner a month plus 0.25% + 25¢ per payout.
-4. **Reminder emails** before a plan ends (needs an email provider, e.g. Resend). Today the admin page warns 7 days before.
-5. **Testimonials and real event media** on the home page once the owner sends them.
-6. Optional: remove the leftover `contract/` (Koinos) folder and its CI check.
+4. **Stripe Connect** for automatic partner payouts and 1099s, once there are more than about 20–30 partners. It costs $2 per active partner a month plus 0.25% + 25¢ per payout.
+5. **Reminder emails** before a plan ends (needs an email provider, e.g. Resend). Today the admin page warns 7 days before.
+6. **Testimonials and real event media** on the home page once the owner sends them.
+7. Optional: remove the leftover `contract/` (Koinos) folder and its CI check.
 
 ## Open questions for the owner
 
-- Final name: AfterFlash, pending clearance. "Shared Now" was considered and rejected as too descriptive and crowded (Shared. App, the Shared photo app, ShareNow).
+- Final name: Rememberoll, pending attorney clearance and domain purchase.
 - Legal business name for `BUSINESS_NAME`, once the LLC is formed.
 
 ---
 
 ## First prompt for the new chat (copy and paste this)
 
-> I'm continuing my AfterFlash project (an event camera app, formerly PhotoShare) in my GitHub repo **bawcejawn/AfterFlash**. Please add the repo, clone it, and read **docs/HANDOFF.md** first, then **docs/CHECKLIST.md**. They explain the whole project, how I like to work (beginner, simple step-by-step instructions, security first, you may push PRs and merge, as few PRs as possible), what's built, and what's next.
+> I'm continuing my Rememberoll project (an event camera and invitation app, formerly AfterFlash and PhotoShare) in my GitHub repo **bawcejawn/AfterFlash**. Please add the repo, clone it, and read **docs/HANDOFF.md** first, then **docs/CHECKLIST.md**. They explain the whole project, how I like to work (beginner, simple step-by-step instructions, security first, you may push PRs and merge, as few PRs as possible), what's built, and what's next.
 >
 > After reading, give me: (1) a 5-line summary of where things stand, (2) my next 3 to-dos from the checklist with exact click-by-click steps, and (3) the top item from "Next in line" that you'd build next and why. Don't start building until I say go.

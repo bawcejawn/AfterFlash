@@ -1,4 +1,4 @@
-// "Add to home screen": puts an AfterFlash icon on the phone that opens full screen.
+// "Add to home screen": puts an Rememberoll icon on the phone that opens full screen.
 // Also remembers the last dashboard this device used (page, event code and studio only:
 // never a key), so the icon can reopen it. Keys stay in the browser's own storage, where
 // the host or admin chose to keep them.
@@ -13,7 +13,7 @@ export function isStandalone() {
 }
 
 const TEXT = {
-  cam: { title: 'Keep this camera handy', why: 'Tap the icon any time to jump straight back into this event’s camera.', opens: 'The AfterFlash icon opens your most recent event’s camera.' },
+  cam: { title: 'Keep this camera handy', why: 'Tap the icon any time to jump straight back into this event’s camera.', opens: 'The Rememberoll icon opens your most recent event’s camera.' },
   host: { title: 'Keep this dashboard handy', why: 'Tap the icon to come straight back to this event’s dashboard.', opens: 'The icon opens the dashboard you used last. It only stays signed in if you tick “Remember me on this device” (Access tab).' },
   admin: { title: 'Keep your studio handy', why: 'Tap the icon to come straight back to your studio admin page.', opens: 'The icon opens your studio admin page. You’ll sign in again each time, so your admin key is never stored on the phone.' },
 };
@@ -23,7 +23,7 @@ export function showInstall(kind = 'cam', { dark = kind === 'cam' } = {}) {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const close = () => overlay.remove();
   const body = installPrompt
-    ? [h('p', null, 'Adds an AfterFlash icon to your phone. ' + t.why),
+    ? [h('p', null, 'Adds an Rememberoll icon to your phone. ' + t.why),
       h('button', { class: 'btn flash', onclick: async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; close(); } }, 'Add to home screen')]
     : ios
       ? [h('p', null, t.why),

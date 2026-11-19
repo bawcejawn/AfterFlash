@@ -33,7 +33,7 @@ const until = (r) => (r.plan === 'lifetime' && !r.expires ? 'for life' : `${r.pl
 function renewed(r) {
   clear(root).append(h('div', { class: 'narrow section stack' },
     h('h1', null, 'Thank you! Your plan is extended'),
-    h('p', null, `Your AfterFlash now works ${until(r)}. Same admin key as before.`),
+    h('p', null, `Your Rememberoll now works ${until(r)}. Same admin key as before.`),
     r.email ? h('p', { class: 'muted' }, `Receipt sent to ${r.email}.`) : null,
     h('div', { class: 'row' }, h('a', { class: 'btn flash', href: 'admin.html' }, 'Back to my events'))));
 }
@@ -47,7 +47,7 @@ function show(r) {
     h('h1', null, 'Thank you! Here’s your admin key'),
     r.email ? h('p', { class: 'muted' }, `Receipt sent to ${r.email}.`) : null,
     r.plan ? h('p', null, h('b', null, `Your plan works ${until(r)}.`)) : null,
-    h('p', null, 'This key is the password to your AfterFlash. Save it in your password manager or notes now. It isn’t shown again (if you lose it, you can get a new one by signing in with Google).'),
+    h('p', null, 'This key is the password to your Rememberoll. Save it in your password manager or notes now. It isn’t shown again (if you lose it, you can get a new one by signing in with Google).'),
     h('div', { class: 'keybox', id: 'admin-key' }, r.adminKey),
     h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => copy(r.adminKey) }, 'Copy admin key')),
     h('label', { class: 'check' }, saved, h('span', null, 'I saved my admin key')),
