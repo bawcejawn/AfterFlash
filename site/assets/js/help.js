@@ -50,6 +50,11 @@ const GUESTS = [
 ];
 
 const HOSTS = [
+  { id: 'planners', q: 'Wedding and event planners: run many clients', steps: [
+    'Use a 1-month or 12-month plan. Both include unlimited events.',
+    'On the admin page, fill in “Planner branding” with your business name and website. Every invitation and album then shows “Planned by” with your link.',
+    'For each new client, create an event and choose “Start from” to copy one you’ve already set up: look, camera settings, challenges, messages and invitation design.',
+    'Give the client their host link (shown after you create the event, or “New host link” in the event list). They can moderate photos and see RSVPs; you keep full control.'] },
   { id: 'prints', q: 'Order prints or a photo book', steps: [
     'Open your dashboard and go to the Photos tab.',
     'Tap photos to pick them. Tip: tap “Favorites”, then “Select all”.',

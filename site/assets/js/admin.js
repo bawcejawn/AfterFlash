@@ -3,7 +3,7 @@ import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIs
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
 import { installButton, rememberPlace } from './install.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, ordersPanel, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, ordersPanel, plannerPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -90,7 +90,7 @@ async function dashboard(created) {
     CLOUD ? partnerPanel({ studio, adminKey, me }) : null,
     CLOUD && !ended ? drivePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
-    needsDrive || ended ? null : createForm(),
+    needsDrive || ended ? null : createForm(events),
     h('h2', { class: 'section' }, `Your events (${events.length})`),
     events.length ? h('table', { class: 'list' },
       h('thead', null, h('tr', null, h('th', null, 'Event'), h('th', null, 'Date'), h('th', null, 'Created'), h('th', null, ''))),
@@ -103,6 +103,7 @@ async function dashboard(created) {
           me.role === 'owner' || CLOUD ? h('a', { class: 'btn small', href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Drive folder') : null,
           ev.canManage !== false ? h('button', { class: 'btn small', onclick: () => newHostLink(ev) }, 'New host link') : null,
           ev.canManage !== false ? h('button', { class: 'btn small danger', onclick: () => del(ev) }, 'Delete') : null)))))) : h('p', { class: 'empty' }, 'No events yet. Create your first one above.'),
+    CLOUD && me.planner && !ended && !needsDrive ? plannerPanel({ studio, adminKey, me }) : null,
     !CLOUD && me.version && me.version !== BACKEND_VERSION && me.role === 'owner' ? updatePanel(me.version) : null,
     problemsPanel(),
     !CLOUD && me.role === 'owner' ? adminsPanel() : null,
@@ -124,19 +125,33 @@ function createdPanel({ id, hostKey, name }) {
     h('p', { class: 'small muted' }, 'Guest link: ', guestUrl));
 }
 
-function createForm() {
+function createForm(events = []) {
+  const canCopy = CLOUD && me.planner && events.some((x) => x.canManage !== false);
+  const from = canCopy ? h('select', { name: 'from' }, h('option', { value: '' }, 'A blank event'),
+    events.filter((x) => x.canManage !== false).map((x) => h('option', { value: x.id }, x.name))) : null;
   const form = h('form', { class: 'panel stack' },
     h('h2', null, 'New event'),
     h('div', { class: 'grid-form' },
       h('label', { class: 'field' }, h('span', null, 'Event name'), h('input', { name: 'name', type: 'text', maxlength: 80, required: true, placeholder: 'Sam & Alex’s wedding' })),
       h('label', { class: 'field' }, h('span', null, 'Date'), h('input', { name: 'date', type: 'date' })),
-      h('label', { class: 'field' }, h('span', null, 'Expected guests'), h('input', { name: 'maxGuests', type: 'number', min: 1, max: 5000, value: 150 })),
-      h('label', { class: 'field' }, h('span', null, 'Shots per guest'), h('input', { name: 'shotsPerGuest', type: 'number', min: 1, max: 500, value: 25 })),
-      h('label', { class: 'field' }, h('span', null, 'Photo reveal'), h('select', { name: 'reveal' }, h('option', { value: 'live' }, 'Live'), h('option', { value: 'after' }, 'Develop later'))),
+      from ? h('label', { class: 'field' }, h('span', null, 'Start from'), from) : null,
+      h('label', { class: 'field tpl-hide' }, h('span', null, 'Expected guests'), h('input', { name: 'maxGuests', type: 'number', min: 1, max: 5000, value: 150 })),
+      h('label', { class: 'field tpl-hide' }, h('span', null, 'Shots per guest'), h('input', { name: 'shotsPerGuest', type: 'number', min: 1, max: 500, value: 25 })),
+      h('label', { class: 'field tpl-hide' }, h('span', null, 'Photo reveal'), h('select', { name: 'reveal' }, h('option', { value: 'live' }, 'Live'), h('option', { value: 'after' }, 'Develop later'))),
       h('label', { class: 'field' }, h('span', null, 'Album closes'), h('input', { name: 'closesAt', type: 'datetime-local' }))),
     h('label', { class: 'check' }, h('input', { name: 'encrypted', type: 'checkbox' }),
       h('span', null, h('strong', null, 'Private storage'), ' (locks the files in Google Drive so only this app can open them, even for people who can see the Drive folder. Can’t be changed later. Leave off for normal events.)')),
     h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'submit' }, 'Create event'), h('span', { class: 'small muted' }, 'You can change everything later from the host dashboard.')));
+  const note = h('p', { class: 'small muted', hidden: true });
+  if (from) {
+    form.querySelector('.grid-form').after(note);
+    from.onchange = () => {
+      const t = from.value;
+      form.querySelectorAll('.tpl-hide').forEach((el) => { el.hidden = !!t; });
+      note.hidden = !t;
+      note.textContent = t ? `Copies the look, camera settings, challenges, messages and invitation design from “${from.selectedOptions[0].textContent}”. Dates, venue and photos aren’t copied.` : '';
+    };
+  }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -144,7 +159,7 @@ function createForm() {
     btn.disabled = true; btn.textContent = 'Creating…';
     const settings = { name: fd.get('name'), date: fd.get('date'), maxGuests: Number(fd.get('maxGuests')), shotsPerGuest: Number(fd.get('shotsPerGuest')), reveal: fd.get('reveal'), closesAt: localInputToIso(fd.get('closesAt')), encrypted: fd.get('encrypted') === 'on' };
     try {
-      const r = await api(studio, 'adminCreate', { k: adminKey, settings }, { retries: 0, timeout: 90000 });
+      const r = await api(studio, 'adminCreate', { k: adminKey, settings, from: (from && from.value) || undefined }, { retries: 0, timeout: 90000 });
       dashboard({ id: r.id, hostKey: r.hostKey, name: settings.name });
     } catch (err) {
       toast(err.message, 'error');

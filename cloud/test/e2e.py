@@ -131,6 +131,18 @@ with sync_playwright() as p:
     expect(page.locator("section.shop")).to_contain_text("Paid, being made", timeout=15000)
     page.screenshot(path=f"{SHOTS}/04b-prints.png", full_page=True)
     page.goto(BASE + "/admin.html")
+    # ---- planner tools: branding shows on the album; "Start from" copies an event
+    page.fill("input[name=bname]", "Bright Day Events")
+    page.fill("input[name=burl]", "https://brightday.example")
+    page.click("form:has(h2:has-text('Planner branding')) button:has-text('Save')")
+    expect(page.locator("text=It shows on all your events")).to_be_visible(timeout=15000)
+    album.goto(f"{BASE}/album.html?e={event_id}")
+    expect(album.locator(".planner-credit a")).to_have_text("Bright Day Events", timeout=15000)
+    assert album.locator(".planner-credit a").get_attribute("href") == "https://brightday.example"
+    page.select_option("select[name=from]", event_id)
+    expect(page.locator("text=Copies the look")).to_be_visible()
+    assert not page.locator("input[name=shotsPerGuest]").is_visible()
+    page.screenshot(path=f"{SHOTS}/04c-planner.png", full_page=True)
 
     # ---- lost key: sign in with Google
     page.goto(BASE + "/admin.html")

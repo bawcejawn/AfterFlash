@@ -8,7 +8,7 @@ Status: **Done** = live today. **Next** = small and worth doing soon. **Later** 
 
 ## Already built (for reference)
 
-Camera with no app download, disposable-camera mode (limited shots, develop later), film looks, shared album, TV slideshow, guestbook with voice messages, highlight video, invitations with RSVP, photo challenges, captions, phone app home screen, automatic messages and thank-you notes, prints and photo books.
+Camera with no app download, disposable-camera mode (limited shots, develop later), film looks, shared album, TV slideshow, guestbook with voice messages, highlight video, invitations with RSVP, photo challenges, captions, phone app home screen, automatic messages and thank-you notes, prints and photo books, planner branding and event copies.
 
 ## Fun for guests (the "toy" part)
 
@@ -56,7 +56,7 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 36. **Custom link name.** rememberoll.app/SamAndAlex for $5. *Next.*
 37. **Extra guests or videos** beyond the plan limits, as a one-time top-up. *Later.*
 38. **Gift for the hosts.** A guest buys the photo book for the couple as their gift. *Later; big wedding market.*
-39. **Planner plan.** A monthly price for wedding planners and venues who run many events. *In progress.*
+39. **Planner tools.** "Planned by" branding and "Start from" event copies, included with the month and 12-month plans. *Done.* A separate higher-priced planner plan can come with white label (40).
 40. **White label.** A planner's own logo and colours, with no Rememberoll branding. A higher planner tier. *Later.*
 41. **Referral partners.** Partners earn a cut for every plan they sell. *Done.*
 42. **Venue QR sign kit.** A printed acrylic sign mailed to the host. You mark up the print cost. *Later.*
@@ -79,8 +79,8 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 Do the **Next** items in this order. Each one is a small PR.
 
-1. Planner plan (39)
-2. Templates (17)
+1. Templates for everyone: wedding, birthday, baby shower (17)
+2. White label for planners (40)
 3. Storage add-on (31)
 4. Printable table cards (21)
 5. Reactions (4)
