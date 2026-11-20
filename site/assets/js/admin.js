@@ -1,5 +1,6 @@
 // Studio admin: create events, hand out host links, delete events.
 import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIso, frameGuard, config, params, myStudios, studioOfDeployment, ownStudio } from './util.js';
+import { TEMPLATES, templateSettings } from './templates.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
 import { installButton, rememberPlace } from './install.js';
@@ -127,27 +128,46 @@ function createdPanel({ id, hostKey, name }) {
 
 function createForm(events = []) {
   const canCopy = CLOUD && me.planner && events.some((x) => x.canManage !== false);
-  const from = canCopy ? h('select', { name: 'from' }, h('option', { value: '' }, 'A blank event'),
+  const from = canCopy ? h('select', { name: 'from' }, h('option', { value: '' }, 'Don’t copy'),
     events.filter((x) => x.canManage !== false).map((x) => h('option', { value: x.id }, x.name))) : null;
-  const form = h('form', { class: 'panel stack' },
-    h('h2', null, 'New event'),
+  let tpl = 'wedding';
+  const blurb = h('p', { class: 'small muted tpl-blurb' });
+  const shots = h('input', { name: 'shotsPerGuest', type: 'number', min: 1, max: 500 });
+  const guests = h('input', { name: 'maxGuests', type: 'number', min: 1, max: 5000 });
+  const pick = (id) => {
+    tpl = id;
+    picker.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.t === id)));
+    const t = TEMPLATES[id];
+    blurb.textContent = t.blurb;
+    shots.value = t.settings.shotsPerGuest || 25; guests.value = t.settings.maxGuests || 150;
+  };
+  const picker = h('div', { class: 'tpl-picker', role: 'group', 'aria-label': 'Template' },
+    Object.entries(TEMPLATES).map(([id, t]) => h('button', { type: 'button', class: `tpl tpl-${id}`, dataset: { t: id }, onclick: () => pick(id) }, t.label)));
+  const more = h('details', { class: 'more-options' }, h('summary', null, 'More options'),
     h('div', { class: 'grid-form' },
-      h('label', { class: 'field' }, h('span', null, 'Event name'), h('input', { name: 'name', type: 'text', maxlength: 80, required: true, placeholder: 'Sam & Alex’s wedding' })),
-      h('label', { class: 'field' }, h('span', null, 'Date'), h('input', { name: 'date', type: 'date' })),
-      from ? h('label', { class: 'field' }, h('span', null, 'Start from'), from) : null,
-      h('label', { class: 'field tpl-hide' }, h('span', null, 'Expected guests'), h('input', { name: 'maxGuests', type: 'number', min: 1, max: 5000, value: 150 })),
-      h('label', { class: 'field tpl-hide' }, h('span', null, 'Shots per guest'), h('input', { name: 'shotsPerGuest', type: 'number', min: 1, max: 500, value: 25 })),
+      from ? h('label', { class: 'field' }, h('span', null, 'Copy an earlier event instead'), from) : null,
+      h('label', { class: 'field tpl-hide' }, h('span', null, 'Expected guests'), guests),
+      h('label', { class: 'field tpl-hide' }, h('span', null, 'Shots per guest'), shots),
       h('label', { class: 'field tpl-hide' }, h('span', null, 'Photo reveal'), h('select', { name: 'reveal' }, h('option', { value: 'live' }, 'Live'), h('option', { value: 'after' }, 'Develop later'))),
       h('label', { class: 'field' }, h('span', null, 'Album closes'), h('input', { name: 'closesAt', type: 'datetime-local' }))),
     h('label', { class: 'check' }, h('input', { name: 'encrypted', type: 'checkbox' }),
-      h('span', null, h('strong', null, 'Private storage'), ' (locks the files in Google Drive so only this app can open them, even for people who can see the Drive folder. Can’t be changed later. Leave off for normal events.)')),
-    h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'submit' }, 'Create event'), h('span', { class: 'small muted' }, 'You can change everything later from the host dashboard.')));
+      h('span', null, h('strong', null, 'Private storage'), ' (locks the files in Google Drive so only this app can open them, even for people who can see the Drive folder. Can’t be changed later. Leave off for normal events.)')));
+  const form = h('form', { class: 'panel stack new-event' },
+    h('h2', null, 'New event'),
+    h('div', { class: 'grid-form' },
+      h('label', { class: 'field' }, h('span', null, 'Event name'), h('input', { name: 'name', type: 'text', maxlength: 80, required: true, placeholder: 'Sam & Alex’s wedding' })),
+      h('label', { class: 'field' }, h('span', null, 'Date'), h('input', { name: 'date', type: 'date', required: true }))),
+    h('div', { class: 'stack tight' }, h('span', { class: 'field-label' }, 'Start with'), picker, blurb),
+    more,
+    h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'submit' }, 'Create event'), h('span', { class: 'small muted' }, 'Everything else is pre-filled. Change any of it later on the dashboard.')));
+  pick(tpl);
   const note = h('p', { class: 'small muted', hidden: true });
   if (from) {
-    form.querySelector('.grid-form').after(note);
+    more.querySelector('.grid-form').after(note);
     from.onchange = () => {
       const t = from.value;
       form.querySelectorAll('.tpl-hide').forEach((el) => { el.hidden = !!t; });
+      picker.closest('.stack').hidden = !!t;
       note.hidden = !t;
       note.textContent = t ? `Copies the look, camera settings, challenges, messages and invitation design from “${from.selectedOptions[0].textContent}”. Dates, venue and photos aren’t copied.` : '';
     };
@@ -157,7 +177,7 @@ function createForm(events = []) {
     const fd = new FormData(form);
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = 'Creating…';
-    const settings = { name: fd.get('name'), date: fd.get('date'), maxGuests: Number(fd.get('maxGuests')), shotsPerGuest: Number(fd.get('shotsPerGuest')), reveal: fd.get('reveal'), closesAt: localInputToIso(fd.get('closesAt')), encrypted: fd.get('encrypted') === 'on' };
+    const settings = templateSettings(tpl, { name: fd.get('name'), date: fd.get('date'), maxGuests: Number(fd.get('maxGuests')), shotsPerGuest: Number(fd.get('shotsPerGuest')), reveal: fd.get('reveal'), closesAt: localInputToIso(fd.get('closesAt')), encrypted: fd.get('encrypted') === 'on' });
     try {
       const r = await api(studio, 'adminCreate', { k: adminKey, settings, from: (from && from.value) || undefined }, { retries: 0, timeout: 90000 });
       dashboard({ id: r.id, hostKey: r.hostKey, name: settings.name });

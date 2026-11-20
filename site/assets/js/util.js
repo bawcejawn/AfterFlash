@@ -191,6 +191,14 @@ export const store = {
 };
 
 // ---------- QR as SVG built from the module matrix (no innerHTML)
+/** The QR code as rows of true/false squares (for drawing on a canvas). */
+export function qrMatrix(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount();
+  return Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => qr.isDark(r, c)));
+}
 export function qrSvg(text, { margin = 2, dark = '#1d2433' } = {}) {
   const qr = qrcode(0, 'M');
   qr.addData(text);

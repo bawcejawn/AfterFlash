@@ -8,7 +8,7 @@ Status: **Done** = live today. **Next** = small and worth doing soon. **Later** 
 
 ## Already built (for reference)
 
-Camera with no app download, disposable-camera mode (limited shots, develop later), film looks, shared album, TV slideshow, guestbook with voice messages, highlight video, invitations with RSVP, photo challenges, captions, phone app home screen, automatic messages and thank-you notes, prints and photo books, planner branding and event copies.
+Camera with no app download, disposable-camera mode (limited shots, develop later), film looks, shared album, TV slideshow, guestbook with voice messages, highlight video, invitations with RSVP, photo challenges, captions, phone app home screen, automatic messages and thank-you notes, prints and photo books, planner branding and event copies, templates (including Surprise party), table cards, co-host links, TV big reveal, invitation countdown, recap emails, album archive date, guest-to-host offer.
 
 ## Fun for guests (the "toy" part)
 
@@ -17,8 +17,8 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 3. **Photo bingo card.** The challenge list shown as a bingo grid; finishing a line throws confetti. *Next.*
 4. **Reactions.** Heart, laugh or fire on any album photo; no comments, so nothing to moderate. *Next.*
 5. **"Best of the night" vote.** Guests get 3 votes; the top 10 show on the TV at the end. *Later.*
-6. **Live photo wall mode.** New photos fly onto the TV as they arrive. *Next.*
-7. **Countdown screen.** The invitation shows "12 days to go" and changes into the camera on the day. *Next.*
+6. **Live photo wall mode.** New photos fly onto the TV as they arrive. *Done.*
+7. **Countdown screen.** The invitation shows "12 days to go" and changes into the camera on the day. *Done.*
 8. **"My photos" page.** Each guest can see and download just the photos they took. *Next.*
 9. **Video guestbook prompts.** "Give the couple one piece of advice" before recording. *Next.*
 10. **Table challenges.** Each table gets its own challenge and the TV shows a table leaderboard. *Later.*
@@ -30,18 +30,18 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 ## Easy for hosts
 
-16. **One-page setup.** Event name, date, done; everything else stays optional. *Next.*
-17. **Templates.** Wedding, birthday, baby shower, corporate, reunion: each fills in challenges, messages and look. *Next.*
-18. **Co-host link.** Share hosting with a partner without sharing a password. *Next.*
+16. **One-page setup.** Event name, date, done; everything else stays optional. *Done.*
+17. **Templates.** Wedding, birthday, baby shower, corporate, reunion: each fills in challenges, messages and look. *Done.*
+18. **Co-host link.** Share hosting with a partner without sharing a password. *Done.*
 19. **Hide a photo in one tap,** straight from the TV or album. *Next.*
-20. **Album download as one zip,** sorted into folders by challenge. *Next.*
-21. **Printable table cards.** A QR code plus "Scan to add your photos" in the event's colours, as a PDF. *Next.*
+20. **Album download as one zip,** sorted into folders by challenge. *Done.*
+21. **Printable table cards.** A QR code plus "Scan to add your photos" in the event's colours, as a PDF. *Done.*
 22. **Seating chart from RSVPs.** Drag names onto tables. *Later.*
 23. **Gift list notes.** Hosts note who gave what so thank-you notes are easier. *Later.*
 24. **Day-of schedule.** "Dinner 7pm, first dance 8pm" shown on the invitation and TV. *Next.*
 25. **Multi-day events.** Rehearsal, wedding and brunch under one invitation. *Later.*
 26. **Guest photo approval.** Photos wait for the host before they go public. *Done ("need a look").*
-27. **Recap email.** The day after: how many photos, the top 5, and a link. *Next (uses messages).*
+27. **Recap email.** The day after: how many photos, the top 5, and a link. *Done* (counts and album link; top photos later).
 28. **Text messages (SMS) for reminders.** Paid per use, because texts cost money. *Later.*
 
 ## Ways to make money (no ads)
@@ -64,27 +64,24 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 ## Trust and safety (makes it easy to sell)
 
-44. **Album password** for sensitive events. *Next.*
-45. **Auto-delete date.** The album erases itself after a set time. *Next.*
-46. **Report a photo** button for guests, sent to the host. *Next.*
+44. **Album password** for sensitive events. *Done* (the 4–8 digit event code under Settings).
+45. **Auto-delete date.** Guest links close on a set date; photos stay with the host. *Done.*
+46. **Report a photo** button for guests, sent to the host. *Done.*
 47. **Kid-safe mode.** No captions and no public album; the host approves every photo. *Next.*
 
 ## Growth (free marketing without ads)
 
-48. **"Made with Rememberoll" on the album footer.** Guests become the next hosts. *Next.*
-49. **Guest-to-host offer.** After the event, guests see "Planning your own? 20% off." *Next.*
+48. **"Made with Rememberoll" on the album footer.** Guests become the next hosts. *Done.*
+49. **Guest-to-host offer.** After the event, guests see "Planning your own? 20% off." *Done.*
 50. **Share a highlight to Instagram or TikTok** in one tap, with a small watermark. *Later.*
 
 ## Suggested order
 
-Do the **Next** items in this order. Each one is a small PR.
+What's left, in order. Each one is a small update.
 
-1. Templates for everyone: wedding, birthday, baby shower (17)
-2. White label for planners (40)
-3. Storage add-on (31)
-4. Printable table cards (21)
-5. Reactions (4)
-6. Recap email (27)
-7. Made-with footer and guest-to-host offer (48, 49)
-8. "My photos" page (8)
-9. Timed challenges (1)
+1. Storage add-on on Rememberoll's own cloud (31)
+2. Reactions (4)
+3. "My photos" page (8)
+4. Timed challenges (1)
+5. Premium invitation designs and custom link names (35, 36)
+6. White label for planners (40)

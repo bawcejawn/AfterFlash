@@ -1,5 +1,5 @@
 // Event branding: accent colour, heading font, tagline and logo, applied on every guest page.
-import { h, setAccent, store, base64ToBytes } from './util.js';
+import { h, setAccent, store, base64ToBytes, link, inStoreApp } from './util.js';
 import { api } from './api.js';
 
 export const FONTS = { modern: 'Modern', elegant: 'Elegant serif', script: 'Script' };
@@ -16,6 +16,27 @@ export function plannerCredit(ev) {
   if (!p || !p.name) return null;
   return h('p', { class: 'planner-credit small muted' }, 'Planned by ',
     /^https:\/\//i.test(p.url || '') ? h('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, p.name) : h('b', null, p.name));
+}
+
+/** Small "Made with Rememberoll" line under albums and invitations, linking to the home page. */
+export function madeWith() {
+  return h('p', { class: 'made-with small muted' }, 'Made with ', h('a', { href: link('index.html') }, 'Rememberoll'));
+}
+
+/** After the event, guests see one soft offer to host their own (Cloud only, never in the Play app). */
+export function guestOffer(studio, ev) {
+  const box = h('aside', { class: 'guest-offer', hidden: true });
+  const today = new Date().toISOString().slice(0, 10);
+  const over = (ev.date && today > ev.date) || (ev.closesAt && Date.now() > Date.parse(ev.closesAt));
+  if (!over || inStoreApp()) return box;
+  api(studio, 'offer', {}, { retries: 0 }).then((r) => {
+    const o = r && r.offer;
+    if (!o || !/^[A-Z0-9-]{3,30}$/i.test(o.code)) return;
+    box.append(h('b', null, 'Planning your own event?'), h('span', null, ` Get ${Number(o.discount) || 0}% off your first Rememberoll plan.`),
+      h('a', { class: 'btn small', href: link('index.html', { extra: { ref: o.code } }) }, 'See plans'));
+    box.hidden = false;
+  }).catch(() => {});
+  return box;
 }
 
 /** Only real PNG/JPEG/WebP bytes become a logo (never SVG or anything else). */
@@ -52,6 +73,15 @@ export function logoUrl(studio, eventId, ev) {
   const ck = `${studio}:${eventId}:${ev && ev.logoV}`;
   if (!urls.has(ck)) urls.set(ck, logoBlob(studio, eventId, ev).then((b) => (b ? URL.createObjectURL(b) : '')));
   return urls.get(ck);
+}
+
+/** The logo as a decoded image for drawing on a canvas, or null. */
+export async function logoImage(studio, eventId, ev) {
+  const u = await logoUrl(studio, eventId, ev);
+  if (!u) return null;
+  const img = new Image(); img.src = u;
+  await img.decode();
+  return img;
 }
 
 /** An <img> that fills in with the logo when it's loaded (stays hidden if there is none). */

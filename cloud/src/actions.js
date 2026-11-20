@@ -75,7 +75,7 @@ function sanitizeSettings(s) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(s.date)) ? String(s.date) : '',
     welcome: cleanText(s.welcome, LIMITS.WELCOME),
     reveal: s.reveal === 'after' ? 'after' : 'live',
-    revealAt: iso(s.revealAt), opensAt: iso(s.opensAt), closesAt: iso(s.closesAt),
+    revealAt: iso(s.revealAt), opensAt: iso(s.opensAt), closesAt: iso(s.closesAt), archiveAt: iso(s.archiveAt),
     shotsPerGuest: int(s.shotsPerGuest, 1, LIMITS.MAX_SHOTS, 25),
     maxGuests: int(s.maxGuests, 1, LIMITS.MAX_GUESTS, 150),
     allowVideo: s.allowVideo !== false,
@@ -105,7 +105,7 @@ function sanitizeSettings(s) {
 /** Automatic emails the host switched on, and their thank-you note. */
 function sanitizeMessages(v) {
   v = v && typeof v === 'object' ? v : {};
-  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, thanks: cleanLines(v.thanks, 600) };
+  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, autoRecap: v.autoRecap !== false, thanks: cleanLines(v.thanks, 600) };
 }
 /** Photo challenges: up to 15 short prompts the host picks ("Selfie with the couple"). */
 function sanitizeChallenges(v) {
@@ -199,6 +199,7 @@ async function loadPublicEvent(c, id) {
   const ev = await loadEvent(c, id);
   const a = await accountOf(c, ev);
   if (archived(a)) throw err('archived', 'This album has closed: albums stay online for 12 months after the host’s plan ends. The photos are still in the host’s Google Drive.');
+  if (ev.settings.archiveAt && Date.now() >= Date.parse(ev.settings.archiveAt)) throw err('archived', 'This album has been archived by the host. The photos are kept safe by the host.');
   return ev;
 }
 /** Hosting (dashboards, new photos) needs the event's account to have an active plan. Viewing albums doesn't. */
@@ -249,13 +250,20 @@ async function authHost(c, req) {
   if (typeof req.k === 'string' && req.k.startsWith('admin:')) {
     const a = await authAccount(c, { k: req.k.slice(6) });
     if (a.id !== ev.account) throw err('forbidden', 'Only the account that created this event can open its dashboard.');
+    ev.role = 'admin';
     return ev;
   }
-  if (req.k && safeEq(await sha256Hex(String(req.k).slice(0, 200)), ev.host_hash)) { await requireActivePlan(c, ev, false); return ev; }
+  const kh = req.k ? await sha256Hex(String(req.k).slice(0, 200)) : '';
+  if (kh && safeEq(kh, ev.host_hash)) { await requireActivePlan(c, ev, false); ev.role = 'host'; return ev; }
+  if (kh && ev.cohost_hash && safeEq(kh, ev.cohost_hash)) { await requireActivePlan(c, ev, false); ev.role = 'cohost'; return ev; }
   const bucket = 'badhost:' + ev.id;
   if (!(await rateOk(c, bucket, LIMITS.BAD_KEY_PER_10MIN, 600, true))) throw err('rate_limited', 'Too many attempts. Wait 10 minutes.');
   await rateHit(c, bucket, 600);
   throw err('unauthorized', 'Invalid host link');
+}
+/** Co-hosts can do everything except replace host links. */
+function requireMainHost(ev) {
+  if (ev.role === 'cohost') throw err('forbidden', 'Only the main host can do that. Ask them to do it from their host link.');
 }
 async function findGuest(c, ev, id) {
   if (!id) return null;
@@ -505,8 +513,22 @@ A.report = async (c, req) => {
   }
   await S(c, ev).run('UPDATE guests SET reports = reports + 1 WHERE event = ? AND id = ?', ev.id, g.id);
   await bump(c, ev);
+  await alertHostReport(c, ev);
   return {};
 };
+/** Email the host (at most once an hour per event) that a photo was reported and is hidden. Never fails the report. */
+async function alertHostReport(c, ev) {
+  try {
+    if (!mailReady(c.env) || !(await rateOk(c, 'reportmail:' + ev.id, 1, 3600))) return;
+    const [to] = await recipients(c, ev, 'recap');
+    if (!to) return;
+    const origin = c.env.SITE_ORIGIN || '', app = c.env.APP_NAME || 'Rememberoll';
+    const body = renderMail({ app, heading: 'A guest reported a photo', paras: [`A guest at ${ev.settings.name} reported a photo. It’s hidden from the album until you look at it.`,
+      'Open your host dashboard, go to Photos, and tap “Reported” to keep or remove it.'], button: { label: 'Open the admin page', url: `${origin}/admin.html` },
+      unsub: `${origin}/admin.html`, reason: 'You got this because you’re hosting this event.', stopLabel: 'Turn off reporting in the event’s settings' });
+    await sendBatch(c.env, [{ to: to.email, subject: `${ev.settings.name}: a photo was reported`, html: body.html, text: body.text, unsub: `${origin}/admin.html` }]);
+  } catch { /* the report itself already worked */ }
+}
 
 // ---- guestbook
 A.guestbookAdd = async (c, req) => {
@@ -591,7 +613,7 @@ A.logo = async (c, req) => {
 // ================================================================= host (host key or the owning account's admin key)
 A.hostGet = async (c, req) => {
   const ev = await authHost(c, req);
-  return { event: { ...(await hostEvent(ev)), purged: !!ev.purged }, key: (await eventKey(c, ev)) || undefined };
+  return { event: { ...(await hostEvent(ev)), purged: !!ev.purged, role: ev.role, cohost: !!ev.cohost_hash }, key: (await eventKey(c, ev)) || undefined };
 };
 
 A.hostUpdate = async (c, req) => {
@@ -677,9 +699,21 @@ A.hostBlockGuest = async (c, req) => {
 
 A.hostRotateKey = async (c, req) => {
   const ev = await authHost(c, req);
+  requireMainHost(ev);
   const key = randomKey(32);
   await c.run('UPDATE events SET host_hash = ? WHERE id = ?', await sha256Hex(key), ev.id);
   return { hostKey: key };
+};
+
+/** One free co-host link: make (or replace) it, or turn it off. Only the main host or the admin can. */
+A.hostCohost = async (c, req) => {
+  const ev = await authHost(c, req);
+  requireMainHost(ev);
+  if (req.op === 'revoke') { await c.run("UPDATE events SET cohost_hash = '' WHERE id = ?", ev.id); return { cohost: false }; }
+  if (req.op !== 'create') throw err('bad_request', 'Unknown request');
+  const key = randomKey(32);
+  await c.run('UPDATE events SET cohost_hash = ? WHERE id = ?', await sha256Hex(key), ev.id);
+  return { cohost: true, cohostKey: key };
 };
 
 A.hostMedia = async (c, req) => {
@@ -1271,7 +1305,7 @@ function inviteView(ev) {
   const s = ev.settings, i = s.invite;
   return {
     id: ev.id, name: s.name, date: s.date, accent: s.accent, font: s.font, tagline: s.tagline,
-    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '', planner: ev.brand || undefined,
+    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '', planner: ev.brand || undefined, gallery: s.guestGallery !== false,
     hosts: i.hosts, startsAt: i.startsAt, endsAt: i.endsAt, tz: i.tz, venue: i.venue, address: i.address, dress: i.dress, note: i.note,
     deadline: i.deadline, closed: !!i.deadline && Date.now() > Date.parse(i.deadline),
     photo: i.photo && !s.encrypted, plusOnes: i.plusOnes, maxParty: i.plusOnes ? i.maxParty : 1, kids: i.kids,
@@ -1458,7 +1492,7 @@ A.hostRsvpDelete = async (c, req) => {
 // invitation, a reminder to people who haven't replied, "the camera is open", "the photos are
 // ready" and a thank-you note. Every email has a one-click stop link; nothing is sent to anyone
 // who used it. Email addresses are only ever shown to the host.
-const MSG_KINDS = ['invite', 'reminder', 'camera', 'photos', 'thanks'];
+const MSG_KINDS = ['invite', 'reminder', 'camera', 'photos', 'thanks', 'recap'];
 async function addInvitee(c, ev, email, name, fromHost) {
   const have = await S(c, ev).one('SELECT email, name FROM invitees WHERE event = ? AND email = ?', ev.id, email);
   if (have) { if (name && !have.name) await S(c, ev).run('UPDATE invitees SET name = ? WHERE event = ? AND email = ?', name, ev.id, email); return false; }
@@ -1475,6 +1509,11 @@ async function sentToday(c, ev) {
 
 /** Who a message goes to: [{ email, name, token }]. Never anyone who opted out. */
 async function recipients(c, ev, kind) {
+  if (kind === 'recap') { // the host's own recap goes to the account email only
+    const a = await accountOf(c, ev);
+    const email = cleanGuestEmail((a && (a.email || a.google_email)) || '');
+    return email ? [{ email, name: '', token: '', host: true }] : [];
+  }
   const inv = await S(c, ev).all('SELECT * FROM invitees WHERE event = ? AND optout = 0', ev.id);
   const rs = await rsvpRows(c, ev);
   const replied = new Set(rs.filter((r) => r.email).map((r) => r.email));
@@ -1487,7 +1526,7 @@ async function recipients(c, ev, kind) {
   return out;
 }
 
-function message(c, ev, kind, to, note) {
+function message(c, ev, kind, to, note, extra = {}) {
   const s = ev.settings, i = s.invite, app = c.env.APP_NAME || 'Rememberoll';
   const origin = c.env.SITE_ORIGIN || '';
   const q = `e=${encodeURIComponent(ev.id)}`;
@@ -1499,17 +1538,50 @@ function message(c, ev, kind, to, note) {
     try { when = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: i.tz || 'UTC', timeZoneName: 'short' }).format(new Date(i.startsAt)); } catch { when = ''; }
   }
   const where = [i.venue, i.address].filter(Boolean).join(', ');
+  const st = extra.stats || {};
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const shots = st.photos ? plural(st.photos + (st.videos || 0), 'shot', 'shots') : '';
+  const tally = st.photos || st.videos ? `${[st.photos ? plural(st.photos, 'photo', 'photos') : '', st.videos ? plural(st.videos, 'video', 'videos') : '', st.notes ? plural(st.notes, 'guestbook message', 'guestbook messages') : ''].filter(Boolean).join(', ')} from ${plural(st.guests || 0, 'guest', 'guests')}.` : '';
   const T = {
     invite: { subject: `You’re invited: ${s.name}`, heading: `You’re invited to ${s.name}`, paras: [hi, `${by} would love for you to come.`, [when, where].filter(Boolean).join('\n')].filter(Boolean), button: { label: 'See the invitation and RSVP', url: urls.invite } },
     reminder: { subject: `Can you make it? ${s.name}`, heading: 'A quick reminder to RSVP', paras: [hi, `${by} haven’t heard from you yet about ${s.name}.`, i.deadline ? `Please reply by ${new Date(i.deadline).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: i.tz || 'UTC' })}.` : 'It only takes a moment.'], button: { label: 'Reply now', url: urls.invite } },
     camera: { subject: `${s.name}: the camera is open!`, heading: 'The camera is open', paras: [hi, `Take photos for the shared album of ${s.name}, right from your phone. No app needed.`], button: { label: 'Open the camera', url: urls.cam } },
-    photos: { subject: `${s.name}: the photos are ready`, heading: 'The photos are ready', paras: [hi, `Everyone’s photos from ${s.name} are in the album now.`], button: { label: 'See the album', url: urls.album } },
-    thanks: { subject: `Thank you from ${i.hosts || s.name}`, heading: 'Thank you for coming', paras: [hi, cleanLines(note, 600) || `Thank you for celebrating ${s.name} with us.`, 'All the photos are in the album.'], button: { label: 'See the photos', url: urls.album } },
+    photos: { subject: shots ? `Your night in photos: ${shots}` : `${s.name}: the photos are ready`, heading: 'The photos are ready', paras: [hi, `Everyone’s photos from ${s.name} are in the album now.`, tally].filter(Boolean), button: { label: 'See the album', url: urls.album } },
+    thanks: { subject: shots ? `Thank you from ${i.hosts || s.name}: ${shots}` : `Thank you from ${i.hosts || s.name}`, heading: 'Thank you for coming', paras: [hi, cleanLines(note, 600) || `Thank you for celebrating ${s.name} with us.`, tally || 'All the photos are in the album.'].filter(Boolean), button: { label: 'See the photos', url: urls.album } },
+    recap: { subject: shots ? `Your night in photos: ${shots}` : `${s.name}: your recap`, heading: `${s.name}: the recap`, paras: [
+      'Here’s how your event went.', tally || 'No photos yet. Guests can keep adding them while the album is open.',
+      st.rsvps ? `${st.rsvps} ${st.rsvps === 1 ? 'guest' : 'guests'} said yes to the invitation.` : '',
+      st.favs ? `You picked ${st.favs} favorite${st.favs === 1 ? '' : 's'}. They make a great photo book.` : 'Tip: heart your favorite photos on the dashboard. They’re perfect for a photo book.',
+      cleanLines(note, 600)].filter(Boolean), button: { label: 'Open the album', url: urls.album } },
   }[kind];
-  const unsub = `${origin}/unsubscribe.html?${q}&t=${encodeURIComponent(to.token)}`;
-  const body = renderMail({ app, heading: T.heading, paras: T.paras, button: T.button, unsub });
+  const host = kind === 'recap';
+  const unsub = host ? `${origin}/admin.html` : `${origin}/unsubscribe.html?${q}&t=${encodeURIComponent(to.token)}`;
+  const offer = extra.offer;
+  const made = ['photos', 'thanks'].includes(kind) ? { label: offer ? `Made with ${app}. Planning your own event? ${offer.discount}% off your first plan.` : `Made with ${app}`, url: offer ? `${origin}/?ref=${encodeURIComponent(offer.code)}` : `${origin}/` } : null;
+  const body = renderMail({ app, heading: T.heading, paras: T.paras, button: T.button, unsub, made,
+    ...(host ? { reason: 'You got this because you’re hosting this event.', stopLabel: 'Turn off recap emails in the event’s Messages settings' } : {}) });
   return { to: to.email, subject: T.subject, html: body.html, text: body.text, unsub };
 }
+
+/** Counts for recap emails. */
+async function eventStats(c, ev) {
+  const m = await S(c, ev).all("SELECT kind, COUNT(*) AS n, SUM(fav) AS f FROM media WHERE event = ? AND status != 'deleted' GROUP BY kind", ev.id);
+  const n = (k) => (m.find((r) => r.kind === k) || {}).n || 0;
+  const g = await S(c, ev).one('SELECT COUNT(*) AS n FROM guests WHERE event = ? AND uploads > 0', ev.id);
+  const notes = await S(c, ev).one("SELECT COUNT(*) AS n FROM notes WHERE event = ? AND status != 'deleted'", ev.id).catch(() => ({ n: 0 }));
+  const rs = (await rsvpRows(c, ev)).filter((r) => r.status === 'yes').length;
+  return { photos: n('photo'), videos: n('video'), guests: (g && g.n) || 0, notes: (notes && notes.n) || 0, rsvps: rs, favs: m.reduce((t, r) => t + (r.f || 0), 0) };
+}
+/** The owner's guest-to-host discount (GUEST_OFFER_CODE, an active partner code), or null. */
+async function guestOffer(c) {
+  const code = c.env.GUEST_OFFER_CODE ? await activeCode(c, c.env.GUEST_OFFER_CODE).catch(() => null) : null;
+  return code && code.discount > 0 ? { code: code.code, discount: code.discount } : null;
+}
+/** Public: the guest-to-host offer shown on albums after the event. */
+A.offer = async (c) => {
+  if (!(await rateOk(c, 'offer', 600, 60))) throw err('rate_limited', 'Busy');
+  return { offer: await guestOffer(c) };
+};
 
 async function sendKind(c, ev, kind, { note = '', auto = false } = {}) {
   if (!MSG_KINDS.includes(kind)) throw err('bad_request', 'Unknown message');
@@ -1523,7 +1595,8 @@ async function sendKind(c, ev, kind, { note = '', auto = false } = {}) {
   const room = LIMITS.MAIL_PER_EVENT_PER_DAY - (await sentToday(c, ev));
   if (room <= 0) throw err('rate_limited', 'This event has sent its email limit for today. Try again tomorrow.');
   const batch = list.slice(0, room);
-  const sent = await sendBatch(c.env, batch.map((to) => message(c, ev, kind, to, note)));
+  const extra = ['photos', 'thanks', 'recap'].includes(kind) ? { stats: await eventStats(c, ev), offer: await guestOffer(c) } : {};
+  const sent = await sendBatch(c.env, batch.map((to) => message(c, ev, kind, to, kind === 'recap' ? '' : note, extra)));
   if (kind === 'invite') for (const x of batch.slice(0, sent)) await S(c, ev).run('UPDATE invitees SET invited = ? WHERE event = ? AND email = ?', c.now(), ev.id, x.email);
   await S(c, ev).run('INSERT INTO msg_log (event, kind, at, sent, auto) VALUES (?, ?, ?, ?, ?)', ev.id, kind, c.now(), sent, auto ? 1 : 0);
   return { sent, more: list.length > sent };
@@ -1576,7 +1649,7 @@ A.unsubscribe = async (c, req) => {
 export async function autoMessages(env) {
   if (!mailReady(env)) return { sent: 0 };
   const c = makeCtx(env);
-  const evs = await c.all("SELECT id FROM events WHERE deleted = 0 AND (settings LIKE '%\"autoReminder\":true%' OR settings LIKE '%\"autoCamera\":true%' OR settings LIKE '%\"autoPhotos\":true%') LIMIT 500");
+  const evs = await c.all("SELECT id FROM events WHERE deleted = 0 AND (settings LIKE '%\"autoReminder\":true%' OR settings LIKE '%\"autoCamera\":true%' OR settings LIKE '%\"autoPhotos\":true%' OR settings LIKE '%\"autoRecap\":true%') ORDER BY created DESC LIMIT 500");
   let sent = 0;
   for (const { id } of evs) {
     try {
@@ -1593,6 +1666,7 @@ export async function autoMessages(env) {
       if (m.autoPhotos && start && now > start + 16 * 3600e3 && now < start + 7 * 864e5 && !(await done('photos')) && !(await done('thanks'))) {
         await go(m.thanks ? 'thanks' : 'photos', { note: m.thanks });
       }
+      if (m.autoRecap && start && now > start + 16 * 3600e3 && now < start + 7 * 864e5 && !(await done('recap'))) await go('recap');
     } catch { /* one bad event never stops the rest */ }
   }
   return { sent };

@@ -5,7 +5,7 @@ import { urlCache,
   downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
 import { mediaBlob } from './crypto.js';
-import { applyBrand, logoEl, plannerCredit } from './brand.js';
+import { applyBrand, logoEl, plannerCredit, madeWith, guestOffer } from './brand.js';
 import { api } from './api.js';
 import { enhance, canvasToBlob } from './film.js';
 import { openComposer, renderNotes } from './guestbook.js';
@@ -93,7 +93,8 @@ function render() {
   const tabBar = tabs.length > 1 ? h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) =>
     h('button', { role: 'tab', 'aria-selected': String(view === id), onclick: () => { view = id; render(); } }, label))) : null;
   const body = h('div');
-  clear(root).append(head, tabBar, body, plannerCredit(ev) || '');
+  if (!offerEl) offerEl = guestOffer(studio, ev);
+  clear(root).append(head, tabBar, body, offerEl, plannerCredit(ev) || '', madeWith());
   if (view === 'mine' && auth) return renderMine(body);
   if (view === 'guestbook' && ev.guestbook) return renderGuestbook(body);
   renderAlbum(body, r);
@@ -205,7 +206,7 @@ function openLb(list, i, mine = false) {
     const close = h('button', { class: 'btn small', onclick: closeLb }, 'Close');
     lb.enh = h('button', { class: 'btn small', 'aria-pressed': String(enhanceOn), onclick: toggleEnhance }, 'Enhance');
     lb.dl = h('button', { class: 'btn small', onclick: download }, 'Download');
-    lb.report = h('button', { class: 'btn small', onclick: report }, 'Report');
+    lb.report = h('button', { class: 'btn small report-btn', onclick: report, title: 'Hide this photo and tell the hosts' }, '⚑ Report photo');
     lb.el.append(
       h('div', { class: 'lb-top' }, lb.who, h('div', { class: 'row' }, lb.enh, close)),
       lb.stage,
@@ -264,7 +265,7 @@ function showLb() {
   lb.enh.hidden = !canEnhance;
   lb.enh.setAttribute('aria-pressed', String(enhanceOn));
   lb.enh.textContent = enhanceOn ? 'Enhance: on' : 'Enhance: off';
-  lb.report.hidden = lbMine || !(auth && ev.allowReports);
+  lb.report.hidden = lbMine || !ev.allowReports;
   lb.dl.textContent = enhanceOn && canEnhance ? 'Download enhanced' : 'Download';
 }
 
@@ -345,8 +346,11 @@ async function download() {
 function step(d) { lbIndex = (lbIndex + d + lbList.length) % lbList.length; showLb(); }
 function closeLb() { if (lb) lb.el.remove(); }
 
+let offerEl = null;
+
 async function report() {
   const it = cur();
+  if (it && !auth) { toast('To report a photo, open the event camera first (so we know you’re a guest), then come back to the album.', 'error'); return; }
   if (!it || !confirm('Hide this photo and let the hosts know? They’ll decide if it comes back.')) return;
   try {
     await api(studio, 'report', { e: eventId, g: auth.g, t: auth.t, id: it.i });

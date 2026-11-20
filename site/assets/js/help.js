@@ -50,6 +50,23 @@ const GUESTS = [
 ];
 
 const HOSTS = [
+  { id: 'surprise', q: 'Throw a surprise party', steps: [
+    'Create an event and pick “Surprise party”. Guests can add old photos from their phone and short video wishes. The album stays hidden from guests, so the guest of honor can’t peek.',
+    'Pass the guest link or QR code around in secret (group chats work great).',
+    'On the day, open the TV wall link on a TV or laptop and tap “Start with a big reveal”. It counts down 3, 2, 1, shows your message with confetti, then plays everyone’s photos.',
+    'Change the big message (for example “Happy 40th, Sam!”) under Settings → Tagline.'] },
+  { id: 'cohost', q: 'Share hosting with a partner or planner (co-host)', steps: [
+    'Open your dashboard → Access → “Create co-host link”, and send that link to your co-host.',
+    'Your co-host can moderate, change settings, see RSVPs and download photos.',
+    'Only you can replace the host links. Tap “Turn off co-host link” any time and their link stops working right away.'] },
+  { id: 'tablecards', q: 'Print table cards with the QR code', steps: [
+    'Open your dashboard → Share → Table cards.',
+    'Choose how many cards, or type a name for each table. Pick 4 per page (tabletop) or 2 per page (large).',
+    'Tap “Download PDF” and print. It looks good in black and white too.'] },
+  { id: 'archive', q: 'Make the album disappear on a date', steps: [
+    'Open Settings and fill in “Album disappears on”.',
+    'After that date, guest links say the album has been archived. Your photos stay in your Google Drive and on your dashboard.',
+    'Clear the date any time to bring the album back.'] },
   { id: 'planners', q: 'Wedding and event planners: run many clients', steps: [
     'Use a 1-month or 12-month plan. Both include unlimited events.',
     'On the admin page, fill in “Planner branding” with your business name and website. Every invitation and album then shows “Planned by” with your link.',

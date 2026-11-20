@@ -48,8 +48,9 @@ function build() {
   els.status = h('div', { class: 'tv-status', hidden: true }, 'Reconnecting…');
   els.banner = h('div', { class: 'tv-banner', hidden: true });
   const start = h('div', { class: 'tv-start' }, h('div', { class: 'stack' },
-    h('button', { class: 'btn', onclick: startShow }, 'Start the show'),
-    h('p', { class: 'muted' }, 'Goes full screen and keeps this screen awake.')));
+    h('button', { class: 'btn', onclick: (e) => startShow(e, false) }, 'Start the show'),
+    h('button', { class: 'btn flash', onclick: (e) => startShow(e, true) }, 'Start with a big reveal'),
+    h('p', { class: 'muted' }, 'Goes full screen and keeps this screen awake. The big reveal counts down 3, 2, 1, then shows your message with confetti. Great for surprises.')));
   clear(root).append(
     h('div', { class: 'tv-shell' }, els.stage,
       h('aside', { class: 'tv-side' }, h('div', null, logoEl(studio, eventId, ev, 'brand-logo tv-logo'), h('h1', { class: 'tv-name tv-title' }, ev.name), ev.tagline ? h('p', { class: 'tv-count' }, ev.tagline) : null, els.count), h('div', null, els.qr, els.qrCap), els.thumbs, h('div'))),
@@ -58,10 +59,38 @@ function build() {
 }
 
 let wakeLock = null;
-async function startShow(e) {
+async function startShow(e, reveal) {
   e.currentTarget.closest('.tv-start').remove();
   try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch { /* not allowed */ }
   keepAwake();
+  if (reveal) bigReveal();
+}
+
+/** Surprise! A 3-2-1 countdown, then the tagline ("Happy birthday, Sam!") with confetti, then the photos. */
+function bigReveal() {
+  const num = h('div', { class: 'tv-reveal-num' }, '3');
+  const box = h('div', { class: 'tv-reveal', role: 'status' }, num);
+  document.body.append(box);
+  clearTimeout(nextT);
+  let n = 3;
+  const t = setInterval(() => {
+    n--;
+    if (n > 0) { num.textContent = String(n); num.style.animation = 'none'; void num.offsetWidth; num.style.animation = ''; return; }
+    clearInterval(t);
+    const colors = ['#ffc400', '#ff5c8a', '#2c45c9', '#21b37b', '#ff7a1a', ev.accent || '#ffffff'];
+    clear(box).append(
+      h('h1', { class: 'tv-reveal-title' }, ev.tagline || 'Surprise!'),
+      h('p', { class: 'tv-reveal-sub' }, ev.name),
+      h('div', { class: 'confetti', 'aria-hidden': 'true' }, Array.from({ length: 70 }, (_, i) => h('i'))));
+    box.querySelectorAll('.confetti i').forEach((el, i) => {
+      el.style.setProperty('--x', `${Math.random() * 100}vw`);
+      el.style.setProperty('--d', `${2.5 + Math.random() * 2.5}s`);
+      el.style.setProperty('--delay', `${Math.random() * 1.2}s`);
+      el.style.setProperty('--r', `${Math.random() * 720 - 360}deg`);
+      el.style.background = colors[i % colors.length];
+    });
+    setTimeout(() => { box.classList.add('out'); setTimeout(() => { box.remove(); advance(); }, 900); }, 9000);
+  }, 1000);
 }
 async function keepAwake() {
   try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch { /* ignore */ }
@@ -149,6 +178,7 @@ function advance() {
   if (!fresh.length && notes.length && slideCount % 6 === 0) { showNote(); return; }
   hideNote();
   let id = fresh.shift();
+  const isNew = !!id;
   if (!id) {
     // Hosts' favorites come round three times as often.
     const pool = [];
@@ -165,10 +195,20 @@ function advance() {
   stopVideo();
   const img = imgs[which = 1 - which];
   const other = imgs[1 - which];
-  wallImage(img, it, 1920, () => { img.classList.add('on'); other.classList.remove('on'); });
-  els.who.textContent = [it.cap ? `“${it.cap}”` : '', it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || ''].filter(Boolean).join(', ');
+  img.classList.remove('just-arrived'); els.stage.classList.remove('challenge-pulse');
+  wallImage(img, it, 1920, () => {
+    img.classList.add('on'); other.classList.remove('on', 'just-arrived');
+    if (isNew) {
+      img.classList.add('just-arrived'); // drops onto the wall (CSS, skipped for reduced motion)
+      if (it.ch) { void els.stage.offsetWidth; els.stage.classList.add('challenge-pulse'); }
+    }
+  });
+  const tag = isNew ? (it.ch ? `New! Challenge: ${it.ch}` : 'New!') : '';
+  els.who.textContent = [tag, it.cap ? `“${it.cap}”` : '', it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || ''].filter(Boolean).join(', ');
+  els.who.classList.toggle('is-new', isNew);
   els.who.hidden = !els.who.textContent;
-  if (it.k === 'v') playVideo(it); else scheduleNext(SHOW_MS);
+  // Brand-new photos stay up a little longer.
+  if (it.k === 'v') playVideo(it); else scheduleNext(isNew ? Math.round(SHOW_MS * 1.5) : SHOW_MS);
 }
 
 // ---- guestbook notes on the wall (text only; voice notes stay in the album)

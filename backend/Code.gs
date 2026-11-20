@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.13.0';
+var APP_VERSION = '1.14.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -56,7 +56,7 @@ var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 's
 var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status', 'clientId', 'dur'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
 var RSVP_COLS = ['id', 'tokenHash', 'name', 'status', 'party', 'kids', 'diet', 'song', 'message', 'photoId', 'clientId', 'createdAt', 'updatedAt', 'deleted', 'email'];
-var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
+var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy', 'cohostHash'];
 
 // ---------------------------------------------------------------- entry points
 
@@ -117,6 +117,7 @@ var ACTIONS = {
   hostGuests: aHostGuests,
   hostBlockGuest: aHostBlockGuest,
   hostRotateKey: aHostRotateKey,
+  hostCohost: aHostCohost,
   hostMedia: aHostMedia,
   hostManifest: aHostManifest,
   hostSaveManifest: aHostSaveManifest,
@@ -210,12 +211,12 @@ function authorize() {
 // ---------------------------------------------------------------- public actions
 
 function aEvent(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   return { event: publicEvent_(ev) };
 }
 
 function aJoin(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   checkPin_(ev, req.pin);
   if (!rateOk_('join:' + ev.id, LIMITS.JOINS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Too many people joining at once. Try again in a moment.');
@@ -241,13 +242,13 @@ function aJoin(req) {
 }
 
 function aMe(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var g = authGuest_(ev, req);
   return { guest: guestView_(ev, g.row), key: eventKey_(ev) || undefined };
 }
 
 function aUpload(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   var g = authGuest_(ev, req);
   var now = Date.now();
@@ -367,7 +368,7 @@ function aUpload(req) {
 }
 
 function aList(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   var isWall = req.mode === 'wall' && !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
   if (!isWall) checkPin_(ev, req.pin);
@@ -411,7 +412,7 @@ function mediaReadable_(ev, req, m) {
 
 /** Preview image (~1024 px JPEG) for a photo or video the caller may see. */
 function aThumb(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!rateOk_('thumb:' + ev.id, LIMITS.THUMBS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
   var m = findMedia_(ev, str_(req.id, 100));
   if (!mediaReadable_(ev, req, m)) throw err_('not_found', 'Not found');
@@ -428,7 +429,7 @@ function aThumb(req) {
 
 /** Full-resolution photo or video for enhance/download/playback, same access rules as aThumb. */
 function aPhoto(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!rateOk_('photo:' + ev.id, LIMITS.PHOTOS_PER_EVENT_PER_MIN, 60)) throw err_('rate_limited', 'Busy, try again.');
   var m = findMedia_(ev, str_(req.id, 100));
   if (!mediaReadable_(ev, req, m)) throw err_('not_found', 'Not found');
@@ -450,7 +451,7 @@ function aPhoto(req) {
 
 /** A guest's own photos and videos, whatever the reveal setting. */
 function aMine(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var g = authGuest_(ev, req);
   var items = readMedia_(ev).filter(function (m) { return String(m.guestId) === g.row.guestId && m.status !== 'deleted'; })
     .map(function (m) { return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', c: m.createdAt, w: m.w, h: m.h, s: m.status }; });
@@ -470,7 +471,7 @@ function notesSheet_(ev) {
 }
 
 function aGuestbookAdd(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   if (!s.guestbook) throw err_('disabled', 'The guestbook is turned off.');
   var g = authGuest_(ev, req);
@@ -544,7 +545,7 @@ function readNotes_(ev) {
 }
 
 function aGuestbookList(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
   if (!isWall) checkPin_(ev, req.pin);
@@ -558,7 +559,7 @@ function aGuestbookList(req) {
 
 /** Voice message bytes for a visible guestbook note (played through the app, not Drive's player). */
 function aNoteAudio(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   var s = ev.settings;
   var isWall = !!req.wk && safeEq_(String(req.wk), wallKey_(ev));
   if (!isWall) checkPin_(ev, req.pin);
@@ -680,7 +681,7 @@ function inviteView_(ev) {
   var s = ev.settings, i = s.invite;
   return {
     id: ev.id, name: s.name, date: s.date, accent: s.accent, font: s.font, tagline: s.tagline,
-    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '',
+    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '', gallery: s.guestGallery !== false,
     hosts: i.hosts, startsAt: i.startsAt, endsAt: i.endsAt, tz: i.tz, venue: i.venue, address: i.address, dress: i.dress, note: i.note,
     deadline: i.deadline, closed: !!i.deadline && Date.now() > Date.parse(i.deadline),
     photo: i.photo && !s.encrypted, plusOnes: i.plusOnes, maxParty: i.plusOnes ? i.maxParty : 1, kids: i.kids,
@@ -690,7 +691,7 @@ function inviteView_(ev) {
 }
 
 function openInviteEvent_(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!ev.settings.invite.on) throw err_('not_found', 'This invitation isn’t open. Check the link with your host.');
   return ev;
 }
@@ -831,7 +832,7 @@ function aHostSetCover(req) {
 }
 
 function aCover(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!ev.cover) throw err_('not_found', 'No cover photo');
   var cache = CacheService.getScriptCache();
   var ck = 'cover:' + ev.id + ':' + ev.cover.v;
@@ -932,7 +933,7 @@ function aHostSetLogo(req) {
 
 /** The event's logo (public: it's shown on the camera page and the printed sign). */
 function aLogo(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!ev.logo) throw err_('not_found', 'No logo');
   var cache = CacheService.getScriptCache();
   var ck = 'logo:' + ev.id + ':' + ev.logo.v;
@@ -1049,7 +1050,7 @@ function aHostFavorite(req) {
 }
 
 function aReport(req) {
-  var ev = loadEvent_(req.e);
+  var ev = loadPublicEvent_(req.e);
   if (!ev.settings.allowReports) throw err_('disabled', 'Reporting is turned off.');
   var g = authGuest_(ev, req);
   // Only guests who have actually taken a photo can report: stops drive-by accounts hiding the album.
@@ -1074,7 +1075,8 @@ function aReport(req) {
 
 function aHostGet(req) {
   var ev = authHost_(req);
-  return { event: hostEvent_(ev), key: eventKey_(ev) || undefined };
+  var out = hostEvent_(ev); out.role = ev.role; out.cohost = !!ev.cohostHash;
+  return { event: out, key: eventKey_(ev) || undefined };
 }
 
 function aHostUpdate(req) {
@@ -1171,6 +1173,7 @@ function aHostBlockGuest(req) {
 
 function aHostRotateKey(req) {
   var ev = authHost_(req);
+  requireMainHost_(ev);
   var key = randomKey_(32);
   withLock_(function () {
     var row = findEventRow_(ev.id);
@@ -1178,6 +1181,21 @@ function aHostRotateKey(req) {
   });
   dropEventCache_(ev.id);
   return { hostKey: key };
+}
+
+/** One free co-host link: make (or replace) it, or turn it off. Only the main host or an admin can. */
+function aHostCohost(req) {
+  var ev = authHost_(req);
+  requireMainHost_(ev);
+  if (req.op !== 'revoke' && req.op !== 'create') throw err_('bad_request', 'Unknown request');
+  var key = req.op === 'create' ? randomKey_(32) : '';
+  withLock_(function () {
+    var row = findEventRow_(ev.id);
+    row.sheet.getRange(1, 11).setValue('cohostHash');
+    row.sheet.getRange(row.rowIndex, 11).setValue(key ? sha256Hex_(key) : '');
+  });
+  dropEventCache_(ev.id);
+  return key ? { cohost: true, cohostKey: key } : { cohost: false };
 }
 
 /** Returns file bytes (base64) for one of THIS event's media files. Used for archiving to chain. */
@@ -1399,13 +1417,21 @@ function authHost_(req) {
   if (typeof req.k === 'string' && req.k.indexOf('admin:') === 0) {
     var me = authAdmin_({ k: req.k.slice(6) });
     requireEventAdmin_(me, ev.id);
+    ev.role = 'admin';
     return ev;
   }
-  if (req.k && safeEq_(sha256Hex_(String(req.k).slice(0, 200)), ev.hostKeyHash)) return ev;
+  var kh = req.k ? sha256Hex_(String(req.k).slice(0, 200)) : '';
+  if (kh && safeEq_(kh, ev.hostKeyHash)) { ev.role = 'host'; return ev; }
+  if (kh && ev.cohostHash && safeEq_(kh, ev.cohostHash)) { ev.role = 'cohost'; return ev; }
   var bucket = 'badhost:' + ev.id;
   if (!rateOk_(bucket, LIMITS.BAD_ADMIN_PER_10MIN, 600, true)) throw err_('rate_limited', 'Too many attempts. Wait 10 minutes.');
   rateHit_(bucket, 600);
   throw err_('unauthorized', 'Invalid host link');
+}
+
+/** Co-hosts can do everything except replace host links. */
+function requireMainHost_(ev) {
+  if (ev.role === 'cohost') throw err_('forbidden', 'Only the main host can do that. Ask them to do it from their host link.');
 }
 
 function authGuest_(ev, req) {
@@ -1437,9 +1463,16 @@ function loadEvent_(id) {
     var row = findEventRow_(id);
     if (!row || row.row[8] === true) throw err_('not_found', 'Event not found');
     var r = row.row;
-    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '', logo: readLogo_(String(r[0])), cover: readCover_(String(r[0])) };
+    ev = { id: r[0], createdAt: r[2], folderId: r[3], sheetId: r[4], hostKeyHash: r[5], cohostHash: String(r[10] || ''), settings: sanitizeSettings_(parseJson_(r[6])), pinHash: r[7] || '', logo: readLogo_(String(r[0])), cover: readCover_(String(r[0])) };
     cache.put('e:' + id, JSON.stringify(ev), 300);
   }
+  return ev;
+}
+
+/** Guest-facing pages: the event, unless the host's archive date has passed. */
+function loadPublicEvent_(id) {
+  var ev = loadEvent_(id);
+  if (ev.settings.archiveAt && Date.now() >= Date.parse(ev.settings.archiveAt)) throw err_('archived', 'This album has been archived by the host. The photos are kept safe by the host.');
   return ev;
 }
 
@@ -1475,6 +1508,7 @@ function sanitizeSettings_(s) {
     revealAt: iso(s.revealAt),
     opensAt: iso(s.opensAt),
     closesAt: iso(s.closesAt),
+    archiveAt: iso(s.archiveAt),
     shotsPerGuest: int_(s.shotsPerGuest, 1, LIMITS.MAX_SHOTS, 25),
     maxGuests: int_(s.maxGuests, 1, LIMITS.MAX_GUESTS, 150),
     allowVideo: s.allowVideo !== false,
@@ -1505,7 +1539,7 @@ function sanitizeSettings_(s) {
 /** Message settings (sending email is a paid-version feature; the free version keeps the note for "open in my email app"). */
 function sanitizeMessages_(v) {
   v = v && typeof v === 'object' ? v : {};
-  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, thanks: cleanLines_(v.thanks, 600) };
+  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, autoRecap: v.autoRecap !== false, thanks: cleanLines_(v.thanks, 600) };
 }
 
 /** Photo challenges: up to 15 short prompts the host picks. */

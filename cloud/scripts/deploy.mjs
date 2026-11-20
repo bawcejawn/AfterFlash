@@ -83,6 +83,7 @@ const vars = {
   MAIL_FROM: env.MAIL_FROM || '',
   PRINT_PRICE: env.PRINT_PRICE || '',
   BOOK_PRICE: env.BOOK_PRICE || '',
+  GUEST_OFFER_CODE: env.GUEST_OFFER_CODE || '',
   ANDROID_PACKAGE: env.ANDROID_PACKAGE || '',
   ANDROID_CERT_SHA256: (env.ANDROID_CERT_SHA256 || '').toUpperCase().replace(/\s+/g, ''),
   PRICE_EVENT: env.PRICE_EVENT || '5',

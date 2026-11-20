@@ -5,7 +5,7 @@ import {
   $, h, clear, toast, params, studioFrom, isEventId, store, setTitle, link, frameGuard, blobToBase64, base64ToBytes, copy, fmtDate, randomId,
 } from './util.js';
 import { api } from './api.js';
-import { applyBrand, logoEl, logoBytesOk, plannerCredit } from './brand.js';
+import { applyBrand, logoEl, logoBytesOk, plannerCredit, madeWith } from './brand.js';
 
 frameGuard();
 const root = $('#app');
@@ -16,6 +16,7 @@ const authKey = () => `ps:rsvp:${studio}:${eventId}`;
 const inviteUrl = () => link('invite.html', { e: eventId, s: studio });
 const privateUrl = () => link('invite.html', { e: eventId, s: studio, frag: { r: `${auth.r}.${auth.rt}` } });
 const cameraUrl = () => link('cam.html', { e: eventId, s: studio });
+const albumUrl = () => link('album.html', { e: eventId, s: studio });
 
 function fail(title, msg) {
   clear(root).append(h('div', { class: 'narrow section stack' }, h('h1', null, title), h('p', null, msg)));
@@ -83,6 +84,61 @@ function cameraTime() {
   if (inv.startsAt) return now >= Date.parse(inv.startsAt) - 2 * 3600e3;
   if (inv.date) return new Date().toISOString().slice(0, 10) >= inv.date;
   return false;
+}
+
+/** When the party is over: the end time, or 8 hours after the start, or the day after the date. */
+function eventOver() {
+  const now = Date.now();
+  if (inv.endsAt) return now > Date.parse(inv.endsAt) + 3600e3;
+  if (inv.startsAt) return now > Date.parse(inv.startsAt) + 8 * 3600e3;
+  if (inv.date) return new Date().toISOString().slice(0, 10) > inv.date;
+  return false;
+}
+/** "12 days to go", "Tomorrow", "Today at 4:00 PM", or '' when there's no date. */
+function countdownText() {
+  const tz = inv.tz || undefined;
+  const dayKey = (d) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz }).format(d);
+  let start, timed = false;
+  if (inv.startsAt) { start = new Date(inv.startsAt); timed = true; } else if (inv.date) start = new Date(inv.date + 'T12:00:00');
+  else return '';
+  const today = Date.parse(dayKey(new Date()) + 'T00:00:00Z'), that = Date.parse(dayKey(start) + 'T00:00:00Z');
+  const days = Math.round((that - today) / 864e5);
+  if (days < 0) return '';
+  if (days === 0) {
+    if (!timed) return 'Today!';
+    const mins = Math.round((start - Date.now()) / 60000);
+    if (mins <= 0) return 'Happening now';
+    if (mins < 90) return `Starts in ${mins} minute${mins === 1 ? '' : 's'}`;
+    return `Today at ${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', timeZone: tz }).format(start)}`;
+  }
+  if (days === 1) return 'Tomorrow';
+  return `${days} days to go`;
+}
+/** The top of the invitation changes with time: countdown, then the camera, then the album. */
+function phase() { return eventOver() ? 'after' : cameraTime() ? 'camera' : 'before'; }
+function topSection() {
+  const p = phase();
+  if (p === 'after') return h('section', { class: 'invite-camera stack' },
+    h('h2', null, 'The photos are ready'),
+    h('p', null, inv.gallery === false ? 'Thanks for coming! The hosts are going through the photos.' : 'See everyone’s photos from the day in the shared album.'),
+    h('div', { class: 'row' }, inv.gallery === false ? null : h('a', { class: 'btn flash big', href: albumUrl() }, 'See the album'),
+      h('a', { class: 'btn', href: cameraUrl() }, 'Add your photos')));
+  if (p === 'camera') return h('section', { class: 'invite-camera stack' },
+    h('h2', null, 'It’s party time'),
+    h('p', null, 'Open the camera to take photos for the shared album.'),
+    h('a', { class: 'btn flash big', href: cameraUrl() }, 'Open the camera'));
+  const t = countdownText();
+  return t ? h('p', { class: 'invite-countdown', role: 'status' }, t) : null;
+}
+let tick = null, shownPhase = '';
+function startClock() {
+  clearInterval(tick);
+  shownPhase = phase();
+  tick = setInterval(() => {
+    if (phase() !== shownPhase) { render(); return; } // the camera or album takes over
+    const el = document.querySelector('.invite-countdown');
+    if (el) el.textContent = countdownText();
+  }, 60000);
 }
 
 // ------------------------------------------------------------------ calendar
@@ -164,12 +220,10 @@ function render() {
         inv.deadline ? [h('dt', null, 'Please reply by'), h('dd', null, fmtDeadline(inv.deadline))] : null),
       inv.note ? h('div', { class: 'invite-note' }, inv.note.split(/\n{2,}/).map((p) => h('p', null, p.split('\n').flatMap((l, i) => (i ? [h('br'), l] : [l]))))) : null,
       calendarButtons()));
-  const cam = cameraTime() ? h('section', { class: 'invite-camera stack' },
-    h('h2', null, 'It’s party time'),
-    h('p', null, 'Open the camera to take photos for the shared album.'),
-    h('a', { class: 'btn flash big', href: cameraUrl() }, 'Open the camera')) : null;
+  const cam = topSection();
+  startClock();
   clear(root).append(h('div', { class: 'invite-page' }, cam, card, rsvpSection(), whoComing(),
-    h('p', { class: 'small muted invite-foot' }, 'Your reply goes only to the host.'), plannerCredit(inv)));
+    h('p', { class: 'small muted invite-foot' }, 'Your reply goes only to the host.'), plannerCredit(inv), madeWith()));
 }
 
 function whoComing() {

@@ -381,6 +381,22 @@ t('host key required; wrong key rate-limited; rotate invalidates old', () => {
   assert.equal(env.post({ a: 'hostGet', e: ev.id, k: rot.hostKey }).ok, true);
 });
 
+t('co-host link and archive date (self-host)', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const r = env.post({ a: 'hostCohost', e: ev.id, k: ev.hostKey, op: 'create' });
+  assert.ok(r.cohostKey);
+  const g = env.post({ a: 'hostGet', e: ev.id, k: r.cohostKey });
+  assert.equal(g.event.role, 'cohost');
+  assert.equal(env.post({ a: 'hostRotateKey', e: ev.id, k: r.cohostKey }).error, 'forbidden');
+  assert.equal(env.post({ a: 'hostCohost', e: ev.id, k: r.cohostKey, op: 'revoke' }).error, 'forbidden');
+  env.post({ a: 'hostCohost', e: ev.id, k: ev.hostKey, op: 'revoke' });
+  assert.equal(env.post({ a: 'hostGet', e: ev.id, k: r.cohostKey }).error, 'unauthorized');
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { archiveAt: new Date(Date.now() - 1000).toISOString() } });
+  assert.equal(env.post({ a: 'event', e: ev.id }).error, 'archived');
+  assert.equal(env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).ok, true);
+});
+
 t('host of event A cannot touch files of event B or arbitrary Drive files', () => {
   const env = boot();
   const A = makeEvent(env);

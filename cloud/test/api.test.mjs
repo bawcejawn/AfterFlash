@@ -762,6 +762,65 @@ t('planner tools: branding on every event, start from another event, not on the 
   assert.equal((await s.call({ a: 'adminCheck', k: one })).me.planner, false);
 });
 
+t('co-host link: free, revocable, cannot replace host links', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Co' } });
+  const hk = 'admin:' + k;
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: hk })).event.cohost, false);
+  const r = await s.call({ a: 'hostCohost', e: ev.id, k: hk, op: 'create' });
+  assert.ok(r.cohostKey && r.cohostKey !== ev.hostKey);
+  const g = await s.call({ a: 'hostGet', e: ev.id, k: r.cohostKey });
+  assert.equal(g.event.role, 'cohost'); assert.equal(g.event.cohost, true);
+  assert.ok((await s.call({ a: 'hostUpdate', e: ev.id, k: r.cohostKey, settings: { welcome: 'Hi from the planner' } })).event, 'co-host can change settings');
+  assert.equal((await s.call({ a: 'hostRotateKey', e: ev.id, k: r.cohostKey })).error, 'forbidden');
+  assert.equal((await s.call({ a: 'hostCohost', e: ev.id, k: r.cohostKey, op: 'create' })).error, 'forbidden');
+  assert.equal((await s.call({ a: 'hostCohost', e: ev.id, k: r.cohostKey, op: 'revoke' })).error, 'forbidden');
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: ev.hostKey })).event.role, 'host');
+  const r2 = await s.call({ a: 'hostCohost', e: ev.id, k: ev.hostKey, op: 'create' });
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: r.cohostKey })).error, 'unauthorized', 'old co-host link dies');
+  await s.call({ a: 'hostCohost', e: ev.id, k: ev.hostKey, op: 'revoke' });
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: r2.cohostKey })).error, 'unauthorized', 'revoked');
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: '' })).error, 'unauthorized', 'empty key never matches an empty co-host hash');
+});
+
+t('archive date, recap email, report alert, guest offer', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Recap Party', date: '2026-01-10' } });
+  const hk = 'admin:' + k;
+  const g = await s.call({ a: 'join', e: ev.id, label: 'Nana' });
+  for (let i = 0; i < 2; i++) await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid(), w: 10, h: 10 });
+  s.env.RESEND_API_KEY = 're_test_fake'; s.env.MAIL_FROM = 'Rememberoll <hello@example.com>';
+  // recap to the host only, with counts
+  const m = await s.call({ a: 'hostMessages', e: ev.id, k: hk });
+  assert.equal(m.counts.recap, 1); assert.equal(m.settings.autoRecap, true);
+  assert.equal((await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'recap' })).sent, 1);
+  const rc = s.fk.mail.at(-1);
+  assert.match(rc.subject, /Your night in photos: 2 shots/); assert.match(rc.text, /2 photos from 1 guest/);
+  assert.doesNotMatch(rc.text, /unsubscribe\.html/, 'host recap has no guest unsubscribe link');
+  // report alert to the host, at most once an hour
+  const items = (await s.call({ a: 'list', e: ev.id, g: g.guest.id, t: g.token })).items;
+  const before = s.fk.mail.length;
+  await s.call({ a: 'report', e: ev.id, g: g.guest.id, t: g.token, id: items[0].i });
+  await s.call({ a: 'report', e: ev.id, g: g.guest.id, t: g.token, id: items[1].i });
+  assert.equal(s.fk.mail.length, before + 1, 'one alert per hour');
+  assert.match(s.fk.mail.at(-1).subject, /a photo was reported/);
+  // guest offer: off until the owner sets GUEST_OFFER_CODE to an active code
+  assert.equal((await s.call({ a: 'offer' })).offer, null);
+  const owner = s.env.OWNER_KEY;
+  await s.call({ a: 'ownerCodeCreate', k: owner, name: 'Guest offer', code: 'GUEST20', discount: 20, commission: 0 });
+  s.env.GUEST_OFFER_CODE = 'guest20';
+  assert.deepEqual((await s.call({ a: 'offer' })).offer, { code: 'GUEST20', discount: 20 });
+  // archive date: guest pages stop, the host dashboard keeps working
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { archiveAt: new Date(Date.now() - 1000).toISOString() } });
+  assert.equal((await s.call({ a: 'event', e: ev.id })).error, 'archived');
+  assert.equal((await s.call({ a: 'list', e: ev.id, g: g.guest.id, t: g.token })).error, 'archived');
+  assert.ok((await s.call({ a: 'hostList', e: ev.id, k: hk })).items.length >= 1);
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { archiveAt: '' } });
+  assert.ok((await s.call({ a: 'event', e: ev.id })).event);
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

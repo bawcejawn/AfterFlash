@@ -167,6 +167,15 @@ Notes:
 - It is turned off inside the Google Play app for now, to keep the store review simple. Hosts order on the website. (Play does allow outside payment for physical goods, so this can be turned on later.)
 - Shipping is to the US and Canada only. Orders are made to order, so the checkout says all sales are final; still refund in Stripe if a lab ruins an order.
 
+## Part 11: Guest-to-host discount (optional, 5 minutes)
+
+After an event, albums and the "photos are ready" emails can offer guests a discount on their own plan. It's free marketing with no ads.
+
+1. Open **admin.html** → owner partner codes → create a code named **GUEST20** with **20%** discount and **0%** commission.
+2. GitHub → **Settings → Secrets and variables → Actions → Variables** → add **GUEST_OFFER_CODE** = `GUEST20`.
+3. **Actions → Deploy Rememberoll Cloud → Run workflow.**
+4. To stop the offer, turn the code off on the admin page (or delete the variable and deploy).
+
 ## Your first sale: step by step
 
 **Week 1: proof**

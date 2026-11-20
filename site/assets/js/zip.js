@@ -17,7 +17,8 @@ export function makeZip(files) {
   const central = [];
   let offset = 0;
   for (const f of files) {
-    const name = enc.encode(f.name.replace(/[^A-Za-z0-9._-]/g, '_'));
+    // Folders allowed (a/b.jpg); never absolute paths or ".." (zip-slip).
+    const name = enc.encode(f.name.replace(/[^A-Za-z0-9._/-]/g, '_').replace(/\.\.+/g, '_').replace(/\/{2,}/g, '/').replace(/^\/+/, ''));
     const crc = crc32(f.bytes);
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(8, 0, true);
