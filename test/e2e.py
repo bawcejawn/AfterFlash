@@ -90,17 +90,20 @@ with sync_playwright() as p:
     expect(cam.locator(".counter-window")).to_have_text("4")
     wait_js(cam, "document.querySelector('video') && document.querySelector('video').videoWidth > 0", 15000)
     cam.click("button[data-look=mono]")
-    expect(cam.locator(".viewfinder")).to_have_class(re.compile("previewing"))
-    # the live preview is a real processed frame: black & white means R == G == B
-    wait_js(cam, "(() => { const c = document.querySelector('.vf-preview'); if (!c.width) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 0; i < d.length; i += 4000) if (Math.abs(d[i] - d[i+1]) > 2 || Math.abs(d[i+1] - d[i+2]) > 2) return false; return true; })()", 10000)
+    # the viewfinder is the camera's own video (no slow canvas copy); looks are GPU filters on it
+    expect(cam.locator(".viewfinder")).to_have_attribute("data-look", "mono")
+    assert cam.locator(".vf-preview").count() == 0
+    assert "grayscale" in cam.evaluate("getComputedStyle(document.querySelector('.viewfinder video')).filter")
     cam.click("button[data-look=vivid]")
+    expect(cam.locator("button.chip:has-text('Beauty')")).to_have_attribute("aria-pressed", "false")  # off until chosen
     cam.click("button.chip:has-text('Beauty')")
-    expect(cam.locator("button.chip:has-text('Beauty')")).to_have_attribute("aria-pressed", "false")
+    expect(cam.locator("button.chip:has-text('Beauty')")).to_have_attribute("aria-pressed", "true")
     cam.click("button.chip:has-text('Beauty')")
     cam.click("button[data-look=mono]")
+    # two quick shots: the shutter is ready again at once, photos finish in the background
     cam.click(".shutter")
     expect(cam.locator(".counter-window")).to_have_text("3", timeout=15000)
-    cam.wait_for_timeout(600)
+    expect(cam.locator(".shutter")).to_be_enabled(timeout=3000)
     cam.click("button[data-look=classic]")
     cam.click(".shutter")
     expect(cam.locator(".queue-pill")).to_contain_text("All photos uploaded", timeout=30000)

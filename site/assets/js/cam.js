@@ -2,7 +2,7 @@
 import { $, h, clear, toast, params, studioFrom, isEventId, store, setAccent, setTitle, fmtDate, fmtWhen, randomId, link, registerSW, frameGuard, config } from './util.js';
 import { installButton } from './install.js';
 import { api, ApiError } from './api.js';
-import { LOOKS, applyLook, renderPixels, stampDate, drawScaled, canvasToBlob, blurScore, encodeBest, encodePreview } from './film.js';
+import { LOOKS, applyLook, stampDate, drawScaled, canvasToBlob, blurScore, encodeBest, encodePreview } from './film.js';
 import { openComposer } from './guestbook.js';
 import { applyBrand, logoEl } from './brand.js';
 import { queue, createUploader } from './queue.js';
@@ -146,7 +146,8 @@ let els = {};
 let nextCaption = '';
 let challengeIdx = 0, challengeArmed = false;
 
-function shotsLeft() { return Math.max(0, shotsLeftServer - pending); }
+let developing = 0; // photos taken but still being finished (look, encode) in the background
+function shotsLeft() { return Math.max(0, shotsLeftServer - pending - developing); }
 
 function renderCounter(tick) {
   els.counter.textContent = String(shotsLeft());
@@ -170,7 +171,8 @@ async function startCamera() {
   const st = statusLine();
   if (st === 'closed') return closedScreen();
   look = ev.look in LOOKS ? ev.look : 'none';
-  beautyOn = ev.beauty !== false && store.get('ps:beauty') !== 'off';
+  // Beauty softens skin, which also softens detail, so it's off until a guest turns it on.
+  beautyOn = ev.beauty !== false && store.get('ps:beauty2') === 'on';
   const evKey = `${studio}:${eventId}`;
   pending = (await queue.list(evKey).catch(() => [])).length;
 
@@ -178,8 +180,7 @@ async function startCamera() {
   els.video.muted = true;
   els.flashFx = h('div', { class: 'flash-overlay' });
   els.lookName = h('div', { class: 'look-name', 'aria-hidden': 'true' });
-  els.preview = h('canvas', { class: 'vf-preview', 'aria-hidden': 'true' });
-  els.vf = h('div', { class: 'viewfinder' }, els.video, els.preview, els.flashFx, els.lookName);
+  els.vf = h('div', { class: 'viewfinder' }, els.video, els.flashFx, els.lookName);
   els.counter = h('span', { class: 'counter-window', 'aria-live': 'polite' }, '');
   els.shutter = h('button', { class: 'shutter', 'aria-label': 'Take photo', onclick: onShutter });
   const flip = h('button', { class: 'ctrl', 'aria-label': 'Switch camera', onclick: flipCamera }, icon('flip'));
@@ -294,10 +295,11 @@ async function openStream() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return cameraUnavailable();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      // Photos: ask for the sensor's full 4:3 resolution. Videos: 1080p, the best that fits the upload limit.
+      // A smooth 30 fps viewfinder. Full-resolution stills come from the camera's photo pipeline
+      // (Android) or the phone's own camera app (HD), not from this stream. Videos: 1080p.
       video: mode === 'video'
         ? { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
-        : { facingMode: { ideal: facing }, width: { ideal: 4032 }, height: { ideal: 3024 } },
+        : { facingMode: { ideal: facing }, width: { ideal: 2560 }, height: { ideal: 1920 }, frameRate: { ideal: 30, max: 30 } },
       audio: mode === 'video',
     });
   } catch (e) {
@@ -306,7 +308,6 @@ async function openStream() {
   }
   els.video.srcObject = stream;
   els.video.classList.toggle('mirror', facing === 'user');
-  els.preview.classList.toggle('mirror', facing === 'user');
   try { await els.video.play(); } catch { /* autoplay will resume on gesture */ }
   if (!els.video.videoWidth) await new Promise((r) => { els.video.onloadedmetadata = r; setTimeout(r, 1500); });
   const track = stream.getVideoTracks()[0];
@@ -383,48 +384,21 @@ function setLook(k) {
 
 function toggleBeauty() {
   beautyOn = !beautyOn;
-  store.set('ps:beauty', beautyOn ? 'on' : 'off');
+  store.set('ps:beauty2', beautyOn ? 'on' : 'off');
   els.beautyChip.setAttribute('aria-pressed', String(beautyOn));
   applyLookPreview();
   if (els.lookName) {
-    els.lookName.textContent = beautyOn ? 'Beauty on' : 'Beauty off';
+    els.lookName.textContent = beautyOn ? 'Beauty on (added to the saved photo)' : 'Beauty off';
     els.lookName.classList.remove('show'); void els.lookName.offsetWidth; els.lookName.classList.add('show');
   }
 }
 
 /**
- * Live preview: runs the exact same look + Beauty code as the photo, on a small copy of each
- * camera frame, so the viewfinder shows what will be saved. Videos record without looks, so the
- * preview is plain in video mode. Drops to a smaller size on slow phones.
+ * Live preview: the camera's own video, full resolution and full speed. A look is shown with a
+ * close GPU (CSS) version of it; the exact look and Beauty are applied to the saved photo.
  */
-let previewOn = false, previewEdge = 480, previewBusy = false, frameMs = 0;
 function applyLookPreview() {
-  const want = mode === 'photo' && (look !== 'none' || beautyOn);
-  els.vf.classList.toggle('previewing', want);
-  if (want && !previewOn) { previewOn = true; requestAnimationFrame(previewFrame); }
-  if (!want) previewOn = false;
-}
-function previewFrame() {
-  if (!previewOn || !els.video || !document.body.contains(els.video)) { previewOn = false; return; }
-  requestAnimationFrame(previewFrame);
-  const v = els.video;
-  if (previewBusy || document.hidden || !v.videoWidth) return;
-  previewBusy = true;
-  try {
-    const t0 = performance.now();
-    const scale = Math.min(1, previewEdge / Math.max(v.videoWidth, v.videoHeight));
-    const w = Math.max(1, Math.round(v.videoWidth * scale)), hh = Math.max(1, Math.round(v.videoHeight * scale));
-    const c = els.preview;
-    if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(v, 0, 0, w, hh);
-    const img = ctx.getImageData(0, 0, w, hh);
-    renderPixels(img.data, w, hh, look, { beauty: beautyOn ? BEAUTY : 0, grain: 0.4 });
-    ctx.putImageData(img, 0, 0);
-    frameMs = frameMs ? frameMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
-    if (frameMs > 55 && previewEdge > 320) { previewEdge = 320; frameMs = 0; }
-  } catch { /* a dropped frame is fine */ }
-  previewBusy = false;
+  els.vf.dataset.look = mode === 'photo' && look in LOOKS ? look : 'none';
 }
 
 /** Process the full-size photo in a worker so the camera never freezes; falls back to the main thread. */
@@ -488,24 +462,41 @@ async function onShutter() {
     if (flashOn && facing === 'environment' && els.torch && !realFlash) { await torch(true); await new Promise((r) => setTimeout(r, 300)); }
     if (flashOn && facing === 'user') { els.flashFx.style.opacity = '1'; await new Promise((r) => setTimeout(r, 250)); }
     const canvas = (await fullResStill(realFlash)) || drawScaled(v, v.videoWidth, v.videoHeight, MAX_EDGE);
-    let blur = -1;
-    try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
     if (flashOn) { torch(false); els.flashFx.style.opacity = ''; }
     els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
     if (navigator.vibrate) navigator.vibrate(15);
-    await new Promise((r) => requestAnimationFrame(r));
-    await processPhoto(canvas, look, { beauty: beautyOn ? BEAUTY : 0 });
-    if (ev.dateStamp) stampDate(canvas);
-    const blob = await encodeBest(canvas);
-    const thumb = await encodePreview(canvas);
-    await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
-    showLastShot(thumb);
-    if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
+    develop(canvas, { look, beauty: beautyOn ? BEAUTY : 0 });
   } catch (e) {
     toast('Couldn’t take that photo. Try again.', 'error');
   } finally {
     els.shutter.disabled = shotsLeft() <= 0;
   }
+}
+
+/** Finish a photo in the background, one at a time, so the shutter is ready again right away. */
+let developChain = Promise.resolve();
+function develop(canvas, { look: lk, beauty }) {
+  developing++;
+  renderCounter(true);
+  developChain = developChain.then(async () => {
+    try {
+      let blur = -1;
+      try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
+      await processPhoto(canvas, lk, { beauty });
+      if (ev.dateStamp) stampDate(canvas);
+      const blob = await encodeBest(canvas);
+      const thumb = await encodePreview(canvas);
+      developing--;
+      await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
+      showLastShot(thumb);
+      if (blur >= 0 && blur < 40) toast('That one looks blurry. Hold still for the next shot.');
+    } catch {
+      developing--;
+      renderCounter();
+      toast('Couldn’t save that photo. Try again.', 'error');
+    }
+    canvas.width = 0; canvas.height = 0; // free the memory
+  });
 }
 
 /** A still from the camera's photo pipeline (full sensor resolution, proper processing), or null. */
@@ -543,15 +534,8 @@ async function fromCameraApp(file) {
     const src = await decodeImage(file);
     const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
     src.done();
-    let blur = -1;
-    try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
     els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
-    await processPhoto(canvas, look, { beauty: beautyOn ? BEAUTY : 0 });
-    if (ev.dateStamp) stampDate(canvas);
-    const blob = await encodeBest(canvas);
-    const thumb = await encodePreview(canvas);
-    await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
-    showLastShot(thumb);
+    develop(canvas, { look, beauty: beautyOn ? BEAUTY : 0 });
   } catch {
     toast('Couldn’t read that photo. Try again.', 'error');
   } finally {
