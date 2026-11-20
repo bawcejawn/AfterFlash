@@ -1,7 +1,7 @@
 {
   "name": "Rememberoll",
   "short_name": "Rememberoll",
-  "start_url": "./index.html",
+  "start_url": "./app.html",
   "scope": "./",
   "id": "./",
   "display": "standalone",
@@ -33,5 +33,52 @@
       "purpose": "maskable"
     }
   ],
-  "description": "Event camera: guests shoot, hosts share."
+  "description": "The event camera and invitation app: guests scan a code to shoot and RSVP, hosts get every photo and a live guest list.",
+  "categories": [
+    "photo",
+    "lifestyle",
+    "social"
+  ],
+  "orientation": "any",
+  "display_override": [
+    "standalone"
+  ],
+  "shortcuts": [
+    {
+      "name": "Scan a code",
+      "short_name": "Scan",
+      "url": "./app.html#scan",
+      "icons": [
+        {
+          "src": "assets/img/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "My events",
+      "short_name": "My events",
+      "url": "./app.html#mine",
+      "icons": [
+        {
+          "src": "assets/img/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Host",
+      "short_name": "Host",
+      "url": "./app.html#host",
+      "icons": [
+        {
+          "src": "assets/img/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
 }

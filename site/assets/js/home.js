@@ -1,41 +1,14 @@
-import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config, knownStudio, myStudios } from './util.js';
+import { $, h, clear, frameGuard, isEventId, store, link, fmtWhen, config, myStudios, inStoreApp } from './util.js';
 import { api } from './api.js';
-import { isStandalone, lastPlace } from './install.js';
+import { isStandalone, lastPlace, myEvents } from './install.js';
 
 frameGuard();
 
-// ---- events this phone has joined (kept in this browser only)
-function myEvents() {
-  const out = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i) || '';
-    const m = /^ps:g:([^:]+):([A-Za-z0-9]{6,20})$/.exec(k);
-    if (!m || !knownStudio(m[1]) || !isEventId(m[2])) continue;
-    const a = store.get(k) || {};
-    out.push({ studio: m[1], id: m[2], name: typeof a.name === 'string' ? a.name : m[2], lastUsed: Number(a.lastUsed) || 0, key: k });
-  }
-  return out.sort((x, y) => y.lastUsed - x.lastUsed);
-}
-
-const events = myEvents();
-// Opened from the home-screen icon: go straight to whatever this phone used last, once per
-// launch. Tapping the logo later shows this page (all your events), so you can switch.
-// Guest cameras count for 3 days; a dashboard for 30. Never more than an event code in a link.
-function launchTarget() {
-  const cam = events[0] && Date.now() - events[0].lastUsed < 3 * 864e5 ? events[0] : null;
-  const place = lastPlace();
-  const dash = place && Date.now() - place.t < 30 * 864e5 ? place : null;
-  if (dash && (!cam || dash.t >= cam.lastUsed)) {
-    return dash.p === 'host' ? link('host.html', { e: dash.e, s: dash.s }) : link('admin.html', { s: dash.s });
-  }
-  return cam ? link('cam.html', { e: cam.id, s: cam.studio }) : null;
-}
+// Opened from the home-screen icon: the app home is the start page (once per launch, so the
+// logo on any page still brings people here to switch events).
 let launched = false;
 try { launched = sessionStorage.getItem('ps:launched') === '1'; sessionStorage.setItem('ps:launched', '1'); } catch { /* private mode */ }
-if (isStandalone() && !launched) {
-  const to = launchTarget();
-  if (to) location.replace(to);
-}
+if (isStandalone() && !launched) location.replace('app.html');
 
 const box = $('#my-events');
 function renderMine() {
@@ -92,6 +65,7 @@ if (cloud) {
   const msg = $('#buy-msg');
   const box = $('#plans');
   if (!plans.length) msg.textContent = 'Sales open soon.';
+  if (inStoreApp()) { plans.length = 0; msg.textContent = 'Plans aren’t sold in the app. Already have a key? Sign in to host.'; }
 
   // Referral codes: ?ref=CODE links are remembered for 60 days on this device, or typed in the box.
   const REF_KEY = 'ps:ref', REF_DAYS = 60;

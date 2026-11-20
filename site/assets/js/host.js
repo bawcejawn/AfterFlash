@@ -45,7 +45,7 @@ async function boot() {
   }
   applyBrand(ev);
   setTitle(ev.name + ' host');
-  if (!key.startsWith('admin:')) rememberPlace('host', studio, eventId);
+  if (!key.startsWith('admin:')) rememberPlace('host', studio, eventId, ev.name);
   await loadItems();
   render();
   pollT = setInterval(() => { if (!document.hidden) loadItems(true); }, 15000);

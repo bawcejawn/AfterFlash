@@ -4,7 +4,7 @@
 //   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID                       (required)
 //   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY       (secrets; DATA_KEY optional)
 //   GOOGLE_CLIENT_ID, PRICE_EVENT / PRICE_MONTH / PRICE_YEAR (dollars), SUPPORT_EMAIL,
-//   BUSINESS_NAME, APP_NAME, SITE_ORIGIN, GOOGLE_SITE_VERIFICATION                              (plain settings; all optional)
+//   BUSINESS_NAME, APP_NAME, SITE_ORIGIN, GOOGLE_SITE_VERIFICATION, ANDROID_PACKAGE, ANDROID_CERT_SHA256 (plain settings; all optional)
 //   SHARDS (how many extra databases, 0–20), ACTIVE_SHARD (e.g. SHARD_1: where new events go)   (scaling; see docs/SCALING.md)
 // Never prints secret values (this repository's Actions logs are public).
 import { execFileSync } from 'node:child_process';
@@ -67,6 +67,11 @@ if (!origin) {
 }
 if (!/^https:\/\/[a-z0-9.-]+$/i.test(origin)) fail('SITE_ORIGIN must look like https://photos.example.com (no path).');
 
+// Google Play (optional): the app's package name and signing-key fingerprints, served as
+// /.well-known/assetlinks.json so Android opens the site as the app without a browser bar.
+if (env.ANDROID_PACKAGE && !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(env.ANDROID_PACKAGE)) fail('ANDROID_PACKAGE must look like com.example.app');
+if (env.ANDROID_CERT_SHA256 && !String(env.ANDROID_CERT_SHA256).toUpperCase().replace(/\s+/g, '').split(',').every((f) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(f))) fail('ANDROID_CERT_SHA256 must be SHA-256 fingerprints like AB:CD:… (comma-separated if more than one).');
+
 // 3. Config for this deployment
 const vars = {
   APP_NAME: env.APP_NAME || 'Rememberoll',
@@ -75,6 +80,8 @@ const vars = {
   SUPPORT_EMAIL: env.SUPPORT_EMAIL || '',
   BUSINESS_NAME: env.BUSINESS_NAME || '',
   GOOGLE_SITE_VERIFICATION: env.GOOGLE_SITE_VERIFICATION || '',
+  ANDROID_PACKAGE: env.ANDROID_PACKAGE || '',
+  ANDROID_CERT_SHA256: (env.ANDROID_CERT_SHA256 || '').toUpperCase().replace(/\s+/g, ''),
   PRICE_EVENT: env.PRICE_EVENT || '5',
   PRICE_MONTH: env.PRICE_MONTH || '10',
   PRICE_YEAR: env.PRICE_YEAR || '30',

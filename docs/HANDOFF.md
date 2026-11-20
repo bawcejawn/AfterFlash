@@ -54,6 +54,15 @@ Naming history: **PhotoShare** → **AfterFlash** (Nov 18) → **Rememberoll** (
 - `backend/Code.gs`: the Apps Script backend (self-host mode).
 - `docs/`: LAUNCH (paid setup, Parts 1–8), PARTNERS, SCALING, CHECKLIST, SETUP/README (self-host), ARCHITECTURE. `contract/` and KOINOS.md are a leftover Koinos feature, removed from the UI.
 
+## The phone app (built Nov 19; see docs/APP-STORES.md)
+
+- **`app.html` + `app.js`:** the app home, and the manifest's `start_url`. A "Continue" card (last camera within 3 days, or last dashboard), then big tiles: **Scan a code**, **My events**, **Host**, **Partner** (paid version only). Hash routes `#scan`, `#mine`, `#host`, `#partner`; long-press shortcuts in the manifest.
+- **Scanner:** `BarcodeDetector` where available, otherwise vendored **jsQR** (`assets/vendor/jsQR.js`, Apache-2.0). `safeTarget()` only opens a bare event code or a link to our own pages on the **same origin**, so a fake QR sticker can't send guests elsewhere.
+- **What the phone remembers** (`install.js`): `ps:places` (dashboards: page, studio, event code, name; never a key; a host place needs "Remember me"), `ps:g:*` (events joined), `ps:rsvp:*` (invitations replied to, with the event name and answer).
+- **index.html** in standalone mode jumps to the app home once per launch; tapping the logo anywhere comes back.
+- **Google Play prep:** the worker serves `/.well-known/assetlinks.json` from the GitHub variables `ANDROID_PACKAGE` and `ANDROID_CERT_SHA256` (validated in deploy and at request time). `inStoreApp()` (util.js) detects the Play wrapper (an `android-app://` referrer) and **hides plan purchases** there (Play Billing rules).
+- **Not done:** the actual Play listing (needs the final name, the domain and the owner's Play account) and Apple (needs $99/yr, a Mac, and review).
+
 ## Invitations + RSVPs (built Nov 19)
 
 - **Host:** the **Invitations** tab on the host dashboard. Turn it on, fill in hosted by, start/end time, venue + address (Maps button), dress code, a note (line breaks kept), cover photo, RSVP deadline and a guest limit (counts plus-ones and children). Questions the host can turn on: selfie with the reply (default on, host-only), plus-ones with names (max party 1–10), children count, a meal per person (up to 4 choices), dietary needs, song request, a message. Optional "Who's coming" shows first name + last initial of Yes guests (never photos). Replies list with totals, meal counts, search, filters, delete, and CSV (formula-injection guarded).
