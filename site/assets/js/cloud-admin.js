@@ -460,3 +460,27 @@ export function ordersPanel({ studio, adminKey }) {
   load();
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: print orders'), body);
 }
+
+/** Planners: the business name and website shown as "Planned by …" on every event's invitation and album. */
+export function plannerPanel({ studio, adminKey, me }) {
+  const b = me.brand || {};
+  const name = h('input', { name: 'bname', type: 'text', maxlength: 60, value: b.name || '', placeholder: 'e.g. Bright Day Events' });
+  const url = h('input', { name: 'burl', type: 'text', inputmode: 'url', autocomplete: 'url', maxlength: 200, value: b.url || '', placeholder: 'https://…' });
+  const save = h('button', { class: 'btn small primary', type: 'submit' }, 'Save');
+  const form = h('form', { class: 'panel stack section' },
+    h('h2', null, 'Planner branding'),
+    h('p', { class: 'small muted' }, 'Run events for clients? Add your business and every invitation and album shows “Planned by” with a link to your site. Hand each client their host link from the event list. To set up a new event fast, choose “Start from” when you create it.'),
+    h('div', { class: 'grid-form' },
+      h('label', { class: 'field' }, h('span', null, 'Business name'), name),
+      h('label', { class: 'field' }, h('span', null, 'Website (optional)'), url)),
+    h('div', { class: 'row' }, save, h('span', { class: 'small muted' }, 'Leave the name empty to turn it off.')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); save.disabled = true;
+    try {
+      const r = await api(studio, 'adminBrand', { k: adminKey, brand: { name: name.value, url: url.value.trim() } });
+      me.brand = r.brand; toast(r.brand ? 'Saved. It shows on all your events.' : 'Planner branding is off.', 'ok');
+    } catch (err) { toast(err.message, 'error'); }
+    save.disabled = false;
+  });
+  return form;
+}

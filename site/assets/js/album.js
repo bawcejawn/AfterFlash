@@ -5,7 +5,7 @@ import { urlCache,
   downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
 import { mediaBlob } from './crypto.js';
-import { applyBrand, logoEl } from './brand.js';
+import { applyBrand, logoEl, plannerCredit } from './brand.js';
 import { api } from './api.js';
 import { enhance, canvasToBlob } from './film.js';
 import { openComposer, renderNotes } from './guestbook.js';
@@ -93,7 +93,7 @@ function render() {
   const tabBar = tabs.length > 1 ? h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([id, label]) =>
     h('button', { role: 'tab', 'aria-selected': String(view === id), onclick: () => { view = id; render(); } }, label))) : null;
   const body = h('div');
-  clear(root).append(head, tabBar, body);
+  clear(root).append(head, tabBar, body, plannerCredit(ev) || '');
   if (view === 'mine' && auth) return renderMine(body);
   if (view === 'guestbook' && ev.guestbook) return renderGuestbook(body);
   renderAlbum(body, r);

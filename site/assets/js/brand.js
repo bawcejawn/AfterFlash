@@ -10,6 +10,14 @@ export function applyBrand(ev) {
   document.documentElement.dataset.font = FONTS[ev.font] ? ev.font : 'modern';
 }
 
+/** "Planned by Bright Day Events" for planners' events (Cloud). Only https links. */
+export function plannerCredit(ev) {
+  const p = ev && ev.planner;
+  if (!p || !p.name) return null;
+  return h('p', { class: 'planner-credit small muted' }, 'Planned by ',
+    /^https:\/\//i.test(p.url || '') ? h('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, p.name) : h('b', null, p.name));
+}
+
 /** Only real PNG/JPEG/WebP bytes become a logo (never SVG or anything else). */
 export function logoBytesOk(mime, d) {
   if (!d || d.length < 12) return false;

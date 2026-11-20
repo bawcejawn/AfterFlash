@@ -156,6 +156,7 @@ function publicEvent(ev) {
     enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pin_hash, revealed: isRevealed(s), now: Date.now(),
     invite: s.invite.on, coverV: ev.cover ? ev.cover.v : '',
     captions: s.captions && !s.encrypted, challenges: s.challenges.on ? s.challenges.list : [],
+    planner: ev.brand || undefined,
   };
 }
 async function wallKey(ev) { return (await sha256Hex(ev.host_hash + ':wall')).slice(0, 32); }
@@ -180,6 +181,7 @@ async function loadEvent(c, id) {
   if (row.logo && !row.logo.id) row.logo = null;
   row.cover = row.cover ? parseJson(row.cover) : null;
   if (row.cover && !row.cover.id) row.cover = null;
+  row.brand = row.brand ? cleanBrand(parseJson(row.brand)) : null;
   return row;
 }
 async function accountOf(c, ev) {
@@ -775,6 +777,7 @@ A.adminCheck = async (c, req) => {
     plan: a.kind === 'owner' ? 'lifetime' : (a.plan || 'lifetime'), expires: a.kind === 'owner' ? 0 : Number(a.expires) || 0, expired: expired(a),
     maxEvents: Number(a.max_events) || 0, eventsUsed: (await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id)).n,
     holdUntil: Number(a.expires) > 0 && a.kind !== 'owner' && a.plan !== 'partner' ? Number(a.expires) + LIMITS.HOLD_MS : 0,
+    planner: plannerOk(a), brand: plannerOk(a) ? cleanBrand(parseJson(a.brand || '')) : null,
     partner: await partnerView(c, a) } };
 };
 
@@ -828,7 +831,10 @@ A.adminList = async (c, req) => {
 
 A.adminCreate = async (c, req) => {
   const a = await authAccount(c, req);
-  const settings = sanitizeSettings(req.settings || {});
+  // "Start from" another event of this account: copy its settings, look, challenges, messages and invitation design.
+  const tpl = req.from ? await loadEvent(c, req.from).catch(() => null) : null;
+  if (req.from && (!tpl || tpl.account !== a.id)) throw err('not_found', 'The event to copy wasn’t found.');
+  const settings = sanitizeSettings(tpl ? fromTemplate(tpl.settings, req.settings || {}) : (req.settings || {}));
   if (!settings.name) throw err('bad_request', 'Event name required');
   if (!a.refresh_enc) throw err('drive_not_connected', 'Connect your Google Drive first: it’s where your photos are saved.');
   const n = await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ? AND deleted = 0', a.id);
@@ -851,8 +857,10 @@ A.adminCreate = async (c, req) => {
   }
   const hostKey = randomKey(32);
   const ek = settings.encrypted ? await seal(c.env, randomKey(32)) : '';
-  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc, shard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek, activeShard(c.env));
+  const brand = plannerOk(a) ? cleanBrand(parseJson(a.brand || '')) : null;
+  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc, shard, logo, brand) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek, activeShard(c.env),
+    tpl && tpl.logo ? JSON.stringify(tpl.logo) : '', brand ? JSON.stringify(brand) : '');
   return { id, hostKey };
 };
 
@@ -1263,7 +1271,7 @@ function inviteView(ev) {
   const s = ev.settings, i = s.invite;
   return {
     id: ev.id, name: s.name, date: s.date, accent: s.accent, font: s.font, tagline: s.tagline,
-    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '',
+    logoV: ev.logo ? ev.logo.v : '', coverV: ev.cover ? ev.cover.v : '', planner: ev.brand || undefined,
     hosts: i.hosts, startsAt: i.startsAt, endsAt: i.endsAt, tz: i.tz, venue: i.venue, address: i.address, dress: i.dress, note: i.note,
     deadline: i.deadline, closed: !!i.deadline && Date.now() > Date.parse(i.deadline),
     photo: i.photo && !s.encrypted, plusOnes: i.plusOnes, maxParty: i.plusOnes ? i.maxParty : 1, kids: i.kids,
@@ -1680,6 +1688,37 @@ A.ownerOrderStatus = async (c, req) => {
   const r = await c.run("UPDATE orders SET status = ?, note = ? WHERE id = ? AND status != 'pending'", status, cleanText(req.note, 120), str(req.order, 20));
   if (!r.meta.changes) throw err('not_found', 'Order not found');
   return { ok: true };
+};
+
+// ---- planner tools (any plan with unlimited events: 1 month, 12 months, lifetime)
+const plannerOk = (a) => a.kind === 'owner' || (a.plan !== 'event' && a.plan !== 'partner');
+function cleanBrand(b) {
+  if (!b || typeof b !== 'object') return null;
+  const name = cleanText(b.name, 60);
+  const url = /^https:\/\/[^\s<>"'`\\]{3,200}$/i.test(String(b.url || '')) ? String(b.url) : '';
+  return name ? { name, url } : null;
+}
+/** A new event's settings from a template: everything except the event-specific parts. */
+function fromTemplate(t, req) {
+  const s = JSON.parse(JSON.stringify(t));
+  s.name = req.name; s.date = req.date || ''; s.closesAt = req.closesAt || ''; s.opensAt = ''; s.revealAt = '';
+  s.encrypted = req.encrypted === true; s.paused = false;
+  s.invite = { ...s.invite, on: false, startsAt: '', endsAt: '', deadline: '', hosts: '', venue: '', address: '' };
+  return s;
+}
+/** Planner: set the business name and website shown as "Planned by …" on all of this account's events. */
+A.adminBrand = async (c, req) => {
+  const a = await authAccount(c, req);
+  if (!plannerOk(a)) throw err('plan_limit', 'Planner branding comes with the 1-month and 12-month plans.');
+  if (req.brand !== undefined) {
+    const raw = req.brand || {};
+    if (raw.url && !/^https:\/\//i.test(String(raw.url))) throw err('bad_request', 'The website must start with https://');
+    const b = cleanBrand(raw);
+    await c.run('UPDATE accounts SET brand = ? WHERE id = ?', b ? JSON.stringify(b) : '', a.id);
+    await c.run('UPDATE events SET brand = ?, v = ? WHERE account = ?', b ? JSON.stringify(b) : '', randomId(8), a.id);
+    return { brand: b };
+  }
+  return { brand: cleanBrand(parseJson(a.brand || '')) };
 };
 
 export const ACTIONS = A;

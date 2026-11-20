@@ -738,6 +738,30 @@ t('prints and photo books: owner prices, photos only, Stripe shipping, paid once
   assert.equal((await s.call({ a: 'hostOrder', e: ev.id, k: hk, kind: 'book', ids })).error, 'not_configured');
 });
 
+t('planner tools: branding on every event, start from another event, not on the 1-event plan', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const a = await s.call({ a: 'adminCreate', k, settings: { name: 'Smith wedding', shotsPerGuest: 7, challenges: { on: true, list: ['First dance'] }, invite: { on: true, hosts: 'Ann & Bo', venue: 'Barn', note: 'Parking out back' } } });
+  assert.equal((await s.call({ a: 'adminCheck', k })).me.planner, true);
+  assert.equal((await s.call({ a: 'adminBrand', k, brand: { name: 'Bright Day Events', url: 'javascript:alert(1)' } })).error, 'bad_request');
+  const b = await s.call({ a: 'adminBrand', k, brand: { name: '<b>Bright</b> Day Events', url: 'https://brightday.example' } });
+  assert.deepEqual(b.brand, { name: 'bBright/b Day Events', url: 'https://brightday.example' });
+  assert.equal((await s.call({ a: 'event', e: a.id })).event.planner.name, 'bBright/b Day Events', 'existing events get it');
+  const t2 = await s.call({ a: 'adminCreate', k, from: a.id, settings: { name: 'Jones wedding', date: '2027-09-01', shotsPerGuest: 99 } });
+  const ev2 = (await s.call({ a: 'hostGet', e: t2.id, k: 'admin:' + k })).event;
+  assert.equal(ev2.name, 'Jones wedding'); assert.equal(ev2.settings.shotsPerGuest, 7, 'copied from the template');
+  assert.deepEqual(ev2.settings.challenges.list, ['First dance']);
+  assert.equal(ev2.settings.invite.on, false); assert.equal(ev2.settings.invite.hosts, ''); assert.equal(ev2.settings.invite.note, 'Parking out back');
+  assert.equal(ev2.planner.url, 'https://brightday.example', 'new events get the brand');
+  const other = await hostWithDrive(s, { sub: 'google-sub-other' });
+  assert.equal((await s.call({ a: 'adminCreate', k: other, from: a.id, settings: { name: 'Steal' } })).error, 'not_found', 'only your own events');
+  await s.call({ a: 'adminBrand', k, brand: null });
+  assert.equal((await s.call({ a: 'event', e: a.id })).event.planner, undefined);
+  const one = await hostWithDrive(s, { sub: 'google-sub-one', plan: 'event' });
+  assert.equal((await s.call({ a: 'adminBrand', k: one, brand: { name: 'X' } })).error, 'plan_limit');
+  assert.equal((await s.call({ a: 'adminCheck', k: one })).me.planner, false);
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

@@ -5,7 +5,7 @@ import {
   $, h, clear, toast, params, studioFrom, isEventId, store, setTitle, link, frameGuard, blobToBase64, base64ToBytes, copy, fmtDate, randomId,
 } from './util.js';
 import { api } from './api.js';
-import { applyBrand, logoEl, logoBytesOk } from './brand.js';
+import { applyBrand, logoEl, logoBytesOk, plannerCredit } from './brand.js';
 
 frameGuard();
 const root = $('#app');
@@ -169,7 +169,7 @@ function render() {
     h('p', null, 'Open the camera to take photos for the shared album.'),
     h('a', { class: 'btn flash big', href: cameraUrl() }, 'Open the camera')) : null;
   clear(root).append(h('div', { class: 'invite-page' }, cam, card, rsvpSection(), whoComing(),
-    h('p', { class: 'small muted invite-foot' }, 'Your reply goes only to the host.')));
+    h('p', { class: 'small muted invite-foot' }, 'Your reply goes only to the host.'), plannerCredit(inv)));
 }
 
 function whoComing() {
