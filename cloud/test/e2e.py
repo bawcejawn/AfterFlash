@@ -84,7 +84,9 @@ with sync_playwright() as p:
     page.screenshot(path=f"{SHOTS}/04-connected.png", full_page=True)
 
     # ---- create an event
-    page.fill("input[name=name]", "Sam & Alex")
+    page.fill("input[name=name]", "Sam & Alex"); page.fill("input[name=date]", "2027-06-12")
+    page.click(".tpl-picker >> text=Blank")
+    page.click("summary:has-text('More options')")
     page.fill("input[name=shotsPerGuest]", "3")
     page.click("text=Create event")
     expect(page.locator(".keybox")).to_contain_text("host.html", timeout=20000)
@@ -139,6 +141,7 @@ with sync_playwright() as p:
     album.goto(f"{BASE}/album.html?e={event_id}")
     expect(album.locator(".planner-credit a")).to_have_text("Bright Day Events", timeout=15000)
     assert album.locator(".planner-credit a").get_attribute("href") == "https://brightday.example"
+    page.click("summary:has-text('More options')")
     page.select_option("select[name=from]", event_id)
     expect(page.locator("text=Copies the look")).to_be_visible()
     assert not page.locator("input[name=shotsPerGuest]").is_visible()

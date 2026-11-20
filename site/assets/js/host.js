@@ -7,7 +7,8 @@ import { api } from './api.js';
 import { LOOKS } from './film.js';
 import { voicePlayer } from './guestbook.js';
 import { mediaBlob } from './crypto.js';
-import { applyBrand, logoEl, logoBlob, prepareLogo, FONTS } from './brand.js';
+import { applyBrand, logoEl, logoBlob, logoImage, prepareLogo, FONTS } from './brand.js';
+import { tableCardsPanel } from './table-cards.js';
 import { ownStudio, blobToBase64 } from './util.js';
 import { installButton, rememberPlace } from './install.js';
 import { invitationsTab } from './host-invite.js';
@@ -52,10 +53,15 @@ async function boot() {
   pollT = setInterval(() => { if (!document.hidden) loadItems(true); }, 15000);
 }
 
+/** hostList and hostUpdate don't repeat who you are (host or co-host); keep it from hostGet. */
+function keepAccess(next) {
+  return ev ? { ...next, role: next.role || ev.role, cohost: next.cohost != null ? next.cohost : ev.cohost } : next;
+}
+
 async function loadItems(quiet) {
   try {
     const r = await api(studio, 'hostList', { e: eventId, k: key }, { retries: quiet ? 0 : 2 });
-    ev = r.event;
+    ev = keepAccess(r.event);
     const changed = r.v !== version;
     version = r.v;
     items = r.items.filter((x) => isDriveId(x.i)).sort((a, b) => b.c - a.c);
@@ -121,7 +127,7 @@ function renderTab() {
 
 // ------------------------------------------------------------------ share
 function inviteTab() {
-  invitationsTab({ studio, eventId, key, body: bodyEl, getEv: () => ev, setEv: (x) => { ev = x; applyBrand(ev); }, rerender: () => { tab = 'invite'; renderTabs(); renderTab(); } });
+  invitationsTab({ studio, eventId, key, body: bodyEl, getEv: () => ev, setEv: (x) => { ev = keepAccess(x); applyBrand(ev); }, rerender: () => { tab = 'invite'; renderTabs(); renderTab(); } });
 }
 
 function linkRow(label, url, help) {
@@ -147,10 +153,11 @@ function shareTab() {
       ev.settings.invite && ev.settings.invite.on ? linkRow('Invitation link', link('invite.html', { e: eventId, s: studio }), 'Guests RSVP here. See the Invitations tab for replies.') : null,
       linkRow('TV wall', wallUrl(), 'Open on a laptop or smart TV browser, then press Start the show. Safe to display: it has no host access.'),
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
-      ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them. ',
-        h('button', { class: 'btn small', onclick: downloadAll }, 'Download all (unlocked)')) : h('p', null, h('button', { class: 'btn small', onclick: downloadAll }, 'Download all photos and videos'), ' ', h('span', { class: 'small muted' }, 'Zipped in your browser; works for co-hosts too.')),
+      ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them.') : null,
+      downloadBox(),
       h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs Rememberoll can open it.)'),
-      h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))));
+      h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))),
+    tableCardsPanel({ ev, eventId, guestUrl: guestUrl(), logo: () => logoImage(studio, eventId, ev) }));
 }
 
 function downloadQr() {
@@ -289,31 +296,63 @@ async function viewOne(it) {
   } catch (e) { if (w) w.close(); toast(e.message, 'error'); }
 }
 
-/** Private storage: Drive only holds locked files, so download everything through the app in zip parts. */
-async function downloadAll() {
+/** Folder and file name inside the zip: sorted by challenge or by guest, or flat. */
+function zipName(it, n, ext, folders) {
+  const clean = (x, max) => String(x || '').normalize('NFKD').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, max);
+  const top = clean(ev.name, 40) || eventId;
+  const file = `${String(n).padStart(4, '0')}${it.g ? '-' + clean(it.g, 20) : ''}.${ext}`;
+  if (folders === 'challenge') {
+    const list = (ev.settings.challenges && ev.settings.challenges.list) || [];
+    const i = it.ch ? list.indexOf(it.ch) : -1;
+    const dir = it.ch ? `${String(i >= 0 ? i + 1 : list.length + 1).padStart(2, '0')}-${clean(it.ch, 40)}` : 'No-challenge';
+    return `${top}/${dir}/${file}`;
+  }
+  if (folders === 'guest') return `${top}/${clean(it.g, 30) || 'Guest'}/${file}`;
+  return `${top}/${file}`;
+}
+
+/** Download every photo and video, zipped in the browser (in parts for big albums). Works for co-hosts and private storage. */
+async function downloadAll(folders = 'challenge', bar = null) {
   const list = items.filter((x) => x.s !== 'deleted');
-  if (!list.length) return;
+  if (!list.length) { toast('No photos yet.'); return; }
   const { makeZip } = await import('./zip.js');
   const PART = 150 * 1024 * 1024; // keeps memory use sane on laptops; more parts for big albums
-  let files = [], size = 0, part = 1, done = 0;
-  const flush = () => {
+  let files = [], size = 0, part = 1, done = 0, skipped = 0;
+  if (bar) { bar.hidden = false; bar.max = list.length; bar.value = 0; }
+  const flush = (last) => {
     if (!files.length) return;
-    saveBlob(makeZip(files), `${eventId}-album-part${part}.zip`);
+    saveBlob(makeZip(files), part === 1 && last ? `${eventId}-album.zip` : `${eventId}-album-part${part}.zip`);
     part++; files = []; size = 0;
   };
   for (const it of list) {
-    toast(`Unlocking ${++done} of ${list.length}…`);
+    done++;
+    if (bar) bar.value = done; else toast(`Getting ${done} of ${list.length}…`);
     try {
       const blob = await origBlob(it);
-      const ext = EXT[blob.type] || 'bin';
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      if (size + bytes.length > PART) flush();
-      files.push({ name: `${eventId}-${String(done).padStart(4, '0')}${it.g ? '-' + it.g.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20) : ''}.${ext}`, bytes });
+      if (size + bytes.length > PART) flush(false);
+      files.push({ name: zipName(it, done, EXT[blob.type] || 'bin', folders), bytes });
       size += bytes.length;
-    } catch (e) { toast(`Skipped one: ${e.message}`, 'error'); }
+    } catch (e) { skipped++; }
   }
-  flush();
-  toast(`Album downloaded (${done} items)`, 'ok');
+  flush(true);
+  if (bar) bar.hidden = true;
+  toast(`Album downloaded (${done - skipped} items${skipped ? `, ${skipped} skipped` : ''})`, skipped ? 'error' : 'ok');
+}
+
+/** The Share tab's download box: choose folders, then one button. */
+function downloadBox() {
+  const hasCh = !!(ev.settings.challenges && ev.settings.challenges.on);
+  const sel = h('select', { class: 'dl-select', 'aria-label': 'Folders in the zip' },
+    h('option', { value: 'challenge' }, hasCh ? 'Folders by challenge' : 'Folders by challenge (none set)'),
+    h('option', { value: 'guest' }, 'Folders by guest'),
+    h('option', { value: 'flat' }, 'No folders'));
+  if (!hasCh) sel.value = 'guest';
+  const bar = h('progress', { class: 'dl-progress', hidden: true, 'aria-label': 'Download progress' });
+  const btn = h('button', { class: 'btn small', onclick: async () => { btn.disabled = true; try { await downloadAll(sel.value, bar); } finally { btn.disabled = false; } } },
+    ev.encrypted ? 'Download all (unlocked)' : 'Download all photos and videos');
+  return h('div', { class: 'stack' }, h('div', { class: 'row' }, btn, sel), bar,
+    h('span', { class: 'small muted' }, 'Zipped in your browser. Works for co-hosts too.'));
 }
 
 async function downloadFavorites() {
@@ -438,7 +477,8 @@ function settingsTab() {
       h('label', { class: 'field' }, h('span', null, 'Photo reveal'), revealSel),
       h('label', { class: 'field' }, h('span', null, 'Reveal at'), inp('revealAt', { type: 'datetime-local', value: isoToLocalInput(s.revealAt) }), h('small', null, 'Only used for “develop later”. Blank means you reveal manually by switching to live.')),
       h('label', { class: 'field' }, h('span', null, 'Camera opens'), inp('opensAt', { type: 'datetime-local', value: isoToLocalInput(s.opensAt) })),
-      h('label', { class: 'field' }, h('span', null, 'Album closes'), inp('closesAt', { type: 'datetime-local', value: isoToLocalInput(s.closesAt) }), h('small', null, 'The TV wall shows a last call 45 minutes before.'))),
+      h('label', { class: 'field' }, h('span', null, 'Album closes'), inp('closesAt', { type: 'datetime-local', value: isoToLocalInput(s.closesAt) }), h('small', null, 'No new photos after this. The TV wall shows a last call 45 minutes before.')),
+      h('label', { class: 'field' }, h('span', null, 'Album disappears on'), inp('archiveAt', { type: 'datetime-local', value: isoToLocalInput(s.archiveAt) }), h('small', null, 'Optional. After this, guest links say “This album has been archived.” Your photos stay in your Google Drive and on this dashboard.'))),
       check('paused', 'Pause uploads now', 'Photos guests take are kept on their phones and upload when you resume.')),
     h('fieldset', null, h('legend', null, 'Safety and privacy'),
       h('p', { class: 'small' }, ev.encrypted ? 'Private storage: on. Files are locked in Drive; only this app can open them.' : 'Private storage: off. Photos are normal files in your Drive folder. (Private storage is chosen when an event is created.)'),
@@ -459,7 +499,7 @@ function settingsTab() {
       name: fd.get('name'), date: fd.get('date'), accent: fd.get('accent'), welcome: fd.get('welcome'), font: fd.get('font'), tagline: fd.get('tagline'),
       shotsPerGuest: Number(fd.get('shotsPerGuest')), maxGuests: Number(fd.get('maxGuests')), maxVideoSec: Number(fd.get('maxVideoSec')),
       look: fd.get('look'), reveal: fd.get('reveal'),
-      revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')),
+      revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')), archiveAt: localInputToIso(fd.get('archiveAt')),
     };
     for (const k of ['allowVideo', 'guestLooks', 'beauty', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports', 'enhance', 'guestbook']) settings[k] = fd.get(k) === 'on';
     settings.captions = fd.get('captions') === 'on';
@@ -471,7 +511,7 @@ function settingsTab() {
     if (fd.get('clearPin') === 'on') payload.pin = '';
     else if (pin) payload.pin = pin;
     try {
-      ev = (await api(studio, 'hostUpdate', payload)).event;
+      ev = keepAccess((await api(studio, 'hostUpdate', payload)).event);
       applyBrand(ev);
       toast('Settings saved', 'ok');
       render();
@@ -604,15 +644,46 @@ function securityTab() {
   const remembered = !!store.get(keyName());
   bodyEl.append(h('div', { class: 'stack narrow' },
     h('h2', null, 'Who can manage this event'),
-    h('p', null, 'Anyone with the host link can moderate, change settings and download originals. Share it only with people you trust, like your planner or a co-host.'),
+    h('p', null, 'Anyone with the host link can moderate, change settings and download originals. Never share it with guests.'),
     key.startsWith('admin:') ? h('p', { class: 'muted' }, 'You opened this dashboard from the studio admin page, using your admin key.') : h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: remembered, onchange: (e) => { if (e.target.checked) store.set(keyName(), key); else store.del(keyName()); toast(e.target.checked ? 'This device will stay signed in' : 'You’ll need the host link next time'); } }),
       h('span', null, 'Remember me on this device', h('small', null, 'Leave off on shared computers.'))),
     key.startsWith('admin:') ? null : h('div', { class: 'stack' }, h('h3', null, 'Open it from your phone’s home screen'),
       h('p', null, 'Tick “Remember me on this device” first, then add the icon. Only do this on your own phone.'), installButton('host')),
     h('hr', { class: 'divider' }),
-    h('h3', null, 'Make a new host link'),
-    h('p', null, 'Turns off the old host link and the TV wall link immediately. Use it if a link was shared by mistake.'),
-    h('button', { class: 'btn danger', onclick: rotate }, 'Make a new host link')));
+    cohostSection(),
+    ev.role === 'cohost' ? null : h('hr', { class: 'divider' }),
+    ev.role === 'cohost' ? null : h('h3', null, 'Make a new host link'),
+    ev.role === 'cohost' ? null : h('p', null, 'Turns off the old host link and the TV wall link immediately. Use it if a link was shared by mistake.'),
+    ev.role === 'cohost' ? null : h('button', { class: 'btn danger', onclick: rotate }, 'Make a new host link')));
+}
+
+/** Co-host (free): one extra host link for a partner or planner. It can do everything except change host links. */
+function cohostSection() {
+  const box = h('div', { class: 'stack' });
+  const draw = (newKey) => {
+    clear(box).append(h('h3', null, 'Co-host (free)'));
+    if (ev.role === 'cohost') { box.append(h('p', null, 'You’re a co-host. You can do everything here except replace the host links. The main host can turn off your link.')); return; }
+    box.append(h('p', null, 'Perfect for a partner or planner. One co-host per event. They can moderate, change settings, see RSVPs and download photos. Only you can replace host links or turn theirs off.'));
+    if (newKey) {
+      const url = link('host.html', { e: eventId, s: studio, frag: { k: newKey } });
+      box.append(h('p', { class: 'callout' }, 'Send this link to your co-host. It won’t be shown again.'),
+        h('div', { class: 'keybox' }, url), h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => copy(url) }, 'Copy co-host link')));
+    }
+    box.append(h('div', { class: 'row' },
+      h('button', { class: 'btn', onclick: () => make() }, ev.cohost ? 'Make a new co-host link' : 'Create co-host link'),
+      ev.cohost ? h('button', { class: 'btn danger', onclick: revoke }, 'Turn off co-host link') : null,
+      ev.cohost && !newKey ? h('span', { class: 'small muted' }, 'A co-host link is active.') : null));
+  };
+  async function make() {
+    if (ev.cohost && !confirm('Make a new co-host link? The current one stops working right away.')) return;
+    try { const r = await api(studio, 'hostCohost', { e: eventId, k: key, op: 'create' }); ev.cohost = true; draw(r.cohostKey); } catch (e) { toast(e.message, 'error'); }
+  }
+  async function revoke() {
+    if (!confirm('Turn off the co-host link? It stops working right away.')) return;
+    try { await api(studio, 'hostCohost', { e: eventId, k: key, op: 'revoke' }); ev.cohost = false; draw(); toast('Co-host link turned off.', 'ok'); } catch (e) { toast(e.message, 'error'); }
+  }
+  draw();
+  return box;
 }
 
 async function rotate() {

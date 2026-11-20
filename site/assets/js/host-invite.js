@@ -85,7 +85,7 @@ export function invitationsTab(ctx) {
       const btn = h('button', { class: 'btn small primary', type: 'button', disabled: !count, onclick: () => send(kind, btn, extra ? thanks.value : undefined) }, count ? `Send to ${count}` : 'Nobody yet');
       return h('div', { class: 'msg-row' }, h('div', null, h('b', null, title), h('small', null, help)), btn);
     };
-    const KIND = { invite: 'Invitation', reminder: 'Reminder', camera: 'Camera is open', photos: 'Photos are ready', thanks: 'Thank-you note' };
+    const KIND = { invite: 'Invitation', reminder: 'Reminder', camera: 'Camera is open', photos: 'Photos are ready', thanks: 'Thank-you note', recap: 'Recap to you' };
     clear(messages).append(
       h('h2', null, 'Messages'),
       h('div', { class: 'stack' },
@@ -103,11 +103,13 @@ export function invitationsTab(ctx) {
         row('Remind people who haven’t replied', 'Invited, but no RSVP yet.', 'reminder', n.reminder),
         row('The camera is open', 'To guests who said Yes or Maybe and gave an email.', 'camera', n.camera),
         row('The photos are ready', 'The album link, to guests who said Yes.', 'photos', n.photos),
-        h('div', { class: 'stack' }, h('b', null, 'Thank-you note'), thanks, row('Send the thank-you note', 'With the album link, to guests who said Yes.', 'thanks', n.thanks, true))),
+        h('div', { class: 'stack' }, h('b', null, 'Thank-you note'), thanks, row('Send the thank-you note', 'With the album link, to guests who said Yes.', 'thanks', n.thanks, true)),
+        row('Email me a recap now', 'How many photos, videos and messages came in, with the album link. Only to you.', 'recap', n.recap)),
       h('div', { class: 'stack' }, h('h3', null, 'Send automatically'),
         autoBox('autoReminder', 'Remind people 3 days before the RSVP deadline', 'Only people who haven’t replied.'),
         autoBox('autoCamera', 'Tell guests when the camera opens', 'About an hour before the start time.'),
-        autoBox('autoPhotos', 'Send the album link the morning after', 'Includes your thank-you note if you wrote one.')),
+        autoBox('autoPhotos', 'Send the album link the morning after', 'Includes your thank-you note if you wrote one.'),
+        autoBox('autoRecap', 'Email me a recap the morning after', 'Photo counts and the album link. Only to you.')),
       m.log && m.log.length ? h('div', { class: 'stack' }, h('h3', null, 'Sent'), h('ul', { class: 'msg-log' }, m.log.map((x) => h('li', null, `${KIND[x.kind] || x.kind}: ${x.sent} ${x.sent === 1 ? 'email' : 'emails'}, ${new Date(x.at).toLocaleString()}${x.auto ? ' (automatic)' : ''}`)))) : null,
       h('details', null, h('summary', null, 'Or use your own email app'), ownApp));
   }

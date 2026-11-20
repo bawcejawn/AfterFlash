@@ -14,8 +14,8 @@ export function cleanEmail(v) {
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /** One simple, readable email. All text is escaped; links are our own https URLs. */
-export function render({ app, heading, paras, button, unsub }) {
-  const text = [heading, '', ...paras.flatMap((p) => [p, '']), button ? `${button.label}: ${button.url}` : '', '', `Don’t want these emails? ${unsub}`].join('\n');
+export function render({ app, heading, paras, button, unsub, reason = 'You got this because the host added you to their event.', stopLabel = 'Stop emails about this event', made = null }) {
+  const text = [heading, '', ...paras.flatMap((p) => [p, '']), button ? `${button.label}: ${button.url}` : '', '', made ? `${made.label}: ${made.url}` : '', `${reason} ${stopLabel}: ${unsub}`].join('\n');
   const html = `<!doctype html><html><body style="margin:0;background:#eef1fb;font-family:Arial,Helvetica,sans-serif;color:#1d2433">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1fb;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden">
@@ -24,7 +24,8 @@ export function render({ app, heading, paras, button, unsub }) {
 ${paras.map((p) => `<p style="margin:0 0 14px;font-size:16px;line-height:1.5">${esc(p).replace(/\n/g, '<br>')}</p>`).join('\n')}
 ${button ? `<p style="margin:22px 0 26px"><a href="${esc(button.url)}" style="display:inline-block;background:#f2c230;color:#2a2000;text-decoration:none;font-weight:bold;padding:14px 22px;border-radius:999px">${esc(button.label)}</a></p>` : ''}
 </td></tr>
-<tr><td style="padding:0 24px 24px;font-size:12px;color:#6b7484">You got this because the host added you to their event. <a href="${esc(unsub)}" style="color:#6b7484">Stop emails about this event</a></td></tr>
+${made ? `<tr><td style="padding:0 24px 12px;font-size:13px;color:#3d4560"><a href="${esc(made.url)}" style="color:#2c45c9">${esc(made.label)}</a></td></tr>` : ''}
+<tr><td style="padding:0 24px 24px;font-size:12px;color:#6b7484">${esc(reason)} <a href="${esc(unsub)}" style="color:#6b7484">${esc(stopLabel)}</a></td></tr>
 </table></td></tr></table></body></html>`;
   return { html, text };
 }

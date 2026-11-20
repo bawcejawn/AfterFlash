@@ -56,6 +56,7 @@ jobs:
           MAIL_FROM: ${{ vars.MAIL_FROM }}
           PRINT_PRICE: ${{ vars.PRINT_PRICE }}
           BOOK_PRICE: ${{ vars.BOOK_PRICE }}
+          GUEST_OFFER_CODE: ${{ vars.GUEST_OFFER_CODE }}
           ANDROID_PACKAGE: ${{ vars.ANDROID_PACKAGE }}
           ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: node scripts/deploy.mjs

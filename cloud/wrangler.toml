@@ -36,5 +36,7 @@ MAIL_FROM = ""
 # Prints and photo books: price per 4x6 print and per book, in dollars. Empty or 0 = not offered.
 PRINT_PRICE = ""
 BOOK_PRICE = ""
+# Guest-to-host offer on albums and photo emails: an active partner code (e.g. GUEST20, 0% commission). Empty = off.
+GUEST_OFFER_CODE = ""
 ANDROID_PACKAGE = ""
 ANDROID_CERT_SHA256 = ""
