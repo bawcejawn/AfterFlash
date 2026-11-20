@@ -57,6 +57,7 @@ jobs:
           PRINT_PRICE: ${{ vars.PRINT_PRICE }}
           BOOK_PRICE: ${{ vars.BOOK_PRICE }}
           GUEST_OFFER_CODE: ${{ vars.GUEST_OFFER_CODE }}
+          STRIPE_TOS: ${{ vars.STRIPE_TOS }}
           STORAGE_BUCKET: ${{ vars.STORAGE_BUCKET }}
           STORAGE_GB_COST: ${{ vars.STORAGE_GB_COST }}
           STORAGE_MARKUP: ${{ vars.STORAGE_MARKUP }}

@@ -38,8 +38,8 @@ PRINT_PRICE = ""
 BOOK_PRICE = ""
 # Guest-to-host offer on albums and photo emails: an active partner code (e.g. GUEST20, 0% commission). Empty = off.
 GUEST_OFFER_CODE = ""
-# Rememberoll storage price: your R2 cost per GB-month × markup, charged per 12 months.
+# Rememberoll storage: $10 / $40 / $100 for 25 / 100 / 250 GB per 12 months. Set STORAGE_MARKUP to price by cost × markup instead.
 STORAGE_GB_COST = "0.015"
-STORAGE_MARKUP = "50"
+STORAGE_MARKUP = ""
 ANDROID_PACKAGE = ""
 ANDROID_CERT_SHA256 = ""

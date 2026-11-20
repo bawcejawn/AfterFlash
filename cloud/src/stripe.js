@@ -106,6 +106,7 @@ export async function createOrderCheckout(env, { order, kind, count, copies, amo
     'line_items[0][quantity]': '1',
     success_url: `${env.SITE_ORIGIN}/order.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${env.SITE_ORIGIN}/order.html?cancelled=1`,
+    'consent_collection[terms_of_service]': env.STRIPE_TOS === 'required' ? 'required' : 'none',
     'custom_text[submit][message]': 'Printed and shipped within about 2 weeks. Made to order, so all sales are final.',
   };
   COUNTRIES.forEach((cc, i) => { form[`shipping_address_collection[allowed_countries][${i}]`] = cc; });
@@ -131,15 +132,20 @@ export async function readOrderCheckout(env, id) {
 
 // ---- Rememberoll storage (Cloudflare R2), sold in packs for 12 months at a time
 export const STORAGE_PACKS = [25, 100, 250]; // GB
+/** Default prices per 12 months, in cents. A full 25 GB costs about $4.50 a year on R2. */
+export const STORAGE_DEFAULT_PRICES = { 25: 1000, 100: 4000, 250: 10000 };
 /**
- * Price in cents for `gb` of space for `years`: the owner's monthly cost per GB (STORAGE_GB_COST,
- * default R2's $0.015) × STORAGE_MARKUP (default 50), per 12 months. One month of what the
- * customer pays covers well over 12 months of the owner's cost.
+ * Price in cents for `gb` of space for `years`. Default: $10 / $40 / $100 per 12 months.
+ * If the owner sets STORAGE_MARKUP, the price is instead GB × STORAGE_GB_COST (default R2's
+ * $0.015 per GB-month) × STORAGE_MARKUP, per 12 months.
  */
 export function storagePrice(env, gb, years = 1) {
-  const cost = Number(env.STORAGE_GB_COST) > 0 ? Number(env.STORAGE_GB_COST) : 0.015;
-  const markup = Number(env.STORAGE_MARKUP) > 0 ? Number(env.STORAGE_MARKUP) : 50;
-  return Math.max(100, Math.round(gb * cost * markup * 100) * years);
+  const markup = Number(env.STORAGE_MARKUP);
+  if (markup > 0) {
+    const cost = Number(env.STORAGE_GB_COST) > 0 ? Number(env.STORAGE_GB_COST) : 0.015;
+    return Math.max(100, Math.round(gb * cost * markup * 100) * years);
+  }
+  return (STORAGE_DEFAULT_PRICES[gb] || Math.round(gb * 40)) * years;
 }
 export async function createStorageCheckout(env, { account, gb, years }) {
   const amount = storagePrice(env, gb, years);
@@ -154,7 +160,8 @@ export async function createStorageCheckout(env, { account, gb, years }) {
       'line_items[0][quantity]': '1',
       success_url: `${env.SITE_ORIGIN}/admin.html?storage={CHECKOUT_SESSION_ID}`,
       cancel_url: `${env.SITE_ORIGIN}/admin.html`,
-      'custom_text[submit][message]': 'Space for your photos on Rememberoll’s own cloud. Paid once, no subscription.',
+      'consent_collection[terms_of_service]': env.STRIPE_TOS === 'required' ? 'required' : 'none',
+      'custom_text[submit][message]': 'Space for your photos on Rememberoll’s own cloud. Paid once, no subscription. All sales are final.',
     },
   });
   return s.url;

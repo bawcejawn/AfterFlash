@@ -825,16 +825,16 @@ t('Rememberoll storage: buy a pack, uploads go to R2, quota, Drive-full switch, 
   const R2 = fakeR2();
   const s = await boot({ STORE: R2 });
   const k = await hostWithDrive(s);
-  // offered with prices: 50 x $0.015/GB-month, for 12 months
+  // offered with prices: $10 / $40 / $100 for 12 months
   const me = (await s.call({ a: 'adminCheck', k })).me;
   assert.equal(me.storage.active, false);
-  assert.deepEqual(me.storage.packs.map((p) => [p.gb, p.price]), [[25, 1875], [100, 7500], [250, 18750]]);
+  assert.deepEqual(me.storage.packs.map((p) => [p.gb, p.price]), [[25, 1000], [100, 4000], [250, 10000]]);
   const ev1 = await s.call({ a: 'adminCreate', k, settings: { name: 'Before' } });
   assert.equal((await s.call({ a: 'hostUseStorage', e: ev1.id, k: 'admin:' + k, on: true })).error, 'storage_needed');
   assert.equal((await s.call({ a: 'storageCheckout', k, gb: 7 })).error, 'bad_request');
   const co = await s.call({ a: 'storageCheckout', k, gb: 25, years: 2 });
   const sid = co.url.split('/').pop();
-  assert.equal(s.fk.sessions.get(sid).amount, 3750, '2 years');
+  assert.equal(s.fk.sessions.get(sid).amount, 2000, '2 years');
   assert.equal((await s.call({ a: 'storageClaim', k, session_id: sid })).error, 'not_paid');
   s.fk.pay(sid);
   const cl = await s.call({ a: 'storageClaim', k, session_id: sid });

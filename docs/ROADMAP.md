@@ -48,7 +48,7 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 29. **Prints.** Hosts order prints of chosen photos. You set the price and earn the margin. *Done.*
 30. **Photo book.** A 20-page hardcover book from the best photos. High margin. *Done.*
-31. **Rememberoll Storage.** We keep the originals for the host, so they don't need Google Drive. Costs us about $0.015 per GB a month (Cloudflare R2), so we sell it for $10–15 per event for 1 year. *Done* (50× your R2 cost, paid per 12 months).
+31. **Rememberoll Storage.** We keep the originals for the host, so they don't need Google Drive. Costs us about $0.015 per GB a month (Cloudflare R2), so we sell it for $10–15 per event for 1 year. *Done* ($10 / $40 / $100 for 25 / 100 / 250 GB per 12 months).
 32. **Keep-it-forever.** A one-time upgrade that keeps the album and invitation online past the plan. *Later.*
 33. **Time capsule unlock.** $5 to send the anniversary capsule (idea 14). *Later.*
 34. **Highlight video in HD with music.** The free version stays; a paid version gets licensed music and longer cuts. *Later.*
