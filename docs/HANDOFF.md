@@ -16,7 +16,7 @@ A PartyCam-style event camera. Guests scan a QR code and shoot a limited "roll" 
 
 Two ways to run it, from one codebase:
 
-1. **Free self-hosted:** the static site in `site/` on GitHub Pages, with a Google Apps Script backend (`backend/Code.gs`, version 1.11.0) in the host's own Google account. Friends can self-host through `setup.html`.
+1. **Free self-hosted:** the static site in `site/` on GitHub Pages, with a Google Apps Script backend (`backend/Code.gs`, version 1.12.0) in the host's own Google account. Friends can self-host through `setup.html`.
 2. **Rememberoll Cloud (paid):** a Cloudflare Worker in `cloud/` that serves `site/` plus `/api`, with a D1 database (SQLite), the Google Drive API (`drive.file` scope only) and Stripe Checkout (no webhooks; the thank-you page verifies the session). The site switches to cloud mode via `config.cloud`.
 
 Naming history: **PhotoShare** → **AfterFlash** (Nov 18) → **Rememberoll** (Nov 19). PhotoShare was dropped because "PHOTOSHARE" is a live US trademark (Switchmate Home LLC, reg. 6720657, classes 9/42). AfterFlash was dropped because an "Afterflash" photo/camera app launched in the App Store in Sept 2026, plus an "AFTERFLASH®" browser photo booth and a German AfterFlash skincare mark. FizzRoll was rejected (Fizz Social sues over "Fizz" in event apps); Unityroll was runner-up. Closest name to Rememberoll found: "Memory Roll" (getmemoryroll.com, a competing event camera). The owner should buy rememberoll.com and rememberroll.com and get an attorney's clearance before printing or recruiting partners. Only display text changed. Internal ids stay `photoshare` on purpose: worker name, D1 names `photoshare` and `photoshare-shard-N`, `ps:` localStorage keys, health id `app: 'photoshare'`. The GitHub repo is still named `AfterFlash` (renaming it changes the free site's address).
@@ -53,6 +53,13 @@ Naming history: **PhotoShare** → **AfterFlash** (Nov 18) → **Rememberoll** (
 - `cloud/scripts/deploy.mjs`: run by `.github/workflows/cloud.yml`. Creates and binds D1 databases and shards, applies migrations, deploys, sets secrets. Never prints secrets.
 - `backend/Code.gs`: the Apps Script backend (self-host mode).
 - `docs/`: LAUNCH (paid setup, Parts 1–8), PARTNERS, SCALING, CHECKLIST, SETUP/README (self-host), ARCHITECTURE. `contract/` and KOINOS.md are a leftover Koinos feature, removed from the UI.
+
+## Look + captions + photo challenges (built Nov 20)
+
+- **Look:** a "brand pass" at the end of `app.css`: cobalt header band on every app page (`body:not(.home) .topbar`), flat white panels on a cool mist page, cobalt primary buttons, colour-block tiles on the app home, stationery-style invitation card. Event pages still use each event's own accent.
+- **Captions:** guests tap **Aa Caption** on the camera; the caption rides with the next shot (`caption`, max 80, cleaned). Shown on album tiles, the lightbox and the TV wall. Off for private-storage events. Hosts can **Remove caption** per photo (`hostClearCaption`). Setting `captions` (default on).
+- **Photo challenges:** setting `challenges: { on, list }` (up to 15 prompts, "Use our ideas" fills 15). The camera shows one prompt; **Shoot it** tags the next photo, then moves to the next prompt. The server only accepts a challenge that is in the host's list. The album shows challenge filter chips; the host grid shows the tag.
+- **Storage:** Cloud migration 0007 + shard 0003 (`media.caption`, `media.challenge`); self-host `MEDIA_COLS` gained `caption`, `challenge` (Code.gs 1.12.0).
 
 ## The phone app (built Nov 19; see docs/APP-STORES.md)
 

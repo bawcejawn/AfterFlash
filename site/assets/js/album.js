@@ -19,6 +19,7 @@ let studio, eventId, ev, auth, pin = '';
 let items = [], version = '', timer = null, lbIndex = -1, lb = null, lastList = null;
 let view = ['mine', 'guestbook'].includes(q.get('view')) ? q.get('view') : 'album';
 let picksOnly = false;
+let challengeOnly = '';
 let mineItems = [];
 let enhanceOn = store.get('ps:enhance') === true;
 let albumKey = '';
@@ -136,12 +137,20 @@ function renderAlbum(body, r) {
     return;
   }
   const picks = items.filter((x) => x.f);
+  const challengeNames = [...new Set(items.map((x) => x.ch).filter(Boolean))];
+  if (challengeNames.length) {
+    body.append(h('div', { class: 'row album-filter challenge-filter', role: 'group', 'aria-label': 'Photo challenges' },
+      h('span', { class: 'small muted' }, 'Challenges:'),
+      challengeNames.map((n) => h('button', { class: 'btn small' + (challengeOnly === n ? ' primary' : ''), 'aria-pressed': String(challengeOnly === n), onclick: () => { challengeOnly = challengeOnly === n ? '' : n; render(); } },
+        `${n} (${items.filter((x) => x.ch === n).length})`))));
+  }
   if (picks.length) {
     body.append(h('div', { class: 'row album-filter' },
       h('button', { class: 'btn small' + (picksOnly ? '' : ' primary'), onclick: () => { picksOnly = false; render(); } }, `All (${items.length})`),
       h('button', { class: 'btn small' + (picksOnly ? ' primary' : ''), onclick: () => { picksOnly = true; render(); } }, `♥ Hosts’ picks (${picks.length})`)));
   }
-  const shown = picksOnly && picks.length ? picks : items;
+  let shown = picksOnly && picks.length ? picks : items;
+  if (challengeOnly) shown = shown.filter((x) => x.ch === challengeOnly);
   if (r.pending) body.append(h('p', { class: 'callout' }, `${r.pending} new photo${r.pending > 1 ? 's are' : ' is'} waiting for the hosts to approve.`));
   body.append(h('div', { class: 'masonry' }, shown.map((it, idx) => {
     const img = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo', loading: 'lazy', decoding: 'async' });
@@ -149,7 +158,8 @@ function renderAlbum(body, r) {
     if (ev.encrypted) whenVisible(img, () => proxyThumb(it.i).then((u) => { if (u) img.src = u; }).catch(() => img.classList.add('img-failed')));
     else loadDriveImage(img, it.k === 'v' && it.t ? it.t : it.i, 600, { proxy: () => proxyThumb(it.i) });
     const tile = h('button', { class: 'tile', onclick: () => openLb(shown, idx), 'aria-label': 'Open photo' }, img,
-      it.k === 'v' ? h('span', { class: 'vid' }, 'Video') : null, it.f ? h('span', { class: 'fav-badge', 'aria-label': 'Hosts’ pick' }, '♥') : null);
+      it.k === 'v' ? h('span', { class: 'vid' }, 'Video') : null, it.f ? h('span', { class: 'fav-badge', 'aria-label': 'Hosts’ pick' }, '♥') : null,
+      it.cap ? h('span', { class: 'tile-caption' }, it.cap) : null);
     return tile;
   })));
 }
@@ -229,7 +239,7 @@ function showLb() {
     media = h('video', { controls: true, playsinline: true });
     proxyThumb(it.i).then((u) => { if (u && token === showToken) media.poster = u; }).catch(() => {});
     lb.who.textContent = 'Loading video…';
-    fullMedia(it).then((b) => { if (token === showToken) { media.src = keepUrl(URL.createObjectURL(b)); lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', '); } })
+    fullMedia(it).then((b) => { if (token === showToken) { media.src = keepUrl(URL.createObjectURL(b)); lb.who.textContent = [it.cap ? `“${it.cap}”` : '', it.g, it.ch ? `Challenge: ${it.ch}` : '', fmtWhen(it.c)].filter(Boolean).join(', '); } })
       .catch((e) => { if (token === showToken) toast(e.message, 'error'); });
   } else if (it.k === 'v') {
     media = h('video', { controls: true, playsinline: true, preload: 'metadata', src: videoUrl(it.i) });
@@ -249,7 +259,7 @@ function showLb() {
     if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
   }
   clear(lb.stage).append(media);
-  lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', ');
+  lb.who.textContent = [it.cap ? `“${it.cap}”` : '', it.g, it.ch ? `Challenge: ${it.ch}` : '', fmtWhen(it.c)].filter(Boolean).join(', ');
   const canEnhance = ev.enhance && it.k !== 'v';
   lb.enh.hidden = !canEnhance;
   lb.enh.setAttribute('aria-pressed', String(enhanceOn));
@@ -279,7 +289,7 @@ async function applyEnhanced(img, it, token) {
     img.dataset.enhanced = '1';
     img.onload = null; img.onerror = null;
     img.src = url;
-    lb.who.textContent = [it.g, fmtWhen(it.c)].filter(Boolean).join(', ');
+    lb.who.textContent = [it.cap ? `“${it.cap}”` : '', it.g, it.ch ? `Challenge: ${it.ch}` : '', fmtWhen(it.c)].filter(Boolean).join(', ');
   } catch { if (token === showToken) toast('Couldn’t enhance this photo.', 'error'); }
 }
 

@@ -42,6 +42,11 @@ const GUESTS = [
     'To change it later, open the same link on the same phone and tap “Change my answer”.',
     'On another phone? Use the private link shown after you reply. Keep it to yourself: anyone with it can change your answer.',
     'Your reply and photo go only to the host.'] },
+  { id: 'challenges', q: 'Do a photo challenge or add a caption', steps: [
+    'If the hosts turned on challenges, a yellow card on the camera shows one, like “Selfie with the hosts”.',
+    'Tap “Shoot it”, then take the photo. The next challenge appears. Tap “Skip” for a different one.',
+    'To add a caption, tap “Aa Caption”, type it and tap Done. It goes with your next photo.',
+    'Captions show under your photo in the album and on the TV.'] },
 ];
 
 const HOSTS = [

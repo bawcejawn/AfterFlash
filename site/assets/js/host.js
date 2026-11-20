@@ -207,8 +207,15 @@ function photosTab() {
       h('div', { class: 'meta' }, h('span', { class: 'state ' + it.s }, label, /blurry/.test(it.f || '') ? ', blurry' : ''),
         h('button', { class: 'heart' + (it.fv ? ' on' : ''), 'aria-pressed': String(!!it.fv), 'aria-label': it.fv ? 'Remove from favorites' : 'Add to favorites', onclick: () => setFav([it.i], !it.fv) }, it.fv ? '♥' : '♡')),
       h('div', { class: 'meta' }, h('span', { class: 'muted' }, it.k === 'v' ? 'Video' : it.g)),
+      it.ch ? h('div', { class: 'meta' }, h('span', { class: 'challenge-tag' }, it.ch)) : null,
+      it.cap ? h('div', { class: 'meta mod-caption' }, h('span', null, `“${it.cap}”`), h('button', { class: 'linkbtn', onclick: () => clearCaption(it) }, 'Remove caption')) : null,
       h('div', { class: 'meta' }, h('span', null, h('button', { class: 'linkbtn', onclick: () => viewOne(it) }, 'Open'), ' ', h('button', { class: 'linkbtn', onclick: () => downloadOne(it) }, 'Download')), h('span', { class: 'muted' }, fmtWhen(it.c))));
   })));
+}
+
+async function clearCaption(it) {
+  try { await api(studio, 'hostClearCaption', { e: eventId, k: key, id: it.i }); it.cap = ''; toast('Caption removed', 'ok'); renderTab(); }
+  catch (e) { toast(e.message, 'error'); }
 }
 
 // Visible photos load from Google's image URLs; anything private (pending, hidden, reported),
@@ -383,6 +390,24 @@ async function block(g, yes) {
 }
 
 // ------------------------------------------------------------------ settings
+const CHALLENGE_IDEAS = ['Selfie with the hosts', 'Someone mid-laugh', 'The best dance move', 'A toast in action', 'Two generations in one photo',
+  'Your whole table together', 'The prettiest detail', 'Someone you just met', 'Shoes made for dancing', 'A candid hug',
+  'Dessert before it disappears', 'Your best photobomb', 'The view from your seat', 'Something blue', 'The last dance'];
+
+/** Captions and photo challenges: small extras that make guests take more (and better) photos. */
+function funFieldset(s) {
+  const ch = s.challenges || { on: false, list: [] };
+  const list = h('textarea', { name: 'challengeList', rows: 6, maxlength: 1000, placeholder: 'One challenge per line' }, (ch.list || []).join('\n'));
+  return h('fieldset', null, h('legend', null, 'Fun extras'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'captions', checked: s.captions !== false, disabled: ev.encrypted }),
+      h('span', null, 'Let guests add a caption to a photo', h('small', null, ev.encrypted ? 'Not available for private-storage events.' : 'Shown under the photo in the album and on the TV. You can remove any caption.'))),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'challengesOn', checked: !!ch.on }),
+      h('span', null, 'Photo challenges', h('small', null, 'The camera shows one prompt at a time, like “Selfie with the hosts”. The album groups the answers.'))),
+    h('label', { class: 'field' }, h('span', null, 'Challenges (up to 15)'), list,
+      h('div', { class: 'row' }, h('button', { class: 'btn small', type: 'button', onclick: () => { list.value = CHALLENGE_IDEAS.join('\n'); } }, 'Use our ideas'),
+        h('small', null, 'Edit them freely. Keep each one short.'))));
+}
+
 function settingsTab() {
   const s = ev.settings;
   const inp = (name, attrs = {}) => h('input', { name, ...attrs });
@@ -406,6 +431,7 @@ function settingsTab() {
       check('beauty', 'Beauty touch-up', 'Gently smooths skin and softens blemishes on faces. Guests can switch it off on their camera.'),
       check('dateStamp', 'Add a date stamp to photos'),
       check('allowLibrary', 'Allow uploads from the camera roll', 'Off keeps it a true disposable camera.')),
+    funFieldset(s),
     h('fieldset', null, h('legend', null, 'Timing'), h('div', { class: 'grid-form' },
       h('label', { class: 'field' }, h('span', null, 'Photo reveal'), revealSel),
       h('label', { class: 'field' }, h('span', null, 'Reveal at'), inp('revealAt', { type: 'datetime-local', value: isoToLocalInput(s.revealAt) }), h('small', null, 'Only used for “develop later”. Blank means you reveal manually by switching to live.')),
@@ -434,6 +460,10 @@ function settingsTab() {
       revealAt: localInputToIso(fd.get('revealAt')), opensAt: localInputToIso(fd.get('opensAt')), closesAt: localInputToIso(fd.get('closesAt')),
     };
     for (const k of ['allowVideo', 'guestLooks', 'beauty', 'dateStamp', 'allowLibrary', 'paused', 'approval', 'guestGallery', 'allowReports', 'enhance', 'guestbook']) settings[k] = fd.get(k) === 'on';
+    settings.captions = fd.get('captions') === 'on';
+    const list = String(fd.get('challengeList') || '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 15);
+    settings.challenges = { on: fd.get('challengesOn') === 'on' && list.length > 0, list };
+    if (fd.get('challengesOn') === 'on' && !list.length) { toast('Add at least one challenge, or turn challenges off.', 'error'); return; }
     const payload = { e: eventId, k: key, settings };
     const pin = String(fd.get('pin') || '').trim();
     if (fd.get('clearPin') === 'on') payload.pin = '';

@@ -817,6 +817,22 @@ t('invitations: RSVP with private edit token, caps, meals, deadline, host-only s
   assert.equal(env.post({ a: 'event', e: ev.id }).event.coverV, cv.coverV);
 });
 
+t('captions and photo challenges (self-host)', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { challenges: { on: true, list: ['Selfie with the hosts'] } } });
+  assert.deepEqual(env.post({ a: 'event', e: ev.id }).event.challenges, ['Selfie with the hosts']);
+  const gst = joinGuest(env, ev.id);
+  assert.equal(upload(env, ev.id, gst, { caption: '@everyone hi', challenge: 'Selfie with the hosts' }).ok, true);
+  upload(env, ev.id, gst, { caption: 'two', challenge: 'not a real one' });
+  const items = env.post({ a: 'list', e: ev.id }).items;
+  assert.equal(items[0].cap, 'everyone hi'); assert.equal(items[0].ch, 'Selfie with the hosts'); assert.equal(items[1].ch, '');
+  assert.equal(env.post({ a: 'hostList', e: ev.id, k: ev.hostKey }).items[1].cap, 'two');
+  env.post({ a: 'hostClearCaption', e: ev.id, k: ev.hostKey, id: items[1].i });
+  assert.equal(env.post({ a: 'list', e: ev.id }).items[1].cap, '');
+  assert.equal(env.post({ a: 'hostClearCaption', e: ev.id, k: 'bad', id: items[1].i }).error, 'unauthorized');
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }
