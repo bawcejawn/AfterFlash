@@ -72,7 +72,7 @@ async function signedIn(key, { show = false } = {}) {
 }
 
 async function dashboard(created) {
-  rememberPlace('admin', studio);
+  rememberPlace('admin', studio, '', 'Studio admin');
   clear(root).append(h('p', { class: 'muted' }, 'Loading events…'));
   let events = [];
   try { events = (await api(studio, 'adminList', { k: adminKey })).events; } catch (e) {

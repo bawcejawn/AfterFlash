@@ -130,6 +130,14 @@ export default {
     if (env.GOOGLE_SITE_VERIFICATION && url.pathname === `/${env.GOOGLE_SITE_VERIFICATION}` && /^google[a-z0-9]+\.html$/.test(env.GOOGLE_SITE_VERIFICATION)) {
       return new Response(`google-site-verification: ${env.GOOGLE_SITE_VERIFICATION}`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
+    // Google Play: lets the Android app open this site full screen (Digital Asset Links).
+    if (url.pathname === '/.well-known/assetlinks.json' && env.ANDROID_PACKAGE && env.ANDROID_CERT_SHA256) {
+      const prints = String(env.ANDROID_CERT_SHA256).split(',').filter((f) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(f));
+      if (/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(env.ANDROID_PACKAGE) && prints.length) {
+        return new Response(JSON.stringify([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: env.ANDROID_PACKAGE, sha256_cert_fingerprints: prints } }]),
+          { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
+      }
+    }
     if (url.pathname === '/setup.html') return redirect(`${env.SITE_ORIGIN}/index.html#pricing`); // self-hosting isn't offered here
     return env.ASSETS.fetch(request);
   },

@@ -8,7 +8,7 @@ workers_dev = true
 [assets]
 directory = "../site"
 binding = "ASSETS"
-run_worker_first = ["/api", "/oauth/*", "/config.js", "/setup.html", "/google*.html"]
+run_worker_first = ["/api", "/oauth/*", "/config.js", "/setup.html", "/google*.html", "/.well-known/*"]
 
 [[d1_databases]]
 binding = "DB"
@@ -32,3 +32,5 @@ GOOGLE_CLIENT_ID = ""
 SUPPORT_EMAIL = ""
 BUSINESS_NAME = ""
 GOOGLE_SITE_VERIFICATION = ""
+ANDROID_PACKAGE = ""
+ANDROID_CERT_SHA256 = ""

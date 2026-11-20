@@ -621,6 +621,18 @@ t('invitations: open link RSVPs with private edit token, caps, deadline, host-on
   assert.equal((await s.call({ a: 'event', e: ev.id })).event.coverV, cv.coverV);
 });
 
+t('Google Play: assetlinks.json only when package and fingerprint are set and valid', async () => {
+  const s = await boot();
+  assert.notEqual((await s.get('/.well-known/assetlinks.json')).headers.get('content-type'), 'application/json');
+  s.env.ANDROID_PACKAGE = 'com.rememberoll.app';
+  s.env.ANDROID_CERT_SHA256 = Array(32).fill('AB').join(':');
+  const j = await (await s.get('/.well-known/assetlinks.json')).json();
+  assert.equal(j[0].target.package_name, 'com.rememberoll.app');
+  assert.equal(j[0].target.sha256_cert_fingerprints.length, 1);
+  s.env.ANDROID_PACKAGE = 'evil"package';
+  assert.notEqual((await s.get('/.well-known/assetlinks.json')).headers.get('content-type'), 'application/json');
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

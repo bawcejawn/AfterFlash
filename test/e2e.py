@@ -311,6 +311,18 @@ with sync_playwright() as p:
     dl.value.save_as(f"{SHOTS}/highlight.{dl.value.suggested_filename.rsplit('.', 1)[-1]}")
     host.screenshot(path=f"{SHOTS}/16-highlight.png", full_page=True)
 
+    # ---- the app home: tiles, typed code, safety check, my events
+    ap = ictx_app = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page(); watch(ap, "app")
+    ap.goto(f"{BASE}/app.html")
+    expect(ap.locator(".app-tile")).to_have_count(3)  # no Partner tile on the free version
+    ap.click(".app-tile >> text=Scan a code")
+    ap.fill("#typed", "https://evil.example/cam.html?e=" + event_id); ap.click("text=Go")
+    expect(ap.locator("text=For your safety")).to_be_visible()
+    ap.fill("#typed", event_id); ap.click("text=Go")
+    ap.wait_for_url("**/cam.html*")
+    ap.goto(f"{BASE}/app.html#host")
+    expect(ap.locator("text=Sign in with my key")).to_be_visible()
+
     # ---- invitations: host turns it on, a guest RSVPs with a selfie, edits it, host sees it in the CSV
     host.goto(host_url)
     host.click("role=tab[name=Invitations]")

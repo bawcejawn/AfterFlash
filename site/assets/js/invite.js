@@ -319,7 +319,7 @@ function rsvpForm() {
     submit.disabled = true; submit.textContent = 'Sending…';
     try {
       const r = await api(studio, 'rsvp', payload, { retries: 2, timeout: 60000 });
-      auth = { r: r.r, rt: payload.rt };
+      auth = { r: r.r, rt: payload.rt, n: inv.name, st: status, t: Date.now() };
       store.set(authKey(), auth);
       store.del(authKey() + ':pending');
       try { localStorage.setItem(`ps:rsvpname:${studio}:${eventId}`, payload.name.slice(0, 24)); } catch { /* private mode */ }

@@ -293,6 +293,19 @@ export function registerSW() {
   }
 }
 
+/**
+ * True inside the Google Play version of the app (a Trusted Web Activity opens the site with an
+ * android-app:// referrer). Play requires its own billing for digital purchases, so the Play
+ * version doesn't sell plans; everything else works the same.
+ */
+export function inStoreApp() {
+  try {
+    if (/^android-app:\/\//.test(document.referrer)) sessionStorage.setItem('ps:store-app', '1');
+    return sessionStorage.getItem('ps:store-app') === '1';
+  } catch { return false; }
+}
+inStoreApp();
+
 export function setTitle(t) { document.title = t ? `${t} – ${config.appName}` : config.appName; }
 
 // Brand name from config on every page.

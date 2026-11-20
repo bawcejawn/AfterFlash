@@ -1,6 +1,6 @@
 // Rememberoll Cloud parts of the admin page: sign in with a bought admin key, "Lost your key?"
 // via Google, connect Google Drive (where every photo is saved), storage meter, owner tools.
-import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params } from './util.js';
+import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params, inStoreApp } from './util.js';
 import { api } from './api.js';
 
 export const CLOUD = !!config.cloud;
@@ -177,7 +177,7 @@ export function planPanel({ studio, adminKey, me }) {
     return me.role === 'owner' ? null : h('p', { class: 'small muted' }, 'Plan: Lifetime. Thank you!');
   }
   if (me.plan === 'partner') {
-    const ps = ((config.cloud && config.cloud.plans) || []).filter((p) => p.on);
+    const ps = inStoreApp() ? [] : ((config.cloud && config.cloud.plans) || []).filter((p) => p.on);
     return h('section', { class: 'panel stack plan-status' }, h('h2', null, 'Partner account'),
       h('p', null, 'This key shows your sales and payouts. To host your own events, buy a plan (partners pay full price, and their own purchases don’t earn commission).'),
       ps.length ? h('div', { class: 'row' }, ps.map((p) => h('button', { class: 'btn small', onclick: async (e) => {
@@ -188,7 +188,7 @@ export function planPanel({ studio, adminKey, me }) {
   }
   const left = Math.ceil((me.expires - Date.now()) / 86400000);
   const unlimitedActive = me.plan !== 'event' && !me.expired;
-  const plans = ((config.cloud && config.cloud.plans) || []).filter((p) => p.on && !(p.id === 'event' && unlimitedActive));
+  const plans = inStoreApp() ? [] : ((config.cloud && config.cloud.plans) || []).filter((p) => p.on && !(p.id === 'event' && unlimitedActive));
   const buy = async (plan, btn) => {
     btn.disabled = true;
     try {
