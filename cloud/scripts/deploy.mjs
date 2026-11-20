@@ -2,7 +2,7 @@
 // Deploys Rememberoll Cloud to Cloudflare (run by .github/workflows/cloud.yml, or locally).
 // Reads settings from environment variables (GitHub repository secrets/variables):
 //   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID                       (required)
-//   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY       (secrets; DATA_KEY optional)
+//   OWNER_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, DATA_KEY, RESEND_API_KEY (secrets; DATA_KEY and RESEND_API_KEY optional)
 //   GOOGLE_CLIENT_ID, PRICE_EVENT / PRICE_MONTH / PRICE_YEAR (dollars), SUPPORT_EMAIL,
 //   BUSINESS_NAME, APP_NAME, SITE_ORIGIN, GOOGLE_SITE_VERIFICATION, ANDROID_PACKAGE, ANDROID_CERT_SHA256 (plain settings; all optional)
 //   SHARDS (how many extra databases, 0–20), ACTIVE_SHARD (e.g. SHARD_1: where new events go)   (scaling; see docs/SCALING.md)
@@ -80,6 +80,7 @@ const vars = {
   SUPPORT_EMAIL: env.SUPPORT_EMAIL || '',
   BUSINESS_NAME: env.BUSINESS_NAME || '',
   GOOGLE_SITE_VERIFICATION: env.GOOGLE_SITE_VERIFICATION || '',
+  MAIL_FROM: env.MAIL_FROM || '',
   ANDROID_PACKAGE: env.ANDROID_PACKAGE || '',
   ANDROID_CERT_SHA256: (env.ANDROID_CERT_SHA256 || '').toUpperCase().replace(/\s+/g, ''),
   PRICE_EVENT: env.PRICE_EVENT || '5',
@@ -106,7 +107,7 @@ run(['deploy', '-c', cfg]);
 let existing = [];
 try { existing = JSON.parse(run(['secret', 'list', '--format', 'json', '-c', cfg])).map((s) => s.name); } catch { /* first deploy */ }
 const secrets = {};
-for (const k of ['OWNER_KEY', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'DATA_KEY']) if (env[k]) secrets[k] = env[k];
+for (const k of ['OWNER_KEY', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'DATA_KEY', 'RESEND_API_KEY']) if (env[k]) secrets[k] = env[k];
 if (!secrets.DATA_KEY && !existing.includes('DATA_KEY')) {
   secrets.DATA_KEY = crypto.randomBytes(32).toString('base64url');
   console.log('Generated DATA_KEY (kept only inside Cloudflare). Don’t delete it: it unlocks saved Google connections.');

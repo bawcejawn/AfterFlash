@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.12.0';
+var APP_VERSION = '1.13.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -55,7 +55,7 @@ var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 's
   'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav', 'caption', 'challenge'];
 var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status', 'clientId', 'dur'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
-var RSVP_COLS = ['id', 'tokenHash', 'name', 'status', 'party', 'kids', 'diet', 'song', 'message', 'photoId', 'clientId', 'createdAt', 'updatedAt', 'deleted'];
+var RSVP_COLS = ['id', 'tokenHash', 'name', 'status', 'party', 'kids', 'diet', 'song', 'message', 'photoId', 'clientId', 'createdAt', 'updatedAt', 'deleted', 'email'];
 var EVENT_COLS = ['id', 'name', 'createdAt', 'folderId', 'sheetId', 'hostKeyHash', 'settings', 'pinHash', 'deleted', 'createdBy'];
 
 // ---------------------------------------------------------------- entry points
@@ -128,6 +128,7 @@ var ACTIONS = {
   hostGuestbookModerate: aHostGuestbookModerate,
   hostSetCover: aHostSetCover,
   hostClearCaption: aHostClearCaption,
+  hostMessages: aHostMessages,
   hostRsvps: aHostRsvps,
   hostRsvpPhoto: aHostRsvpPhoto,
   hostRsvpDelete: aHostRsvpDelete,
@@ -671,7 +672,7 @@ function shortName_(n) {
 }
 
 function rsvpView_(r) {
-  return { id: r.id, name: String(r.name), status: r.status, party: partyOf_(r), kids: Number(r.kids) || 0, diet: String(r.diet || ''),
+  return { id: r.id, name: String(r.name), email: String(r.email || ''), status: r.status, party: partyOf_(r), kids: Number(r.kids) || 0, diet: String(r.diet || ''),
     song: String(r.song || ''), message: String(r.message || ''), hasPhoto: !!r.photoId, created: Number(r.createdAt), updated: Number(r.updatedAt) };
 }
 
@@ -740,6 +741,11 @@ function aRsvp(req) {
   var song = i.song && status !== 'no' ? cleanText_(req.song, 120) : '';
   var message = i.message ? cleanText_(req.message, 500) : '';
   var clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+  var email = '';
+  if (req.email) {
+    email = String(req.email).trim().toLowerCase();
+    if (email.length > 120 || !/^[^\s@<>()",;:\\\[\]]{1,64}@[^\s@<>()",;:\\\[\]]+\.[A-Za-z]{2,24}$/.test(email)) throw err_('bad_request', 'That email address doesn’t look right. Check it, or leave it blank.');
+  }
   var newPhoto = null;
   if (req.photo) {
     if (!i.photo || s.encrypted) throw err_('bad_request', 'Photos aren’t part of this invitation.');
@@ -779,16 +785,22 @@ function aRsvp(req) {
       var now = Date.now();
       var sh = rsvpSheet_(ev);
       var id = row ? row.id : randomId_(12);
-      var values = [id, row ? row.tokenHash : sha256Hex_(token), txt_(name), status, JSON.stringify(party), kids, txt_(diet), txt_(song), txt_(message), photoId, clientId, row ? Number(row.createdAt) : now, now, false];
+      var values = [id, row ? row.tokenHash : sha256Hex_(token), txt_(name), status, JSON.stringify(party), kids, txt_(diet), txt_(song), txt_(message), photoId, clientId, row ? Number(row.createdAt) : now, now, false, txt_(email)];
       if (row) sh.getRange(row.rowIndex, 1, 1, RSVP_COLS.length).setValues([values]);
       else sh.appendRow(values);
-      return rowObj_(RSVP_COLS, [id, '', name, status, JSON.stringify(party), kids, diet, song, message, photoId, clientId, values[11], now, false]);
+      return rowObj_(RSVP_COLS, [id, '', name, status, JSON.stringify(party), kids, diet, song, message, photoId, clientId, values[11], now, false, email]);
     });
   } catch (x) {
     trash(newPhotoId);
     throw x;
   }
   return { r: saved.id, rsvp: rsvpView_(saved) };
+}
+
+/** The free version doesn't send email; the host's own email app does (see the Invitations tab). */
+function aHostMessages(req) {
+  var ev = authHost_(req);
+  return { ready: false, selfHost: true, invitees: [], counts: {}, log: [], settings: ev.settings.messages };
 }
 
 function readCover_(eventId) {
@@ -1485,8 +1497,15 @@ function sanitizeSettings_(s) {
     tagline: cleanText_(s.tagline, 80),
     invite: sanitizeInvite_(s.invite),
     captions: s.captions !== false,
-    challenges: sanitizeChallenges_(s.challenges)
+    challenges: sanitizeChallenges_(s.challenges),
+    messages: sanitizeMessages_(s.messages)
   };
+}
+
+/** Message settings (sending email is a paid-version feature; the free version keeps the note for "open in my email app"). */
+function sanitizeMessages_(v) {
+  v = v && typeof v === 'object' ? v : {};
+  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, thanks: cleanLines_(v.thanks, 600) };
 }
 
 /** Photo challenges: up to 15 short prompts the host picks. */

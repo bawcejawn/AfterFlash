@@ -219,6 +219,7 @@ function rsvpForm() {
   let removePhoto = false;
   const err = h('p', { class: 'form-error', role: 'alert', hidden: true });
   const name = h('input', { type: 'text', name: 'name', maxlength: 60, required: true, autocomplete: 'name', value: (prev.party && prev.party[0] && prev.party[0].n) || prev.name || '' });
+  const email = h('input', { type: 'email', name: 'email', maxlength: 120, autocomplete: 'email', inputmode: 'email', value: prev.email || '', placeholder: 'Optional' });
   const statusRow = h('div', { class: 'rsvp-choices', role: 'radiogroup', 'aria-label': 'Will you come?' });
   const attending = h('div', { class: 'stack' });
   const mealSel = (val) => h('select', { class: 'meal' }, h('option', { value: '' }, 'Choose a meal'), inv.meals.map((m) => h('option', { value: m, selected: m === val }, m)));
@@ -291,6 +292,7 @@ function rsvpForm() {
   const form = h('form', { class: 'stack', novalidate: true },
     h('label', { class: 'field' }, h('span', null, 'Your name'), name),
     h('div', { class: 'field' }, h('span', null, 'Will you come?'), statusRow), spots,
+    h('label', { class: 'field' }, h('span', null, 'Your email'), email, h('small', null, 'Optional. For reminders and the link to the photos. Only the host sees it, and every email has a stop link.')),
     attending, err,
     h('div', { class: 'row' }, submit, mine ? h('button', { class: 'btn', type: 'button', onclick: () => { editing = false; render(); } }, 'Cancel') : null));
   form.addEventListener('submit', async (e) => {
@@ -302,7 +304,7 @@ function rsvpForm() {
     const going = status !== 'no';
     const n = size && going ? Number(size.value) - 1 : 0;
     const payload = {
-      e: eventId, name: name.value.trim(), status,
+      e: eventId, name: name.value.trim(), status, email: email.value.trim(),
       meal: going && myMeal ? myMeal.value : '',
       party: extraRows.slice(0, n).map((r) => ({ n: r.name.value.trim(), m: r.meal ? r.meal.value : '' })),
       kids: going && kids ? Number(kids.value) || 0 : 0,

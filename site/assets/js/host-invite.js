@@ -41,8 +41,76 @@ export function invitationsTab(ctx) {
           h('small', null, 'Text or email this link, or print the QR code on paper invitations. On the event day the same link shows a big “Open the camera” button.')),
         h('button', { class: 'btn small', onclick: () => downloadQr(url) }, 'Download QR code'))) : null);
 
-  body.append(h('div', { class: 'invite-host' }, onOff, i.on ? replies : null, detailsForm()));
-  if (i.on) loadReplies();
+  const messages = h('div', { class: 'stack' });
+  body.append(h('div', { class: 'invite-host' }, onOff, i.on ? replies : null, i.on ? messages : null, detailsForm()));
+  if (i.on) { loadReplies(); loadMessages(); }
+
+  // ---- messages (email)
+  async function loadMessages() {
+    let m, rs;
+    try { [m, rs] = await Promise.all([api(studio, 'hostMessages', { e: eventId, k: key }), api(studio, 'hostRsvps', { e: eventId, k: key })]); }
+    catch (e) { clear(messages).append(h('p', { class: 'form-error' }, e.message)); return; }
+    const ms = m.settings || {};
+    const coming = rs.rsvps.filter((x) => x.status === 'yes' && x.email).map((x) => x.email);
+    const all = [...new Set([...rs.rsvps.filter((x) => x.email).map((x) => x.email), ...(m.invitees || []).filter((x) => !x.optout).map((x) => x.email)])];
+    const mailto = (to, subject, body) => 'mailto:?bcc=' + encodeURIComponent(to.join(',')) + '&subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    const albumUrl = link('album.html', { e: eventId, s: studio }), camUrl = link('cam.html', { e: eventId, s: studio });
+    const ownApp = h('div', { class: 'stack' },
+      h('h3', null, 'Use your own email app'),
+      h('p', { class: 'small muted' }, 'Opens a new email with your guests in BCC, so they don’t see each other’s addresses.'),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn small', href: mailto(all, `You’re invited: ${ev.name}`, `We’d love for you to come! See the invitation and RSVP here:\n${url}`) }, `Invitation (${all.length})`),
+        h('a', { class: 'btn small', href: mailto(coming, `${ev.name}: the camera is open!`, `Take photos for our shared album, right from your phone:\n${camUrl}`) }, `Camera is open (${coming.length})`),
+        h('a', { class: 'btn small', href: mailto(coming, `Thank you from ${i.hosts || ev.name}`, `${ms.thanks || 'Thank you for celebrating with us!'}\n\nAll the photos are here:\n${albumUrl}`) }, `Thank-you + photos (${coming.length})`),
+        h('button', { class: 'btn small', type: 'button', disabled: !all.length, onclick: () => copy(all.join(', ')) }, 'Copy all emails')));
+    if (!m.ready) {
+      clear(messages).append(h('h2', null, 'Messages'),
+        h('p', { class: 'muted' }, m.selfHost ? 'Guests who give their email on the RSVP form are listed below. Send from your own email app.'
+          : 'Automatic emails aren’t switched on yet (owner: docs/LAUNCH.md, Part 9). Until then, send from your own email app.'), ownApp);
+      return;
+    }
+    const n = m.counts || {};
+    const send = async (kind, btn, note) => {
+      btn.disabled = true;
+      try { const r = await api(studio, 'hostSend', { e: eventId, k: key, kind, note }, { timeout: 60000 }); toast(r.sent ? `Sent to ${r.sent} ${r.sent === 1 ? 'person' : 'people'}` : 'Nobody to send to right now', 'ok'); loadMessages(); }
+      catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+    };
+    const emails = h('textarea', { rows: 4, placeholder: 'Paste email addresses: one per line, or separated by commas' });
+    const thanks = h('textarea', { rows: 3, maxlength: 600, placeholder: 'Thank you for celebrating with us! It meant the world.' }, ms.thanks || '');
+    const autoBox = (name, label, help) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!ms[name], onchange: async (e) => {
+      try { const r = await api(studio, 'hostUpdate', { e: eventId, k: key, settings: { messages: { ...ms, [name]: e.target.checked, thanks: thanks.value } } }); ctx.setEv(r.event); Object.assign(ms, r.event.settings.messages); toast('Saved', 'ok'); }
+      catch (x) { toast(x.message, 'error'); e.target.checked = !e.target.checked; }
+    } }), h('span', null, label, h('small', null, help)));
+    const row = (title, help, kind, count, extra) => {
+      const btn = h('button', { class: 'btn small primary', type: 'button', disabled: !count, onclick: () => send(kind, btn, extra ? thanks.value : undefined) }, count ? `Send to ${count}` : 'Nobody yet');
+      return h('div', { class: 'msg-row' }, h('div', null, h('b', null, title), h('small', null, help)), btn);
+    };
+    const KIND = { invite: 'Invitation', reminder: 'Reminder', camera: 'Camera is open', photos: 'Photos are ready', thanks: 'Thank-you note' };
+    clear(messages).append(
+      h('h2', null, 'Messages'),
+      h('div', { class: 'stack' },
+        h('h3', null, 'Guest emails'),
+        h('p', { class: 'small muted' }, `${(m.invitees || []).length} on your list. Guests who RSVP with an email are added automatically.`),
+        emails,
+        h('div', { class: 'row' }, h('button', { class: 'btn small', type: 'button', onclick: async () => {
+          const list = emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+          if (!list.length) return;
+          try { const r = await api(studio, 'hostAddInvitees', { e: eventId, k: key, emails: list }); toast(`Added ${r.added}` + (r.bad.length ? `. Couldn’t read: ${r.bad.join(', ')}` : ''), r.bad.length ? 'error' : 'ok'); emails.value = ''; loadMessages(); }
+          catch (e) { toast(e.message, 'error'); }
+        } }, 'Add to the list'))),
+      h('div', { class: 'msg-list' },
+        row('Send the invitation', 'To people on your list who haven’t been invited yet.', 'invite', n.invite),
+        row('Remind people who haven’t replied', 'Invited, but no RSVP yet.', 'reminder', n.reminder),
+        row('The camera is open', 'To guests who said Yes or Maybe and gave an email.', 'camera', n.camera),
+        row('The photos are ready', 'The album link, to guests who said Yes.', 'photos', n.photos),
+        h('div', { class: 'stack' }, h('b', null, 'Thank-you note'), thanks, row('Send the thank-you note', 'With the album link, to guests who said Yes.', 'thanks', n.thanks, true))),
+      h('div', { class: 'stack' }, h('h3', null, 'Send automatically'),
+        autoBox('autoReminder', 'Remind people 3 days before the RSVP deadline', 'Only people who haven’t replied.'),
+        autoBox('autoCamera', 'Tell guests when the camera opens', 'About an hour before the start time.'),
+        autoBox('autoPhotos', 'Send the album link the morning after', 'Includes your thank-you note if you wrote one.')),
+      m.log && m.log.length ? h('div', { class: 'stack' }, h('h3', null, 'Sent'), h('ul', { class: 'msg-log' }, m.log.map((x) => h('li', null, `${KIND[x.kind] || x.kind}: ${x.sent} ${x.sent === 1 ? 'email' : 'emails'}, ${new Date(x.at).toLocaleString()}${x.auto ? ' (automatic)' : ''}`)))) : null,
+      h('details', null, h('summary', null, 'Or use your own email app'), ownApp));
+  }
 
   // ---- replies
   async function loadReplies() {
@@ -77,6 +145,7 @@ export function invitationsTab(ctx) {
           h('h3', null, x.name, h('span', { class: `rsvp-pill rsvp-${x.status}` }, STATUS[x.status]),
             x.status !== 'no' ? h('span', { class: 'small muted' }, `${x.party.length + x.kids} ${x.party.length + x.kids === 1 ? 'person' : 'people'}`) : null),
           people ? h('p', null, people) : null,
+          x.email ? h('p', null, x.email) : null,
           x.kids ? h('p', null, `Children: ${x.kids}`) : null,
           x.diet ? h('p', null, `Dietary: ${x.diet}`) : null,
           x.song ? h('p', null, `Song: ${x.song}`) : null,
@@ -197,9 +266,9 @@ function downloadQr(url) {
 function downloadCsv(rsvps, name) {
   // Every cell is quoted, and a leading = + - @ is neutralised so spreadsheets never run it as a formula.
   const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""').replace(/^([=+\-@])/, "'$1") + '"';
-  const rows = [['Name', 'Reply', 'Party size', 'Guests (meal)', 'Children', 'Dietary needs', 'Song request', 'Message', 'Photo', 'Replied']];
+  const rows = [['Name', 'Email', 'Reply', 'Party size', 'Guests (meal)', 'Children', 'Dietary needs', 'Song request', 'Message', 'Photo', 'Replied']];
   for (const x of rsvps) {
-    rows.push([x.name, STATUS[x.status], x.status === 'no' ? 0 : x.party.length + x.kids, x.status === 'no' ? '' : x.party.map((p) => (p.m ? `${p.n} (${p.m})` : p.n)).join('; '),
+    rows.push([x.name, x.email || '', STATUS[x.status], x.status === 'no' ? 0 : x.party.length + x.kids, x.status === 'no' ? '' : x.party.map((p) => (p.m ? `${p.n} (${p.m})` : p.n)).join('; '),
       x.kids, x.diet, x.song, x.message, x.hasPhoto ? 'Yes' : '', new Date(x.updated).toISOString().slice(0, 16).replace('T', ' ')]);
   }
   const blob = new Blob(['﻿' + rows.map((r) => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' });

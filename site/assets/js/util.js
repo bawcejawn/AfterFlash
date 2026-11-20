@@ -37,10 +37,11 @@ export function h(tag, attrs, ...children) {
   return el;
 }
 
-/** Only allow http(s), blob:, data:image and relative URLs into href/src. */
+/** Only allow http(s), blob:, data:image, our mailto:? links and relative URLs into href/src. */
 export function safeUrl(u) {
   const s = String(u);
   if (/^\/\//.test(s)) return 'about:blank'; // protocol-relative: could point off-site
+  if (/^mailto:\?[^\s]*$/i.test(s)) return s; // only our own BCC links: no address in the 'to' part
   if (/^(https?:|blob:|data:image\/(png|jpeg|gif|webp);|\.{0,2}\/|[a-z0-9_-]+\.html|#|\?)/i.test(s)) return s;
   if (/^[a-z0-9_./-]+$/i.test(s)) return s;
   return 'about:blank';

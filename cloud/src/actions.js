@@ -5,6 +5,7 @@ import {
   sniffMime, sniffAudio, sniffImage, isEnc, ENC_OVERHEAD, stripJpegMeta, cleanText, str, int, parseJson,
 } from './lib.js';
 import { driveFor } from './google.js';
+import { mailReady, cleanEmail as cleanGuestEmail, render as renderMail, sendBatch } from './mail.js';
 import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted } from './stripe.js';
 
 export const VERSION = '1.11.0';
@@ -16,7 +17,7 @@ const LIMITS = {
   BAD_KEY_PER_10MIN: 30, REPORTS_PER_GUEST: 15, NOTES_PER_GUEST: 5, NOTE_TEXT: 500, BLUR_THRESHOLD: 40,
   READS_PER_EVENT_PER_MIN: 900, EVENTS_PER_ACCOUNT: 200, CHECKOUTS_PER_10MIN: 60, REF_LOOKUPS_PER_10MIN: 300,
   HOLD_MS: 365 * 86400000, PAYOUT_WAIT_MS: 14 * 86400000, MAX_PCT: 50, MAX_CASH_CENTS: 100000,
-  RSVP_PHOTO_BYTES: 1024 * 1024, COVER_BYTES: 700 * 1024, MAX_RSVPS: 3000, RSVPS_PER_EVENT_PER_MIN: 60, MAX_PARTY: 10,
+  MAIL_PER_EVENT_PER_DAY: 600, MAX_INVITEES: 1000, RSVP_PHOTO_BYTES: 1024 * 1024, COVER_BYTES: 700 * 1024, MAX_RSVPS: 3000, RSVPS_PER_EVENT_PER_MIN: 60, MAX_PARTY: 10,
   MAX_TIER: 3, MIN_PAYOUT: 2500, MAX_TEAM: 100, MAX_OPEN_INVITES: 20, INVITE_MS: 14 * 86400000, JOINS_PER_10MIN: 60,
 };
 
@@ -98,7 +99,13 @@ function sanitizeSettings(s) {
     invite: sanitizeInvite(s.invite),
     captions: s.captions !== false,
     challenges: sanitizeChallenges(s.challenges),
+    messages: sanitizeMessages(s.messages),
   };
+}
+/** Automatic emails the host switched on, and their thank-you note. */
+function sanitizeMessages(v) {
+  v = v && typeof v === 'object' ? v : {};
+  return { autoReminder: v.autoReminder === true, autoCamera: v.autoCamera === true, autoPhotos: v.autoPhotos === true, thanks: cleanLines(v.thanks, 600) };
 }
 /** Photo challenges: up to 15 short prompts the host picks ("Selfie with the couple"). */
 function sanitizeChallenges(v) {
@@ -1264,7 +1271,7 @@ function inviteView(ev) {
     capped: i.cap > 0, opensAt: s.opensAt, needsPin: !!ev.pin_hash, now: Date.now(),
   };
 }
-const rsvpView = (r) => ({ id: r.id, name: r.name, status: r.status, party: partyOf(r), kids: Number(r.kids) || 0, diet: r.diet, song: r.song, message: r.message, hasPhoto: !!r.photo, created: r.created, updated: r.updated });
+const rsvpView = (r) => ({ id: r.id, name: r.name, email: r.email || '', status: r.status, party: partyOf(r), kids: Number(r.kids) || 0, diet: r.diet, song: r.song, message: r.message, hasPhoto: !!r.photo, created: r.created, updated: r.updated });
 const rsvpRows = (c, ev) => S(c, ev).all('SELECT * FROM rsvps WHERE event = ? AND deleted = 0 ORDER BY created', ev.id);
 async function rsvpByToken(c, ev, id, token) {
   const r = id && await S(c, ev).one('SELECT * FROM rsvps WHERE event = ? AND id = ? AND deleted = 0', ev.id, str(id, 40));
@@ -1319,6 +1326,8 @@ A.rsvp = async (c, req) => {
     message: i.message ? cleanText(req.message, 500) : '',
   };
   const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.clientId || '')) ? String(req.clientId) : '';
+  const email = req.email ? cleanGuestEmail(req.email) : '';
+  if (req.email && !email) throw err('bad_request', 'That email address doesn’t look right. Check it, or leave it blank.');
 
   // Existing answer: by its id (edit link) or by this browser's retry id.
   let row = null;
@@ -1357,17 +1366,18 @@ A.rsvp = async (c, req) => {
   } else if (req.removePhoto === true && photo) { await d.trash(photo).catch(() => {}); photo = ''; }
   const now = c.now();
   if (row) {
-    await S(c, ev).run('UPDATE rsvps SET name = ?, status = ?, party = ?, kids = ?, diet = ?, song = ?, message = ?, photo = ?, updated = ? WHERE event = ? AND id = ?',
-      name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, now, ev.id, id);
+    await S(c, ev).run('UPDATE rsvps SET name = ?, status = ?, party = ?, kids = ?, diet = ?, song = ?, message = ?, photo = ?, updated = ?, email = ? WHERE event = ? AND id = ?',
+      name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, now, email, ev.id, id);
   } else {
     try {
-      await S(c, ev).run('INSERT INTO rsvps (event, id, token_hash, name, status, party, kids, diet, song, message, photo, client, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ev.id, id, await sha256Hex(token), name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, clientId, now, now);
+      await S(c, ev).run('INSERT INTO rsvps (event, id, token_hash, name, status, party, kids, diet, song, message, photo, client, created, updated, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ev.id, id, await sha256Hex(token), name, status, JSON.stringify(party), kids, fields.diet, fields.song, fields.message, photo, clientId, now, now, email);
     } catch (e) {
       if (newPhoto && photo) await d.trash(photo).catch(() => {});
       throw err('busy', 'That didn’t save. Please try again.');
     }
   }
+  if (email) await addInvitee(c, ev, email, name, false);
   const saved = await S(c, ev).one('SELECT * FROM rsvps WHERE event = ? AND id = ?', ev.id, id);
   return { r: id, rsvp: rsvpView(saved) };
 };
@@ -1434,6 +1444,151 @@ A.hostRsvpDelete = async (c, req) => {
   }
   return { changed };
 };
+
+// ================================================================= automatic messages (email)
+// Hosts add guest emails (or guests give theirs on the RSVP form). The app can send the
+// invitation, a reminder to people who haven't replied, "the camera is open", "the photos are
+// ready" and a thank-you note. Every email has a one-click stop link; nothing is sent to anyone
+// who used it. Email addresses are only ever shown to the host.
+const MSG_KINDS = ['invite', 'reminder', 'camera', 'photos', 'thanks'];
+async function addInvitee(c, ev, email, name, fromHost) {
+  const have = await S(c, ev).one('SELECT email, name FROM invitees WHERE event = ? AND email = ?', ev.id, email);
+  if (have) { if (name && !have.name) await S(c, ev).run('UPDATE invitees SET name = ? WHERE event = ? AND email = ?', name, ev.id, email); return false; }
+  const n = await S(c, ev).one('SELECT COUNT(*) AS n FROM invitees WHERE event = ?', ev.id);
+  if (n.n >= LIMITS.MAX_INVITEES) { if (fromHost) throw err('full', `An event can have up to ${LIMITS.MAX_INVITEES} email addresses.`); return false; }
+  await S(c, ev).run('INSERT INTO invitees (event, email, name, token, added) VALUES (?, ?, ?, ?, ?)', ev.id, email, cleanText(name, 60), randomId(24), c.now());
+  return true;
+}
+
+async function sentToday(c, ev) {
+  const r = await S(c, ev).one('SELECT COALESCE(SUM(sent), 0) AS n FROM msg_log WHERE event = ? AND at > ?', ev.id, c.now() - 864e5);
+  return Number(r.n) || 0;
+}
+
+/** Who a message goes to: [{ email, name, token }]. Never anyone who opted out. */
+async function recipients(c, ev, kind) {
+  const inv = await S(c, ev).all('SELECT * FROM invitees WHERE event = ? AND optout = 0', ev.id);
+  const rs = await rsvpRows(c, ev);
+  const replied = new Set(rs.filter((r) => r.email).map((r) => r.email));
+  const byEmail = new Map(inv.map((x) => [x.email, x]));
+  if (kind === 'invite') return inv.filter((x) => !x.invited && !replied.has(x.email));
+  if (kind === 'reminder') return inv.filter((x) => x.invited && !replied.has(x.email));
+  const want = kind === 'camera' ? ['yes', 'maybe'] : ['yes'];
+  const out = [];
+  for (const r of rs) if (r.email && want.includes(r.status) && byEmail.has(r.email)) out.push({ ...byEmail.get(r.email), name: r.name });
+  return out;
+}
+
+function message(c, ev, kind, to, note) {
+  const s = ev.settings, i = s.invite, app = c.env.APP_NAME || 'Rememberoll';
+  const origin = c.env.SITE_ORIGIN || '';
+  const q = `e=${encodeURIComponent(ev.id)}`;
+  const urls = { invite: `${origin}/invite.html?${q}`, cam: `${origin}/cam.html?${q}`, album: `${origin}/album.html?${q}` };
+  const hi = to.name ? `Hi ${cleanText(to.name, 40).split(' ')[0]},` : 'Hi,';
+  const by = i.hosts || 'Your hosts';
+  let when = '';
+  if (i.startsAt) {
+    try { when = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: i.tz || 'UTC', timeZoneName: 'short' }).format(new Date(i.startsAt)); } catch { when = ''; }
+  }
+  const where = [i.venue, i.address].filter(Boolean).join(', ');
+  const T = {
+    invite: { subject: `You’re invited: ${s.name}`, heading: `You’re invited to ${s.name}`, paras: [hi, `${by} would love for you to come.`, [when, where].filter(Boolean).join('\n')].filter(Boolean), button: { label: 'See the invitation and RSVP', url: urls.invite } },
+    reminder: { subject: `Can you make it? ${s.name}`, heading: 'A quick reminder to RSVP', paras: [hi, `${by} haven’t heard from you yet about ${s.name}.`, i.deadline ? `Please reply by ${new Date(i.deadline).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: i.tz || 'UTC' })}.` : 'It only takes a moment.'], button: { label: 'Reply now', url: urls.invite } },
+    camera: { subject: `${s.name}: the camera is open!`, heading: 'The camera is open', paras: [hi, `Take photos for the shared album of ${s.name}, right from your phone. No app needed.`], button: { label: 'Open the camera', url: urls.cam } },
+    photos: { subject: `${s.name}: the photos are ready`, heading: 'The photos are ready', paras: [hi, `Everyone’s photos from ${s.name} are in the album now.`], button: { label: 'See the album', url: urls.album } },
+    thanks: { subject: `Thank you from ${i.hosts || s.name}`, heading: 'Thank you for coming', paras: [hi, cleanLines(note, 600) || `Thank you for celebrating ${s.name} with us.`, 'All the photos are in the album.'], button: { label: 'See the photos', url: urls.album } },
+  }[kind];
+  const unsub = `${origin}/unsubscribe.html?${q}&t=${encodeURIComponent(to.token)}`;
+  const body = renderMail({ app, heading: T.heading, paras: T.paras, button: T.button, unsub });
+  return { to: to.email, subject: T.subject, html: body.html, text: body.text, unsub };
+}
+
+async function sendKind(c, ev, kind, { note = '', auto = false } = {}) {
+  if (!MSG_KINDS.includes(kind)) throw err('bad_request', 'Unknown message');
+  if (!mailReady(c.env)) throw err('not_configured', 'Email isn’t switched on yet. The owner can turn it on (docs/LAUNCH.md, Part 9).');
+  if (['invite', 'reminder'].includes(kind) && !ev.settings.invite.on) throw err('bad_request', 'Turn on the invitation first.');
+  await requireActivePlan(c, ev, true);
+  const last = await S(c, ev).one('SELECT at FROM msg_log WHERE event = ? AND kind = ? ORDER BY at DESC LIMIT 1', ev.id, kind);
+  if (!auto && last && kind !== 'invite' && c.now() - last.at < 3600e3) throw err('rate_limited', 'That message went out less than an hour ago.');
+  const list = await recipients(c, ev, kind);
+  if (!list.length) return { sent: 0 };
+  const room = LIMITS.MAIL_PER_EVENT_PER_DAY - (await sentToday(c, ev));
+  if (room <= 0) throw err('rate_limited', 'This event has sent its email limit for today. Try again tomorrow.');
+  const batch = list.slice(0, room);
+  const sent = await sendBatch(c.env, batch.map((to) => message(c, ev, kind, to, note)));
+  if (kind === 'invite') for (const x of batch.slice(0, sent)) await S(c, ev).run('UPDATE invitees SET invited = ? WHERE event = ? AND email = ?', c.now(), ev.id, x.email);
+  await S(c, ev).run('INSERT INTO msg_log (event, kind, at, sent, auto) VALUES (?, ?, ?, ?, ?)', ev.id, kind, c.now(), sent, auto ? 1 : 0);
+  return { sent, more: list.length > sent };
+}
+
+A.hostMessages = async (c, req) => {
+  const ev = await authHost(c, req);
+  const inv = await S(c, ev).all('SELECT email, name, invited, optout FROM invitees WHERE event = ? ORDER BY added', ev.id);
+  const counts = {};
+  for (const k of MSG_KINDS) counts[k] = (await recipients(c, ev, k)).length;
+  const log = await S(c, ev).all('SELECT kind, at, sent, auto FROM msg_log WHERE event = ? ORDER BY at DESC LIMIT 30', ev.id);
+  return { ready: mailReady(c.env), invitees: inv.map((x) => ({ email: x.email, name: x.name, invited: x.invited, optout: !!x.optout })), counts, log, settings: ev.settings.messages };
+};
+
+A.hostAddInvitees = async (c, req) => {
+  const ev = await authHost(c, req);
+  const raw = Array.isArray(req.emails) ? req.emails.slice(0, 500) : [];
+  let added = 0; const bad = [];
+  for (const x of raw) {
+    const email = cleanGuestEmail(x && x.email != null ? x.email : x);
+    if (!email) { bad.push(String(x && x.email != null ? x.email : x).slice(0, 60)); continue; }
+    if (await addInvitee(c, ev, email, x && x.name, true)) added++;
+  }
+  return { added, bad: bad.slice(0, 20) };
+};
+
+A.hostRemoveInvitee = async (c, req) => {
+  const ev = await authHost(c, req);
+  await S(c, ev).run('DELETE FROM invitees WHERE event = ? AND email = ?', ev.id, cleanGuestEmail(req.email));
+  return { ok: true };
+};
+
+A.hostSend = async (c, req) => {
+  const ev = await authHost(c, req);
+  if (!(await rateOk(c, 'send:' + ev.id, 10, 3600))) throw err('rate_limited', 'Lots of messages this hour. Try again later.');
+  return sendKind(c, ev, String(req.kind || ''), { note: req.note });
+};
+
+A.unsubscribe = async (c, req) => {
+  const ev = await loadEvent(c, req.e).catch(() => null);
+  if (!ev) throw err('not_found', 'This link isn’t valid any more.');
+  const t = String(req.t || '');
+  if (!/^[A-Za-z0-9]{24}$/.test(t)) throw err('not_found', 'This link isn’t valid any more.');
+  const r = await S(c, ev).run('UPDATE invitees SET optout = 1 WHERE event = ? AND token = ?', ev.id, t);
+  if (!r.meta || !r.meta.changes) throw err('not_found', 'This link isn’t valid any more.');
+  return { ok: true, name: ev.settings.name };
+};
+
+/** Hourly: the automatic messages hosts switched on. */
+export async function autoMessages(env) {
+  if (!mailReady(env)) return { sent: 0 };
+  const c = makeCtx(env);
+  const evs = await c.all("SELECT id FROM events WHERE deleted = 0 AND (settings LIKE '%\"autoReminder\":true%' OR settings LIKE '%\"autoCamera\":true%' OR settings LIKE '%\"autoPhotos\":true%') LIMIT 500");
+  let sent = 0;
+  for (const { id } of evs) {
+    try {
+      const ev = await loadEvent(c, id);
+      const s = ev.settings, i = s.invite, m = s.messages, now = c.now();
+      const start = i.startsAt ? Date.parse(i.startsAt) : (s.date ? Date.parse(s.date + 'T17:00:00Z') : 0);
+      const done = async (kind, since = 0) => !!(await S(c, ev).one('SELECT 1 FROM msg_log WHERE event = ? AND kind = ? AND at > ?', ev.id, kind, since));
+      const go = async (kind, opts) => { try { sent += (await sendKind(c, ev, kind, { ...opts, auto: true })).sent || 0; } catch { /* skip this one */ } };
+      if (m.autoReminder && i.on && i.deadline) {
+        const dl = Date.parse(i.deadline);
+        if (now > dl - 3 * 864e5 && now < dl && !(await done('reminder', now - 2 * 864e5))) await go('reminder');
+      }
+      if (m.autoCamera && start && now > start - 3600e3 && now < start + 3 * 3600e3 && !(await done('camera'))) await go('camera');
+      if (m.autoPhotos && start && now > start + 16 * 3600e3 && now < start + 7 * 864e5 && !(await done('photos')) && !(await done('thanks'))) {
+        await go(m.thanks ? 'thanks' : 'photos', { note: m.thanks });
+      }
+    } catch { /* one bad event never stops the rest */ }
+  }
+  return { sent };
+}
 
 export const ACTIONS = A;
 

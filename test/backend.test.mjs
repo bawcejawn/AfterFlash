@@ -833,6 +833,18 @@ t('captions and photo challenges (self-host)', () => {
   assert.equal(env.post({ a: 'hostClearCaption', e: ev.id, k: 'bad', id: items[1].i }).error, 'unauthorized');
 });
 
+t('RSVP email (self-host): stored for the host, bad addresses refused, sending stays off', () => {
+  const env = boot();
+  const ev = makeEvent(env);
+  const crypto = await_import_crypto();
+  env.post({ a: 'hostUpdate', e: ev.id, k: ev.hostKey, settings: { invite: { on: true }, messages: { thanks: 'Thanks!', autoCamera: true } } });
+  assert.equal(env.post({ a: 'rsvp', e: ev.id, name: 'Pat', status: 'yes', email: 'bad', rt: crypto.randomBytes(24).toString('base64url') }).error, 'bad_request');
+  assert.equal(env.post({ a: 'rsvp', e: ev.id, name: 'Pat', status: 'yes', email: 'Pat@Example.com', rt: crypto.randomBytes(24).toString('base64url') }).ok, true);
+  assert.equal(env.post({ a: 'hostRsvps', e: ev.id, k: ev.hostKey }).rsvps[0].email, 'pat@example.com');
+  const m = env.post({ a: 'hostMessages', e: ev.id, k: ev.hostKey });
+  assert.equal(m.ready, false); assert.equal(m.settings.thanks, 'Thanks!');
+});
+
 // tiny helper so the test above can stay sync
 import nodeCrypto from 'node:crypto';
 function await_import_crypto() { return nodeCrypto; }

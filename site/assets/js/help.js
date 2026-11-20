@@ -50,6 +50,12 @@ const GUESTS = [
 ];
 
 const HOSTS = [
+  { id: 'messages', q: 'Email your guests (reminders, camera link, thank-you)', steps: [
+    'Guests can add their email when they RSVP. You can also paste emails under Invitations → Messages.',
+    'Tap “Use your own email app” to send from your own email. Guests are in BCC, so nobody sees the others’ addresses.',
+    'On Rememberoll Cloud you can also send from here, or turn on automatic messages: a reminder before the reply-by date, the camera link when the party starts, and the photos the day after.',
+    'Write a thank-you note once. It goes out with the album link.',
+    'Every email has an unsubscribe link. Guests who use it are never emailed again.'] },
   { id: 'lost-key', q: 'I lost my admin key', cloud: true, steps: [
     'Go to the sign-in page and choose “Lost your key?” → “Sign in with Google”.',
     'Use the same Google account you connected for photos. You’ll get a new key straight away (the old one stops working).'] },

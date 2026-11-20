@@ -18,7 +18,7 @@ migrations_dir = "migrations"
 
 # Nightly database cleanup (UTC). See docs/SCALING.md.
 [triggers]
-crons = ["17 7 * * *"]
+crons = ["17 7 * * *", "17 * * * *"]
 
 [vars]
 APP_NAME = "Rememberoll"
@@ -32,5 +32,6 @@ GOOGLE_CLIENT_ID = ""
 SUPPORT_EMAIL = ""
 BUSINESS_NAME = ""
 GOOGLE_SITE_VERIFICATION = ""
+MAIL_FROM = ""
 ANDROID_PACKAGE = ""
 ANDROID_CERT_SHA256 = ""

@@ -656,6 +656,50 @@ t('captions and photo challenges: cleaned, only host prompts count, host can rem
   assert.equal((await s.call({ a: 'list', e: ev.id })).items[2].cap, '', 'captions off');
 });
 
+t('messages: guest emails, invite + reminder + thank-you, opt-out, limits, hourly auto', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Sam & Alex' } });
+  const hk = 'admin:' + k;
+  assert.equal((await s.call({ a: 'hostMessages', e: ev.id, k: hk })).ready, false, 'off until the owner sets it up');
+  assert.equal((await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'invite' })).error, 'not_configured');
+  s.env.RESEND_API_KEY = 're_test_fake'; s.env.MAIL_FROM = 'Rememberoll <hello@example.com>';
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { invite: { on: true, hosts: 'The Lees', startsAt: new Date(Date.now() + 3600e3 / 2).toISOString() } } });
+  const add = await s.call({ a: 'hostAddInvitees', e: ev.id, k: hk, emails: ['Pat@Example.com', 'lee@example.com', 'not an email', 'pat@example.com', { email: 'kim@example.com', name: 'Kim <b>' }] });
+  assert.equal(add.added, 3); assert.deepEqual(add.bad, ['not an email']);
+  assert.equal((await s.call({ a: 'hostAddInvitees', e: ev.id, k: 'bad', emails: ['x@y.com'] })).error, 'unauthorized');
+  const inv = await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'invite' });
+  assert.equal(inv.sent, 3); assert.equal(s.fk.mail.length, 3);
+  const m0 = s.fk.mail[0];
+  assert.match(m0.subject, /You’re invited: Sam & Alex/); assert.match(m0.html, /Sam &amp; Alex/, 'escaped');
+  assert.match(m0.headers['List-Unsubscribe'], /unsubscribe\.html\?e=/);
+  assert.equal((await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'invite' })).sent, 0, 'nobody invited twice');
+  // Pat replies with the same email; the reminder skips them.
+  await s.call({ a: 'rsvp', e: ev.id, name: 'Pat', status: 'yes', email: 'pat@example.com', rt: crypto.randomBytes(24).toString('base64url') });
+  assert.equal((await s.call({ a: 'rsvp', e: ev.id, name: 'X', status: 'yes', email: 'nope', rt: crypto.randomBytes(24).toString('base64url') })).error, 'bad_request');
+  // Lee opts out with the link from their email.
+  const lee = s.fk.mail.find((m) => m.to[0] === 'lee@example.com');
+  const t = new URL(lee.headers['List-Unsubscribe'].slice(1, -1)).searchParams.get('t');
+  assert.equal((await s.call({ a: 'unsubscribe', e: ev.id, t: 'x'.repeat(24) })).error, 'not_found');
+  assert.equal((await s.call({ a: 'unsubscribe', e: ev.id, t })).ok, true);
+  const rem = await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'reminder' });
+  assert.equal(rem.sent, 1, 'only Kim: Pat replied, Lee opted out');
+  assert.equal(s.fk.mail.at(-1).to[0], 'kim@example.com');
+  assert.equal((await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'reminder' })).error, 'rate_limited', 'not twice in an hour');
+  const ty = await s.call({ a: 'hostSend', e: ev.id, k: hk, kind: 'thanks', note: 'Thank you <3 for coming' });
+  assert.equal(ty.sent, 1); assert.match(s.fk.mail.at(-1).html, /Thank you 3 for coming/, "angle brackets stripped");
+  const msgs = await s.call({ a: 'hostMessages', e: ev.id, k: hk });
+  assert.equal(msgs.ready, true); assert.equal(msgs.invitees.find((x) => x.email === 'lee@example.com').optout, true);
+  assert.equal((await s.call({ a: 'hostRsvps', e: ev.id, k: hk })).rsvps[0].email, 'pat@example.com');
+  assert.equal((await s.call({ a: 'invite', e: ev.id })).coming, undefined, 'emails never public');
+  // Hourly: "camera is open" goes out once to Yes/Maybe guests with an email.
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { messages: { autoCamera: true } } });
+  const before = s.fk.mail.length;
+  const { autoMessages } = await import('../src/actions.js');
+  await autoMessages(s.env); await autoMessages(s.env);
+  assert.equal(s.fk.mail.length, before + 1); assert.match(s.fk.mail.at(-1).subject, /camera is open/);
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }
