@@ -4,7 +4,7 @@ import { TEMPLATES, templateSettings } from './templates.js';
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
 import { installButton, rememberPlace } from './install.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, ordersPanel, plannerPanel, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, ordersPanel, plannerPanel, storagePanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -75,6 +75,13 @@ async function signedIn(key, { show = false } = {}) {
 async function dashboard(created) {
   rememberPlace('admin', studio, '', 'Studio admin');
   clear(root).append(h('p', { class: 'muted' }, 'Loading events…'));
+  // Back from paying for Rememberoll storage: add it to this account, then tidy the address bar.
+  const paid = CLOUD && new URLSearchParams(location.search).get('storage');
+  if (paid && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(paid)) {
+    try { const r = await api(studio, 'storageClaim', { k: adminKey, session_id: paid }, { retries: 2 }); toast(`Rememberoll storage is on: ${r.storage.gb} GB until ${fmtDate(r.storage.until)}.`, 'ok'); }
+    catch (e) { toast(e.message, 'error'); }
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
   let events = [];
   try { events = (await api(studio, 'adminList', { k: adminKey })).events; } catch (e) {
     if (e.code === 'unauthorized') { store.del(KEY(), sessionStorage); return login('Please sign in again.'); }
@@ -90,6 +97,7 @@ async function dashboard(created) {
     CLOUD ? planPanel({ studio, adminKey, me }) : null,
     CLOUD ? partnerPanel({ studio, adminKey, me }) : null,
     CLOUD && !ended ? drivePanel({ studio, adminKey, me }) : null,
+    CLOUD && me.storage ? storagePanel({ studio, adminKey, me }) : null,
     created ? createdPanel(created) : null,
     needsDrive || ended ? null : createForm(events),
     h('h2', { class: 'section' }, `Your events (${events.length})`),

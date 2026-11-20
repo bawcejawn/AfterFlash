@@ -176,6 +176,30 @@ After an event, albums and the "photos are ready" emails can offer guests a disc
 3. **Actions → Deploy Rememberoll Cloud → Run workflow.**
 4. To stop the offer, turn the code off on the admin page (or delete the variable and deploy).
 
+## Part 12: Sell Rememberoll storage (optional, about 10 minutes)
+
+Hosts can pay once for space on your own Cloudflare storage (R2), so they never run out of Google Drive space. New photos then save there instead of their Drive.
+
+**How the price works:** your cost per GB per month (Cloudflare R2 charges $0.015) × 50, charged for 12 months. So one month of what the host pays covers more than 12 months of your cost. The packs are:
+- 25 GB: $18.75 for 12 months (costs you about $4.50 a year if it's full)
+- 100 GB: $75
+- 250 GB: $187.50
+
+Hosts can buy 12 months, 2 years or 3 years at once, and buy again any time to add time or move up to a bigger pack.
+
+1. Cloudflare dashboard → **R2 Object Storage** → turn it on. Cloudflare asks for a card; the first 10 GB each month are free.
+2. Cloudflare → **My Profile → API Tokens** → edit the token you use for deploys → add **Account → Workers R2 Storage → Edit**.
+3. GitHub → your repo → **Settings → Secrets and variables → Actions → Variables** → add **STORAGE_BUCKET** = `rememberoll-photos`.
+4. Optional: to change the price, add **STORAGE_MARKUP** (default `50`) or **STORAGE_GB_COST** (default `0.015`).
+5. **Actions → Deploy Rememberoll Cloud → Run workflow.** The deploy creates the bucket. If it prints "Rememberoll storage is OFF", re-check steps 1 and 2.
+6. Test in Stripe test mode: admin page → **Rememberoll storage** → 25 GB → card `4242 4242 4242 4242`.
+
+What happens:
+- After paying, all of that host's events (and new ones) save new photos to Rememberoll storage. Each host can switch an event back on its Share tab.
+- If a host's Google Drive fills up and they have Rememberoll storage, the event switches over by itself.
+- When the time runs out, photos stay viewable and downloadable, and new photos go back to Google Drive. Deleting an event deletes its files from storage.
+- It's hidden inside the Google Play app (store billing rules). Hosts buy on the website.
+
 ## Your first sale: step by step
 
 **Week 1: proof**

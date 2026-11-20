@@ -6,7 +6,8 @@ import {
 } from './lib.js';
 import { driveFor } from './google.js';
 import { mailReady, cleanEmail as cleanGuestEmail, render as renderMail, sendBatch } from './mail.js';
-import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted, SHOP, shopPrices, createOrderCheckout, readOrderCheckout } from './stripe.js';
+import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted, SHOP, shopPrices, createOrderCheckout, readOrderCheckout, STORAGE_PACKS, storagePrice, createStorageCheckout, readStorageCheckout } from './stripe.js';
+import { hybridStore, storageActive } from './storage.js';
 
 export const VERSION = '1.11.0';
 
@@ -189,7 +190,11 @@ async function accountOf(c, ev) {
   if (!a || a.status !== 'active') throw err('not_found', 'Event not found');
   return a;
 }
-const drive = async (c, ev) => driveFor(c.env, c.db, await accountOf(c, ev));
+const drive = async (c, ev) => {
+  const a = await accountOf(c, ev);
+  if (!c.env.STORE) return driveFor(c.env, c.db, a);
+  return hybridStore({ env: c.env, db: c.db, ev, account: a, driveClient: () => driveFor(c.env, c.db, a) });
+};
 // Partner-only accounts (plan 'partner') can sign in to see earnings but can't host until they buy a plan.
 const expired = (a) => a.kind !== 'owner' && (a.plan === 'partner' || (Number(a.expires) > 0 && Number(a.expires) < Date.now()));
 const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -613,7 +618,8 @@ A.logo = async (c, req) => {
 // ================================================================= host (host key or the owning account's admin key)
 A.hostGet = async (c, req) => {
   const ev = await authHost(c, req);
-  return { event: { ...(await hostEvent(ev)), purged: !!ev.purged, role: ev.role, cohost: !!ev.cohost_hash }, key: (await eventKey(c, ev)) || undefined };
+  const acct = await accountOf(c, ev);
+  return { event: { ...(await hostEvent(ev)), purged: !!ev.purged, role: ev.role, cohost: !!ev.cohost_hash, store: ev.store || '', storage: !!c.env.STORE && !ev.settings.encrypted ? { active: storageActive(c.env, acct), until: Number(acct.storage_until) || 0 } : null }, key: (await eventKey(c, ev)) || undefined };
 };
 
 A.hostUpdate = async (c, req) => {
@@ -812,6 +818,7 @@ A.adminCheck = async (c, req) => {
     maxEvents: Number(a.max_events) || 0, eventsUsed: (await c.one('SELECT COUNT(*) AS n FROM events WHERE account = ?', a.id)).n,
     holdUntil: Number(a.expires) > 0 && a.kind !== 'owner' && a.plan !== 'partner' ? Number(a.expires) + LIMITS.HOLD_MS : 0,
     planner: plannerOk(a), brand: plannerOk(a) ? cleanBrand(parseJson(a.brand || '')) : null,
+    storage: storageView(c, a),
     partner: await partnerView(c, a) } };
 };
 
@@ -892,9 +899,9 @@ A.adminCreate = async (c, req) => {
   const hostKey = randomKey(32);
   const ek = settings.encrypted ? await seal(c.env, randomKey(32)) : '';
   const brand = plannerOk(a) ? cleanBrand(parseJson(a.brand || '')) : null;
-  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc, shard, logo, brand) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  await c.run('INSERT INTO events (id, account, name, created, folder, host_hash, settings, v, ek_enc, shard, logo, brand, store) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, a.id, settings.name, c.now(), folder, await sha256Hex(hostKey), JSON.stringify(settings), randomId(8), ek, activeShard(c.env),
-    tpl && tpl.logo ? JSON.stringify(tpl.logo) : '', brand ? JSON.stringify(brand) : '');
+    tpl && tpl.logo ? JSON.stringify(tpl.logo) : '', brand ? JSON.stringify(brand) : '', storageActive(c.env, a) && !settings.encrypted ? 'r2' : '');
   return { id, hostKey };
 };
 
@@ -913,7 +920,8 @@ A.adminHostLink = async (c, req) => {
 A.adminDelete = async (c, req) => {
   const { ev } = await ownedEvent(c, req);
   if (req.confirm !== ev.id) throw err('bad_request', 'Confirmation does not match');
-  try { await (await drive(c, ev)).trash(ev.folder); } catch { /* folder already gone */ }
+  try { await (await driveFor(c.env, c.db, await accountOf(c, ev))).trash(ev.folder); } catch { /* folder already gone, or Drive not connected */ }
+  await deleteCloudFiles(c, ev);
   await c.run('UPDATE events SET deleted = 1 WHERE id = ?', ev.id);
   return {};
 };
@@ -1794,6 +1802,64 @@ A.adminBrand = async (c, req) => {
   }
   return { brand: cleanBrand(parseJson(a.brand || '')) };
 };
+
+// ================================================================= Rememberoll storage (Cloudflare R2)
+/** What the admin page shows: offered at all, current space and time left, and the packs for sale. */
+function storageView(c, a) {
+  if (!c.env.STORE || !c.env.STRIPE_SECRET_KEY || a.kind === 'owner' || a.plan === 'partner') return null;
+  return { active: storageActive(c.env, a), gb: Number(a.storage_gb) || 0, until: Number(a.storage_until) || 0, used: Number(a.storage_bytes) || 0,
+    packs: STORAGE_PACKS.map((gb) => ({ gb, price: storagePrice(c.env, gb, 1) })) };
+}
+/** Buy space (or more time): a one-time payment for 12 months, or 2–3 years at once. */
+A.storageCheckout = async (c, req) => {
+  const a = await authAccount(c, req, { allowExpired: true });
+  if (!storageView(c, a)) throw err('not_configured', 'Rememberoll storage isn’t available yet.');
+  if (!(await rateOk(c, 'storagebuy:' + a.id, 20, 3600))) throw err('rate_limited', 'Lots of tries this hour. Try again later.');
+  const gb = Number(req.gb), years = Math.floor(Number(req.years) || 1);
+  if (!STORAGE_PACKS.includes(gb) || years < 1 || years > 3) throw err('bad_request', 'Pick a size and how long.');
+  if (storageActive(c.env, a) && gb < Number(a.storage_gb)) throw err('bad_request', `You have ${a.storage_gb} GB now. To add time, pick ${a.storage_gb} GB or more.`);
+  return { url: await createStorageCheckout(c.env, { account: a.id, gb, years }) };
+};
+/** Back from Stripe: add the space and time (once per payment). Time stacks; size goes up to the bigger pack. */
+A.storageClaim = async (c, req) => {
+  const a = await authAccount(c, req, { allowExpired: true });
+  const sid = str(req.session_id, 260);
+  const p = await readStorageCheckout(c.env, sid);
+  if (p.kind !== 'storage' || p.account !== a.id) throw err('not_found', 'That payment isn’t for this account.');
+  if (!p.paid) throw err('not_paid', 'This payment hasn’t gone through yet. Refresh in a moment.');
+  if (!STORAGE_PACKS.includes(p.gb) || p.years < 1 || p.years > 3) throw err('bad_request', 'Unknown storage pack.');
+  const r = await c.run('INSERT OR IGNORE INTO storage_purchases (session, account, gb, years, amount, created) VALUES (?, ?, ?, ?, ?, ?)', sid, a.id, p.gb, p.years, p.amount, c.now());
+  if (r.meta.changes) {
+    const until = Math.max(c.now(), Number(a.storage_until) || 0) + p.years * 365 * 864e5;
+    await c.run('UPDATE accounts SET storage_gb = MAX(storage_gb, ?), storage_until = ? WHERE id = ?', p.gb, until, a.id);
+    // New events use it automatically; switch this account's open events over too, so space is never a worry.
+    await c.run("UPDATE events SET store = 'r2' WHERE account = ? AND deleted = 0 AND settings NOT LIKE '%\"encrypted\":true%'", a.id);
+  }
+  const fresh = await c.one('SELECT * FROM accounts WHERE id = ?', a.id);
+  return { storage: storageView(c, fresh) };
+};
+/** Host: save this event's new photos to Rememberoll storage (on) or the host's Google Drive (off). */
+A.hostUseStorage = async (c, req) => {
+  const ev = await authHost(c, req);
+  const a = await accountOf(c, ev);
+  if (req.on === true) {
+    if (ev.settings.encrypted) throw err('bad_request', 'Private-storage events stay in Google Drive.');
+    if (!storageActive(c.env, a)) throw err('storage_needed', 'Add Rememberoll storage on the admin page first.');
+  }
+  await c.run('UPDATE events SET store = ? WHERE id = ?', req.on === true ? 'r2' : '', ev.id);
+  return { store: req.on === true ? 'r2' : '' };
+};
+/** When an event is deleted, its files in Rememberoll storage go too (and the space is freed). */
+async function deleteCloudFiles(c, ev) {
+  if (!c.env.STORE) return;
+  let cursor, freed = 0;
+  do {
+    const l = await c.env.STORE.list({ prefix: `e/${ev.id}/`, cursor, limit: 1000 });
+    if (l.objects.length) { await c.env.STORE.delete(l.objects.map((o) => o.key)); freed += l.objects.reduce((t, o) => t + (o.size || 0), 0); }
+    cursor = l.truncated ? l.cursor : undefined;
+  } while (cursor);
+  if (freed) await c.run('UPDATE accounts SET storage_bytes = MAX(0, storage_bytes - ?) WHERE id = ?', freed, ev.account);
+}
 
 export const ACTIONS = A;
 

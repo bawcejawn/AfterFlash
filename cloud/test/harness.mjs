@@ -176,3 +176,20 @@ export function serveAsset(pathname) {
   if (!fs.existsSync(p)) return new Response(fs.readFileSync(path.join(SITE_DIR, '404.html')), { status: 404, headers: { 'content-type': 'text/html' } });
   return new Response(fs.readFileSync(p), { headers: { 'content-type': TYPES[path.extname(p)] || 'application/octet-stream' } });
 }
+
+/** In-memory stand-in for a Cloudflare R2 bucket binding (just the calls the app uses). */
+export function fakeR2() {
+  const m = new Map();
+  const obj = (k) => { const b = m.get(k); return b && { key: k, size: b.length, async arrayBuffer() { return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); } }; };
+  return {
+    objects: m,
+    async put(k, bytes) { m.set(k, new Uint8Array(bytes)); return { key: k }; },
+    async get(k) { return obj(k) || null; },
+    async head(k) { return obj(k) || null; },
+    async delete(k) { for (const x of [].concat(k)) m.delete(x); },
+    async list({ prefix = '', limit = 1000 } = {}) {
+      const objects = [...m.keys()].filter((k) => k.startsWith(prefix)).slice(0, limit).map(obj);
+      return { objects, truncated: false };
+    },
+  };
+}

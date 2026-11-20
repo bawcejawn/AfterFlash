@@ -69,6 +69,8 @@ export function toast(msg, kind = '') {
 // ---------- ids / params
 export const isEventId = (s) => typeof s === 'string' && /^[A-Za-z0-9]{6,20}$/.test(s);
 export const isDriveId = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{10,120}$/.test(s);
+/** Files kept in Rememberoll's own storage (not Google Drive) have ids starting "r2-" and always load through the app. */
+export const isCloudId = (s) => typeof s === 'string' && s.startsWith('r2-');
 
 export function params() {
   const q = new URLSearchParams(location.search);
@@ -126,12 +128,12 @@ export function link(page, { e, s, extra = {}, frag = {} } = {}) {
 
 // ---------- media URLs (Google Drive)
 export function thumbUrl(id, w = 800) {
-  if (!isDriveId(id)) return '';
+  if (!isDriveId(id) || isCloudId(id)) return '';
   return `${config.driveBase}/thumbnail?id=${encodeURIComponent(id)}&sz=w${w | 0}`;
 }
 /** Google's image CDN form of a public Drive file — loads without a Google sign-in. */
 export function cdnUrl(id, w = 800) {
-  if (!isDriveId(id)) return '';
+  if (!isDriveId(id) || isCloudId(id)) return '';
   return `${config.imageBase || 'https://lh3.googleusercontent.com'}/d/${encodeURIComponent(id)}=w${w | 0}`;
 }
 
@@ -170,12 +172,12 @@ export function serial() {
 }
 
 export function videoUrl(id) {
-  if (!isDriveId(id)) return '';
+  if (!isDriveId(id) || isCloudId(id)) return '';
   return `${config.driveBase}/uc?export=download&id=${encodeURIComponent(id)}`;
 }
 
 export function downloadUrl(id) {
-  if (!isDriveId(id)) return '';
+  if (!isDriveId(id) || isCloudId(id)) return '';
   return `${config.driveBase}/uc?export=download&id=${encodeURIComponent(id)}`;
 }
 export function previewUrl(id) {

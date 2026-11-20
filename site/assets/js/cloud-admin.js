@@ -105,6 +105,7 @@ export function drivePanel({ studio, adminKey, me }) {
       h('button', { class: 'btn small', onclick: (e) => connect(e.currentTarget) }, 'Use a different Google account')),
     h('details', null, h('summary', null, 'Running low on space?'),
       h('ul', null,
+        me.storage && !inStoreApp() ? h('li', null, h('a', { href: '#storage' }, 'Add Rememberoll storage'), ': paid once for 12 months, and new photos save there instead of your Google Drive.') : null,
         h('li', null, 'Buy more space from Google (100 GB is a few dollars a month). Rememberoll keeps working with no changes.'),
         h('li', null, 'Or use a fresh free Google account: click “Use a different Google account”. New events save there; old events stay where they are.'),
         h('li', null, 'Or after an event: download the album (host dashboard → Share → Download all), then delete the event to free the space.'))));
@@ -114,6 +115,7 @@ export function drivePanel({ studio, adminKey, me }) {
     meter.firstChild.style.width = pct + '%';
     meter.classList.toggle('full', pct >= 90);
     line.textContent = d.limit ? `${fmtBytes(d.used)} of ${fmtBytes(d.limit)} used (${pct}%). Roughly ${Math.max(0, Math.floor((d.limit - d.used) / (3.5 * 1024 * 1024))).toLocaleString()} more photos fit.` : 'Unlimited storage.';
+    if (pct >= 80 && me.storage && !me.storage.active && !inStoreApp()) line.after(h('p', { class: 'callout warn' }, 'Your Google Drive is almost full. ', h('a', { href: '#storage' }, 'Add Rememberoll storage'), ' and new photos save there instead, so you never run out of space.'));
   }).catch(() => { line.textContent = 'Couldn’t check storage right now.'; });
   return panel;
 }
@@ -483,4 +485,42 @@ export function plannerPanel({ studio, adminKey, me }) {
     save.disabled = false;
   });
   return form;
+}
+
+
+/** Rememberoll storage: space on Rememberoll's own cloud, paid once for 12 months (or 2–3 years). */
+export function storagePanel({ studio, adminKey, me }) {
+  const st = me.storage;
+  if (!st || inStoreApp()) return null;
+  const money = (c) => '$' + (c % 100 ? (c / 100).toFixed(2) : String(c / 100));
+  const years = h('select', { class: 'dl-select', 'aria-label': 'How long' }, h('option', { value: '1' }, '12 months'), h('option', { value: '2' }, '2 years'), h('option', { value: '3' }, '3 years'));
+  const packs = h('div', { class: 'storage-packs' });
+  const drawPacks = () => {
+    const y = Number(years.value);
+    clear(packs).append(...st.packs.map((p) => {
+      const tooSmall = st.active && p.gb < st.gb;
+      return h('button', { class: `btn storage-pack${st.active && p.gb === st.gb ? ' current' : ''}`, type: 'button', disabled: tooSmall, title: tooSmall ? `You have ${st.gb} GB now` : null, onclick: (e) => buy(e.currentTarget, p.gb, y) },
+        h('b', null, `${p.gb} GB`), h('span', null, money(p.price * y)), h('small', null, st.active && p.gb === st.gb ? 'Add time' : `about ${(p.gb * 280).toLocaleString()} photos`));
+    }));
+  };
+  years.onchange = drawPacks;
+  async function buy(btn, gb, y) {
+    btn.disabled = true;
+    try { const r = await api(studio, 'storageCheckout', { k: adminKey, gb, years: y }); location.assign(r.url); }
+    catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  }
+  const pct = st.gb ? Math.min(100, Math.round((st.used / (st.gb * 1e9)) * 100)) : 0;
+  const meter = h('div', { class: 'meter', role: 'img', 'aria-label': 'Rememberoll storage used' }, h('span'));
+  meter.firstChild.style.width = pct + '%';
+  meter.classList.toggle('full', pct >= 90);
+  drawPacks();
+  return h('section', { class: 'panel stack section', id: 'storage' },
+    h('h2', null, 'Rememberoll storage'),
+    st.active
+      ? h('div', { class: 'stack' }, meter, h('p', { class: 'small' }, `${fmtBytes(st.used)} of ${st.gb} GB used (${pct}%). Paid through ${fmtDate(st.until)}.`),
+        h('p', { class: 'small muted' }, 'New photos from all your events save here, not in your Google Drive. If you ever go over, they quietly save to Google Drive instead.'))
+      : h('p', null, 'Never worry about running out of space. Photos save on Rememberoll’s own secure cloud instead of your Google Drive. Pay once, no subscription.'),
+    h('div', { class: 'row' }, h('span', { class: 'small' }, st.active ? 'Add time or more space:' : 'Pick a size:'), years),
+    packs,
+    h('p', { class: 'small muted' }, 'Photos stay viewable and downloadable after your storage time ends; only new photos stop saving there. Albums can be downloaded anytime from the host dashboard.'));
 }

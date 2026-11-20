@@ -1,7 +1,7 @@
 // Shared album: masonry grid, hosts' picks, lightbox (enhance, download, report),
 // "My photos" (works before the reveal) and the guestbook.
 import { urlCache,
-  $, h, clear, toast, params, studioFrom, isEventId, isDriveId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown,
+  $, h, clear, toast, params, studioFrom, isEventId, isDriveId, isCloudId, store, setAccent, setTitle, fmtDate, fmtWhen, fmtCountdown,
   downloadUrl, previewUrl, videoUrl, link, frameGuard, registerSW, loadDriveImage, pool, whenVisible,
 } from './util.js';
 import { mediaBlob } from './crypto.js';
@@ -235,7 +235,7 @@ function showLb() {
   const token = ++showToken;
   let media;
   for (const u of lbUrls.splice(0)) URL.revokeObjectURL(u);
-  if (it.k === 'v' && (ev.encrypted || lbMine)) {
+  if (it.k === 'v' && (ev.encrypted || lbMine || isCloudId(it.i))) {
     // Private storage, or your own video (it may not be public yet): fetched through the app.
     media = h('video', { controls: true, playsinline: true });
     proxyThumb(it.i).then((u) => { if (u && token === showToken) media.poster = u; }).catch(() => {});
@@ -251,9 +251,9 @@ function showLb() {
     });
   } else {
     media = h('img', { alt: it.g ? `Photo by ${it.g}` : 'Guest photo' });
-    if (lbMine || ev.encrypted) {
+    if (lbMine || ev.encrypted || isCloudId(it.i)) {
       proxyThumb(it.i).then((u) => { if (u && token === showToken && !media.dataset.full) media.src = u; }).catch(() => {});
-      if (ev.encrypted && !(enhanceOn && ev.enhance)) {
+      if ((ev.encrypted || isCloudId(it.i)) && !(enhanceOn && ev.enhance)) {
         fullMedia(it).then((b) => { if (token === showToken && !media.dataset.enhanced) { media.dataset.full = '1'; media.src = keepUrl(URL.createObjectURL(b)); } }).catch(() => {});
       }
     } else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
@@ -317,7 +317,7 @@ function toggleEnhance() {
 async function download() {
   const it = cur();
   if (!it) return;
-  const viaApp = ev.encrypted || lbMine;
+  const viaApp = ev.encrypted || lbMine || isCloudId(it.i);
   if (it.k === 'v' && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }
   const wantEnhanced = enhanceOn && ev.enhance && it.k !== 'v';
   if (!wantEnhanced && !viaApp) { window.open(downloadUrl(it.i), '_blank', 'noopener'); return; }

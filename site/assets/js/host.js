@@ -9,7 +9,7 @@ import { voicePlayer } from './guestbook.js';
 import { mediaBlob } from './crypto.js';
 import { applyBrand, logoEl, logoBlob, logoImage, prepareLogo, FONTS } from './brand.js';
 import { tableCardsPanel } from './table-cards.js';
-import { ownStudio, blobToBase64 } from './util.js';
+import { ownStudio, blobToBase64, inStoreApp } from './util.js';
 import { installButton, rememberPlace } from './install.js';
 import { invitationsTab } from './host-invite.js';
 import { shopStrip } from './host-shop.js';
@@ -55,7 +55,7 @@ async function boot() {
 
 /** hostList and hostUpdate don't repeat who you are (host or co-host); keep it from hostGet. */
 function keepAccess(next) {
-  return ev ? { ...next, role: next.role || ev.role, cohost: next.cohost != null ? next.cohost : ev.cohost } : next;
+  return ev ? { ...next, role: next.role || ev.role, cohost: next.cohost != null ? next.cohost : ev.cohost, store: next.store != null ? next.store : ev.store, storage: next.storage !== undefined ? next.storage : ev.storage } : next;
 }
 
 async function loadItems(quiet) {
@@ -155,6 +155,7 @@ function shareTab() {
       linkRow('Album', albumUrl(), ev.guestGallery ? 'Guests can browse here once photos are revealed.' : 'Guest browsing is off, so only you see the photos.'),
       ev.encrypted ? h('p', { class: 'callout' }, 'Private storage is on: files in Drive are locked and only this app can open them.') : null,
       downloadBox(),
+      storageLine(),
       h('p', null, h('a', { href: ev.folderUrl, target: '_blank', rel: 'noopener' }, 'Open the Google Drive folder'), ' to download every original at full resolution. (Only the Google account that runs Rememberoll can open it.)'),
       h('p', { class: 'callout warn' }, 'Never share the host link (this page’s address) with guests. Anyone who has it can change settings and delete photos. Share the guest link, QR code or event code instead.'))),
     tableCardsPanel({ ev, eventId, guestUrl: guestUrl(), logo: () => logoImage(studio, eventId, ev) }));
@@ -338,6 +339,19 @@ async function downloadAll(folders = 'challenge', bar = null) {
   flush(true);
   if (bar) bar.hidden = true;
   toast(`Album downloaded (${done - skipped} items${skipped ? `, ${skipped} skipped` : ''})`, skipped ? 'error' : 'ok');
+}
+
+/** Where new photos save: Rememberoll storage (if the account has it) or the host's Google Drive. */
+function storageLine() {
+  if (!ev.storage || inStoreApp()) return null;
+  if (!ev.storage.active) {
+    return ev.role === 'cohost' ? null : h('p', { class: 'small' }, 'Worried about Google Drive space? ',
+      h('a', { href: link('admin.html', { s: studio }) + '#storage' }, 'Add Rememberoll storage'), ' (paid once for 12 months).');
+  }
+  return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ev.store === 'r2', onchange: async (e) => {
+    try { const r = await api(studio, 'hostUseStorage', { e: eventId, k: key, on: e.target.checked }); ev.store = r.store; toast(r.store ? 'New photos save to Rememberoll storage.' : 'New photos save to your Google Drive.', 'ok'); }
+    catch (x) { toast(x.message, 'error'); e.target.checked = !e.target.checked; }
+  } }), h('span', null, 'Save new photos to Rememberoll storage', h('small', null, `Not your Google Drive. Paid through ${fmtDate(ev.storage.until)}.`)));
 }
 
 /** The Share tab's download box: choose folders, then one button. */

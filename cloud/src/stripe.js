@@ -128,3 +128,40 @@ export async function readOrderCheckout(env, id) {
     ship: sd ? { name: clip(sd.name), line1: clip(a.line1), line2: clip(a.line2), city: clip(a.city), state: clip(a.state), zip: clip(a.postal_code), country: clip(a.country) } : null,
   };
 }
+
+// ---- Rememberoll storage (Cloudflare R2), sold in packs for 12 months at a time
+export const STORAGE_PACKS = [25, 100, 250]; // GB
+/**
+ * Price in cents for `gb` of space for `years`: the owner's monthly cost per GB (STORAGE_GB_COST,
+ * default R2's $0.015) × STORAGE_MARKUP (default 50), per 12 months. One month of what the
+ * customer pays covers well over 12 months of the owner's cost.
+ */
+export function storagePrice(env, gb, years = 1) {
+  const cost = Number(env.STORAGE_GB_COST) > 0 ? Number(env.STORAGE_GB_COST) : 0.015;
+  const markup = Number(env.STORAGE_MARKUP) > 0 ? Number(env.STORAGE_MARKUP) : 50;
+  return Math.max(100, Math.round(gb * cost * markup * 100) * years);
+}
+export async function createStorageCheckout(env, { account, gb, years }) {
+  const amount = storagePrice(env, gb, years);
+  const s = await stripe(env, '/checkout/sessions', {
+    method: 'POST',
+    form: {
+      mode: 'payment',
+      'metadata[kind]': 'storage', 'metadata[account]': account, 'metadata[gb]': String(gb), 'metadata[years]': String(years),
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][unit_amount]': String(amount),
+      'line_items[0][price_data][product_data][name]': `Rememberoll storage: ${gb} GB for ${years === 1 ? '12 months' : `${years} years`}`,
+      'line_items[0][quantity]': '1',
+      success_url: `${env.SITE_ORIGIN}/admin.html?storage={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${env.SITE_ORIGIN}/admin.html`,
+      'custom_text[submit][message]': 'Space for your photos on Rememberoll’s own cloud. Paid once, no subscription.',
+    },
+  });
+  return s.url;
+}
+export async function readStorageCheckout(env, id) {
+  if (!/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(String(id))) throw err('bad_request', 'That link isn’t a valid purchase link.');
+  const s = await stripe(env, `/checkout/sessions/${encodeURIComponent(id)}`);
+  const m = s.metadata || {};
+  return { paid: s.payment_status === 'paid', kind: m.kind || '', account: String(m.account || ''), gb: Number(m.gb) || 0, years: Number(m.years) || 0, amount: s.amount_total || 0 };
+}
