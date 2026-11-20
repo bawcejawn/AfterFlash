@@ -210,8 +210,8 @@ You can't stop a customer from disputing a charge with their bank, but these ste
 2. **Make the charge easy to recognize.** Stripe → **Settings → Business → Public details → Statement descriptor**: `REMEMBEROLL` (plus a short support phone or website if Stripe allows). Many disputes are just "I don't recognize this charge".
 3. **Turn on Stripe receipts.** Stripe → **Settings → Customer emails** → "Successful payments".
 4. **Keep Radar on** (it's on by default) to block risky cards.
-5. **If someone asks for a refund, answer fast.** For a $5–10 sale, a refund is cheaper than a dispute (Stripe charges a dispute fee even if you win). Use your judgment; "all sales are final" lets you say no, but a quick yes often costs less.
-6. **If a dispute comes in:** Stripe → Payments → the dispute → **Submit evidence**. Include the checkout terms they agreed to, their receipt, and proof they used it (the event, photo count and dates from their admin page).
+5. **If someone asks for a refund, answer fast.** For a $5–10 sale, a refund is far cheaper than a dispute (a dispute costs you the sale plus at least $15). Use your judgment; "all sales are final" lets you say no, but a quick yes often costs less.
+6. **If a dispute comes in:** Stripe takes the amount plus a $15 fee you don't get back, even if you win. Submitting evidence costs another $15, which is returned only if you win. So for small sales ($5–10), usually accept the dispute and don't fight it. For bigger ones (a $30+ plan, a photo book), Stripe → Payments → the dispute → **Submit evidence**: the terms they agreed to, their receipt, and proof they used it (event, photo count, dates).
 
 ## Your first sale: step by step
 
