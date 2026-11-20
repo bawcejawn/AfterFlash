@@ -34,6 +34,7 @@ export function fakes() {
   const refresh = new Map(); // refresh token -> sub
   const access = new Map(); // access token -> sub
   const sessions = new Map(); // stripe checkout session id -> { paid, email }
+  const mail = []; // emails accepted by the fake Resend
   const quota = { usage: 0, limit: 15 * 1024 ** 3 };
   let n = 0;
   const id = (p) => `${p}${(++n).toString(36).padStart(6, '0')}x${Math.random().toString(36).slice(2, 12)}`;
@@ -110,6 +111,13 @@ export function fakes() {
       }
       return reply({ error: 'unknown ' + p }, 404);
     }
+    // ---- Resend (email)
+    if (u.host === 'api.resend.com') {
+      if (req.headers.get('authorization') !== 'Bearer re_test_fake') return reply({ message: 'bad key' }, 401);
+      const body = JSON.parse(await req.text());
+      for (const m of body) mail.push(m);
+      return reply({ data: body.map(() => ({ id: id('em') })) });
+    }
     // ---- Stripe
     if (u.host === 'api.stripe.com') {
       if (req.headers.get('authorization') !== 'Bearer sk_test_fake') return reply({ error: { message: 'bad key' } }, 401);
@@ -132,7 +140,7 @@ export function fakes() {
   }
 
   return {
-    drive, sessions, quota, grants, refresh,
+    drive, sessions, quota, grants, refresh, mail,
     /** Simulate the user approving Google sign-in: returns the code Google would send back. */
     approve({ sub = 'google-sub-1', email = 'host@example.com', scope = 'openid email https://www.googleapis.com/auth/drive.file', noRefresh = false } = {}) {
       const code = id('code'); grants.set(code, { sub, email, scope, noRefresh }); return code;

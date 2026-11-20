@@ -1,7 +1,7 @@
 // Rememberoll Cloud worker: serves the website (static assets from ../site), the JSON API at
 // /api, the Google "Connect Drive" callback at /oauth/callback, and a config.js built from
 // this deployment's settings.
-import { ACTIONS, VERSION, makeCtx, nightly } from './actions.js';
+import { ACTIONS, VERSION, makeCtx, nightly, autoMessages } from './actions.js';
 import { ApiErr, randomKey, sha256Hex } from './lib.js';
 import { authUrl, exchangeCode, sealRefresh } from './google.js';
 import { ON_SALE, PLAN_NAMES, planPrices, money } from './stripe.js';
@@ -143,7 +143,9 @@ export default {
   },
   /** Daily cron (wrangler.toml [triggers]): database cleanup. */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(nightly(env).catch((e) => console.log('nightly cleanup failed', e && e.message)));
+    // Two schedules: the nightly cleanup (07:17 UTC) and the hourly automatic emails.
+    if (event.cron === '17 * * * *') ctx.waitUntil(autoMessages(env).catch((e) => console.log('auto messages failed', e && e.message)));
+    else ctx.waitUntil(nightly(env).catch((e) => console.log('nightly cleanup failed', e && e.message)));
   },
 };
 

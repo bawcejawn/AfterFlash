@@ -135,6 +135,22 @@ You don't need to create products in Stripe: Rememberoll sets the prices itself,
 
 ---
 
+## Part 9: Turn on email (optional, about 15 minutes)
+
+Lets hosts email invitations, reminders, "the camera is open", "the photos are ready" and thank-you notes, by hand or automatically. Without it, hosts can still use their own email app (the Invitations tab has buttons for that).
+
+1. Go to **resend.com** → sign up. The free plan sends 3,000 emails a month but **only 100 a day**, so one big wedding's invitations can hit the cap. Once real customers use email, switch to Resend **Pro ($20/month, 50,000 emails, no daily cap)**.
+2. **Domains → Add domain** → type your domain (e.g. `rememberoll.com`) → Resend shows a few DNS records.
+3. In **Cloudflare → your domain → DNS → Records**, add each record exactly as Resend shows it (or click **Auto configure** if Resend offers Cloudflare). Back in Resend, click **Verify**. It can take a few minutes.
+4. Resend: **API Keys → Create API key** → name "Rememberoll", permission **Sending access**, domain: yours → **Add** → copy the key (starts with `re_`).
+5. GitHub → **Settings → Secrets and variables → Actions**:
+   - **Secrets → New repository secret:** `RESEND_API_KEY` = the key.
+   - **Variables → New repository variable:** `MAIL_FROM` = `Rememberoll <hello@YOUR-DOMAIN>` (the part in `<>` must use your verified domain).
+6. Run **Actions → Deploy Rememberoll Cloud → Run workflow**.
+7. Test: open a test event → **Invitations** tab → add your own email → **Send the invitation**. Check it arrives (and look in spam the first time).
+
+Limits built in: each event can send up to 600 emails a day, the same message can't go out twice within an hour, and anyone who clicks "Stop emails" never gets another one about that event.
+
 ## Your first sale: step by step
 
 **Week 1: proof**
