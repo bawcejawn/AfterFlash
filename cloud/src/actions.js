@@ -6,7 +6,7 @@ import {
 } from './lib.js';
 import { driveFor } from './google.js';
 import { mailReady, cleanEmail as cleanGuestEmail, render as renderMail, sendBatch } from './mail.js';
-import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted } from './stripe.js';
+import { createCheckout, readCheckout, PLAN_DAYS, ON_SALE, planPrices, discounted, SHOP, shopPrices, createOrderCheckout, readOrderCheckout } from './stripe.js';
 
 export const VERSION = '1.11.0';
 
@@ -1589,6 +1589,98 @@ export async function autoMessages(env) {
   }
   return { sent };
 }
+
+// ================================================================= prints and photo books
+/** What the host can order for this event, and the orders already placed. */
+A.hostShop = async (c, req) => {
+  const ev = await authHost(c, req);
+  const p = shopPrices(c.env);
+  const on = !!c.env.STRIPE_SECRET_KEY && !ev.settings.encrypted;
+  const rows = await c.all("SELECT id, kind, items, copies, amount, status, note, created FROM orders WHERE event = ? AND status != 'pending' ORDER BY created DESC LIMIT 50", ev.id);
+  return {
+    prints: on ? p.prints : 0, book: on ? p.book : 0, limits: SHOP, encrypted: !!ev.settings.encrypted,
+    orders: rows.map((o) => ({ id: o.id, kind: o.kind, n: JSON.parse(o.items).length, copies: o.copies, amount: o.amount, status: o.status, note: o.note, created: o.created })),
+  };
+};
+
+/** Start a print or book order: checks the photos, then sends the host to Stripe Checkout. */
+A.hostOrder = async (c, req) => {
+  const ev = await authHost(c, req);
+  await requireActivePlan(c, ev);
+  if (!(await rateOk(c, 'order:' + ev.id, 20, 3600))) throw err('rate_limited', 'Lots of orders this hour. Try again later.');
+  if (ev.settings.encrypted) throw err('bad_request', 'Prints aren’t available for encrypted events, because only you can open the photos.');
+  const kind = req.kind === 'book' ? 'book' : req.kind === 'prints' ? 'prints' : '';
+  if (!kind) throw err('bad_request', 'Pick prints or a photo book.');
+  const price = shopPrices(c.env)[kind];
+  if (!price || !c.env.STRIPE_SECRET_KEY) throw err('not_configured', 'This isn’t available yet.');
+  const lim = SHOP[kind];
+  const ids = [...new Set((Array.isArray(req.ids) ? req.ids : []).slice(0, lim.max + 1).map((x) => str(x, 100)).filter(Boolean))];
+  if (ids.length < lim.min || ids.length > lim.max) throw err('bad_request', kind === 'book' ? `A photo book needs ${lim.min} to ${lim.max} photos. You picked ${ids.length}.` : `Pick 1 to ${lim.max} photos.`);
+  for (const id of ids) {
+    const m = await mediaRow(c, ev, id);
+    if (!m || m.status === 'deleted' || m.kind === 'video') throw err('bad_request', 'Some of the picked items are videos or were deleted. Pick photos only.');
+  }
+  const copies = kind === 'prints' ? Math.min(5, Math.max(1, Math.floor(Number(req.copies) || 1))) : 1;
+  const amount = kind === 'book' ? price : price * ids.length * copies;
+  if (amount < 50) throw err('bad_request', 'The order total is too small. Pick a few more photos.');
+  const id = randomId(12);
+  const a = await accountOf(c, ev);
+  await c.run('INSERT INTO orders (id, event, account, kind, items, copies, amount, status, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, ev.id, (a && a.id) || '', kind, JSON.stringify(ids), copies, amount, 'pending', c.now());
+  const url = await createOrderCheckout(c.env, { order: id, kind, count: ids.length, copies, amount, event: ev.settings.name || 'Event' });
+  return { url };
+};
+
+/** The order thank-you page: confirms payment with Stripe and marks the order paid (once). */
+A.orderDone = async (c, req) => {
+  if (!(await rateOk(c, 'orderdone', 120, 600))) throw err('rate_limited', 'Busy, try again in a minute.');
+  const sid = str(req.session_id, 260);
+  const p = await readOrderCheckout(c.env, sid);
+  const o = p.order && await c.one('SELECT * FROM orders WHERE id = ?', p.order);
+  if (!o) throw err('not_found', 'That order wasn’t found. Contact support with your receipt.');
+  if (!p.paid) throw err('not_paid', 'This payment hasn’t gone through yet. If you just paid, wait a moment and refresh.');
+  if (o.status === 'pending') {
+    await c.run("UPDATE orders SET status = 'paid', session = ?, email = ?, ship = ?, amount = ?, paid_at = ? WHERE id = ? AND status = 'pending'",
+      sid, p.email, JSON.stringify(p.ship || {}), p.amount, c.now(), o.id);
+  } else if (o.session && o.session !== sid) throw err('not_found', 'That order wasn’t found.');
+  return { kind: o.kind, n: JSON.parse(o.items).length, copies: o.copies, amount: p.amount, email: p.email };
+};
+
+/** Owner: orders to print and ship. */
+A.ownerOrders = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const rows = await c.all("SELECT o.*, e.name AS ename FROM orders o LEFT JOIN events e ON e.id = o.event WHERE o.status != 'pending' ORDER BY (o.status = 'paid') DESC, o.created DESC LIMIT 300");
+  return { orders: rows.map((o) => ({ id: o.id, event: o.ename || o.event, kind: o.kind, n: JSON.parse(o.items).length, copies: o.copies, amount: o.amount,
+    status: o.status, email: o.email, ship: o.ship ? JSON.parse(o.ship) : {}, note: o.note, created: o.created, paid: o.paid_at })) };
+};
+
+/** Owner: the full-size original of photo number n in an order, for printing. */
+A.ownerOrderPhoto = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const o = await c.one('SELECT * FROM orders WHERE id = ?', str(req.order, 20));
+  if (!o || o.status === 'pending') throw err('not_found', 'Not found');
+  const ids = JSON.parse(o.items);
+  const n = Math.floor(Number(req.n));
+  if (!(n >= 0 && n < ids.length)) throw err('not_found', 'Not found');
+  const ev = await loadEvent(c, o.event);
+  const m = await mediaRow(c, ev, ids[n]);
+  if (!m || m.kind === 'video') throw err('not_found', 'That photo was deleted.');
+  const bytes = await (await drive(c, ev)).download(m.id);
+  if (isEnc(bytes) || bytes.length > LIMITS.VIDEO_BYTES) throw err('not_found', 'That photo can’t be opened.');
+  const mime = sniffImage(bytes);
+  if (!mime) throw err('not_found', 'That photo can’t be opened.');
+  return { mime, data: b64encode(bytes), name: `${o.id}-${String(n + 1).padStart(2, '0')}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}` };
+};
+
+/** Owner: mark an order sent (with a tracking note), cancelled, or back to paid. */
+A.ownerOrderStatus = async (c, req) => {
+  requireOwner(await authAccount(c, req));
+  const status = ['paid', 'sent', 'cancelled'].includes(req.status) ? req.status : '';
+  if (!status) throw err('bad_request', 'Pick a status.');
+  const r = await c.run("UPDATE orders SET status = ?, note = ? WHERE id = ? AND status != 'pending'", status, cleanText(req.note, 120), str(req.order, 20));
+  if (!r.meta.changes) throw err('not_found', 'Order not found');
+  return { ok: true };
+};
 
 export const ACTIONS = A;
 

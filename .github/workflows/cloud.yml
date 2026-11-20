@@ -54,6 +54,8 @@ jobs:
           SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}
           GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
           MAIL_FROM: ${{ vars.MAIL_FROM }}
+          PRINT_PRICE: ${{ vars.PRINT_PRICE }}
+          BOOK_PRICE: ${{ vars.BOOK_PRICE }}
           ANDROID_PACKAGE: ${{ vars.ANDROID_PACKAGE }}
           ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: node scripts/deploy.mjs

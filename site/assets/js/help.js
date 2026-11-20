@@ -50,6 +50,12 @@ const GUESTS = [
 ];
 
 const HOSTS = [
+  { id: 'prints', q: 'Order prints or a photo book', steps: [
+    'Open your dashboard and go to the Photos tab.',
+    'Tap photos to pick them. Tip: tap “Favorites”, then “Select all”.',
+    'Under “Prints and photo books”, choose how many copies and tap “Order prints”, or tap “Make a photo book” (20 to 60 photos).',
+    'Pay and enter the shipping address. Orders usually ship within about 2 weeks.',
+    'The status shows under “Your orders” on the Photos tab.'] },
   { id: 'messages', q: 'Email your guests (reminders, camera link, thank-you)', steps: [
     'Guests can add their email when they RSVP. You can also paste emails under Invitations → Messages.',
     'Tap “Use your own email app” to send from your own email. Guests are in BCC, so nobody sees the others’ addresses.',

@@ -116,7 +116,21 @@ with sync_playwright() as p:
     expect(page.locator(".event-code")).to_have_text(event_id, timeout=15000)
     page.click("role=tab[name=/Photos/]")
     expect(page.locator(".mod-item")).to_have_count(1)
-    page.go_back()
+    # ---- prints: pick the photo, order, pay (fake Stripe), thank-you page
+    shop = page.locator("section.shop")
+    expect(shop).to_contain_text("4×6 prints, $0.50 each", timeout=15000)
+    expect(shop.locator("button:has-text('Make a photo book')")).to_be_disabled()
+    page.click("button:has-text('Select all')")
+    page.select_option("select[name=copies]", "2")
+    shop.locator("button", has_text="Order 2 prints ($1)").click()
+    page.wait_for_url("**/order.html*", timeout=20000)
+    expect(page.locator("h1")).to_have_text("Thank you! Your order is in", timeout=20000)
+    assert "session_id" not in page.url
+    page.goto(host_url)
+    page.click("role=tab[name=/Photos/]")
+    expect(page.locator("section.shop")).to_contain_text("Paid, being made", timeout=15000)
+    page.screenshot(path=f"{SHOTS}/04b-prints.png", full_page=True)
+    page.goto(BASE + "/admin.html")
 
     # ---- lost key: sign in with Google
     page.goto(BASE + "/admin.html")
@@ -145,6 +159,9 @@ with sync_playwright() as p:
     expect(page.locator("section", has=page.locator("h2", has_text="Owner: system health"))).to_contain_text("of 10 GB", timeout=15000)
     page.click("button:has-text('Run cleanup now')")
     expect(page.locator("text=Last nightly cleanup")).to_be_visible(timeout=15000)
+    orders = page.locator("section", has=page.locator("h2", has_text="Owner: print orders"))
+    expect(orders).to_contain_text("1 photos × 2", timeout=15000)
+    expect(orders).to_contain_text("Austin")
     page.screenshot(path=f"{SHOTS}/05-owner.png", full_page=True)
 
     # ---- referral partner: owner adds a friend with a lifetime key

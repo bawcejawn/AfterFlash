@@ -11,6 +11,7 @@ import { applyBrand, logoEl, logoBlob, prepareLogo, FONTS } from './brand.js';
 import { ownStudio, blobToBase64 } from './util.js';
 import { installButton, rememberPlace } from './install.js';
 import { invitationsTab } from './host-invite.js';
+import { shopStrip } from './host-shop.js';
 
 frameGuard();
 const root = $('#app');
@@ -197,6 +198,7 @@ function photosTab() {
     h('button', { class: 'btn small', onclick: recoverMissing, title: 'Adds photos that are in the Drive folder but missing from the album' }, 'Find missing photos'));
   if (ev.purged) bodyEl.append(h('p', { class: 'callout warn' }, 'This album’s photo list was cleared because the plan had ended over 12 months ago. Your photos are still in your Google Drive: click “Find missing photos” to bring them back. They’ll come back waiting for your approval.'));
   bodyEl.append(h('div', { class: 'mod-toolbar stack' }, h('div', { class: 'row' }, ...chips), actions));
+  if (!ev.encrypted && config.cloud) bodyEl.append(shopStrip({ studio, eventId, key, items, selected }));
   if (!list.length) { bodyEl.append(h('p', { class: 'empty' }, filter === 'all' ? 'No photos yet. Share the QR code to get started.' : 'Nothing here.')); return; }
   bodyEl.append(h('div', { class: 'mod-grid' }, list.map((it) => {
     const sel = selected.has(it.i);

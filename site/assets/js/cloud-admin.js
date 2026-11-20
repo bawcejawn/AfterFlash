@@ -1,6 +1,6 @@
 // Rememberoll Cloud parts of the admin page: sign in with a bought admin key, "Lost your key?"
 // via Google, connect Google Drive (where every photo is saved), storage meter, owner tools.
-import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params, inStoreApp } from './util.js';
+import { h, clear, toast, copy, fmtBytes, fmtWhen, fmtDate, config, params, inStoreApp, base64ToBytes } from './util.js';
 import { api } from './api.js';
 
 export const CLOUD = !!config.cloud;
@@ -413,4 +413,50 @@ export function healthPanel({ studio, adminKey }) {
   }
   load();
   return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: system health'), body);
+}
+
+/** Owner: print and photo-book orders to make and ship by hand. */
+export function ordersPanel({ studio, adminKey }) {
+  const body = h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'Loading…'));
+  const money = (c) => '$' + (c % 100 ? (c / 100).toFixed(2) : String(c / 100));
+  const STATUS = { paid: 'To make', sent: 'Shipped', cancelled: 'Cancelled' };
+  async function photos(o, btn) {
+    btn.disabled = true;
+    for (let n = 0; n < o.n; n++) {
+      btn.textContent = `Downloading ${n + 1} of ${o.n}…`;
+      try {
+        const r = await api(studio, 'ownerOrderPhoto', { k: adminKey, order: o.id, n }, { retries: 1, timeout: 120000 });
+        const url = URL.createObjectURL(new Blob([base64ToBytes(r.data)], { type: r.mime }));
+        const a = h('a', { href: url, download: r.name }); document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      } catch (e) { toast(`Photo ${n + 1}: ${e.message}`, 'error'); }
+    }
+    btn.textContent = 'Download photos'; btn.disabled = false;
+  }
+  async function setStatus(o, status) {
+    const note = status === 'sent' ? (prompt('Tracking number or note (optional)', o.note || '') ?? null) : o.note;
+    if (note === null) return;
+    try { await api(studio, 'ownerOrderStatus', { k: adminKey, order: o.id, status, note }); toast('Saved.'); load(); } catch (e) { toast(e.message, 'error'); }
+  }
+  async function load() {
+    try {
+      const { orders } = await api(studio, 'ownerOrders', { k: adminKey });
+      if (!orders.length) { clear(body).append(h('p', { class: 'muted' }, 'No orders yet. Prints and books are offered once PRINT_PRICE or BOOK_PRICE is set (see docs/LAUNCH.md, Part 10).')); return; }
+      clear(body).append(h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Order'), h('th', null, 'Ship to'), h('th', null, 'Status'), h('th', null, ''))),
+        h('tbody', null, orders.map((o) => {
+          const s = o.ship || {};
+          return h('tr', null,
+            h('td', null, o.kind === 'book' ? `Photo book, ${o.n} photos` : `${o.n} photos × ${o.copies}`, h('div', { class: 'small muted' }, `${o.event}, ${money(o.amount)}, ${fmtDate(o.paid || o.created)}`)),
+            h('td', { class: 'small' }, [s.name, s.line1, s.line2, [s.city, s.state, s.zip].filter(Boolean).join(' '), s.country].filter(Boolean).map((l) => h('div', null, l)), h('div', { class: 'muted' }, o.email)),
+            h('td', null, STATUS[o.status] || o.status, o.note ? h('div', { class: 'small muted' }, o.note) : null),
+            h('td', null, h('div', { class: 'row' },
+              h('button', { class: 'btn small', onclick: (e) => photos(o, e.currentTarget) }, 'Download photos'),
+              o.status !== 'sent' ? h('button', { class: 'btn small primary', onclick: () => setStatus(o, 'sent') }, 'Mark shipped') : null,
+              o.status === 'paid' ? h('button', { class: 'btn small', onclick: () => setStatus(o, 'cancelled') }, 'Cancel') : null)));
+        }))));
+    } catch (e) { clear(body).append(h('p', null, e.message)); }
+  }
+  load();
+  return h('section', { class: 'panel stack section' }, h('h2', null, 'Owner: print orders'), body);
 }

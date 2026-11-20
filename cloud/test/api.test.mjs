@@ -700,6 +700,44 @@ t('messages: guest emails, invite + reminder + thank-you, opt-out, limits, hourl
   assert.equal(s.fk.mail.length, before + 1); assert.match(s.fk.mail.at(-1).subject, /camera is open/);
 });
 
+t('prints and photo books: owner prices, photos only, Stripe shipping, paid once, owner fulfilment', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Shop' } });
+  const hk = 'admin:' + k;
+  const g = await s.call({ a: 'join', e: ev.id, label: 'Nana' });
+  for (let i = 0; i < 3; i++) await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid(), w: 10, h: 10 });
+  const ids = (await s.call({ a: 'hostList', e: ev.id, k: hk })).items.map((x) => x.i);
+  const shop = await s.call({ a: 'hostShop', e: ev.id, k: hk });
+  assert.equal(shop.prints, 50); assert.equal(shop.book, 7900); assert.deepEqual(shop.orders, []);
+  assert.equal((await s.call({ a: 'hostShop', e: ev.id, k: 'nope' })).error, 'unauthorized');
+  assert.equal((await s.call({ a: 'hostOrder', e: ev.id, k: hk, kind: 'book', ids })).error, 'bad_request', 'book needs 20+');
+  assert.equal((await s.call({ a: 'hostOrder', e: ev.id, k: hk, kind: 'prints', ids: ['not-a-photo'] })).error, 'bad_request');
+  const o = await s.call({ a: 'hostOrder', e: ev.id, k: hk, kind: 'prints', ids: [...ids, ids[0]], copies: 2 });
+  const sid = o.url.split('/').pop();
+  assert.equal(s.fk.sessions.get(sid).amount, 300, '3 photos x 2 copies x 50c');
+  assert.equal((await s.call({ a: 'orderDone', session_id: sid })).error, 'not_paid');
+  assert.equal((await s.call({ a: 'hostShop', e: ev.id, k: hk })).orders.length, 0, 'unpaid orders hidden');
+  s.fk.pay(sid);
+  const done = await s.call({ a: 'orderDone', session_id: sid });
+  assert.equal(done.n, 3); assert.equal(done.copies, 2);
+  await s.call({ a: 'orderDone', session_id: sid });
+  assert.equal((await s.call({ a: 'hostShop', e: ev.id, k: hk })).orders[0].status, 'paid');
+  assert.equal((await s.call({ a: 'ownerOrders', k })).error, 'forbidden');
+  const owner = s.env.OWNER_KEY;
+  const list = (await s.call({ a: 'ownerOrders', k: owner })).orders;
+  assert.equal(list.length, 1); assert.equal(list[0].ship.city, 'Austin'); assert.equal(list[0].event, 'Shop');
+  const ph = await s.call({ a: 'ownerOrderPhoto', k: owner, order: list[0].id, n: 0 });
+  assert.equal(ph.mime, 'image/jpeg'); assert.match(ph.name, /-01\.jpg$/);
+  assert.equal((await s.call({ a: 'ownerOrderPhoto', k: owner, order: list[0].id, n: 9 })).error, 'not_found');
+  assert.equal((await s.call({ a: 'ownerOrderPhoto', k, order: list[0].id, n: 0 })).error, 'forbidden');
+  await s.call({ a: 'ownerOrderStatus', k: owner, order: list[0].id, status: 'sent', note: 'USPS 9400 <b>1</b>' });
+  const after = (await s.call({ a: 'hostShop', e: ev.id, k: hk })).orders[0];
+  assert.equal(after.status, 'sent'); assert.equal(after.note, 'USPS 9400 b1/b');
+  s.env.BOOK_PRICE = '';
+  assert.equal((await s.call({ a: 'hostOrder', e: ev.id, k: hk, kind: 'book', ids })).error, 'not_configured');
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }
