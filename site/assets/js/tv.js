@@ -1,5 +1,5 @@
 // TV / projector photo wall. New photos jump the queue; otherwise the wall replays older ones.
-import { urlCache, $, h, clear, params, studioFrom, isEventId, isDriveId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
+import { urlCache, $, h, clear, params, studioFrom, isEventId, isDriveId, isCloudId, setAccent, setTitle, fmtCountdown, link, qrSvg, loadDriveImage, serial, videoUrl } from './util.js';
 import { api } from './api.js';
 import { mediaBlob } from './crypto.js';
 import { applyBrand, logoEl } from './brand.js';
@@ -236,7 +236,7 @@ function playVideo(it) {
   const v = h('video', { muted: true, playsinline: true, autoplay: true, preload: 'auto', class: 'tv-video' });
   v.muted = true;
   vid = v;
-  if (ev.encrypted) {
+  if (ev.encrypted || isCloudId(it.i)) {
     api(studio, 'photo', { e: eventId, id: it.i, wk: wk || undefined }, { retries: 0, timeout: 60000 })
       .then((r) => mediaBlob(r, wallKeyForMedia))
       .then((b) => { if (vid === v) v.src = URL.createObjectURL(b); })

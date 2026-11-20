@@ -50,6 +50,11 @@ const GUESTS = [
 ];
 
 const HOSTS = [
+  { id: 'storage', q: 'Never run out of space (Rememberoll storage)', steps: [
+    'On the admin page, find “Rememberoll storage” and pick a size: 25, 100 or 250 GB.',
+    'Choose 12 months, 2 years or 3 years and pay once. There’s no subscription.',
+    'New photos from your events then save on Rememberoll’s cloud instead of your Google Drive. You can switch one event back on its Share tab.',
+    'Buy again any time to add time or move up to more space. After your time ends, photos stay viewable and downloadable.'] },
   { id: 'surprise', q: 'Throw a surprise party', steps: [
     'Create an event and pick “Surprise party”. Guests can add old photos from their phone and short video wishes. The album stays hidden from guests, so the guest of honor can’t peek.',
     'Pass the guest link or QR code around in secret (group chats work great).',

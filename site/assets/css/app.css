@@ -652,3 +652,10 @@ h1 { letter-spacing: -0.02em; }
 @keyframes fall { to { transform: translateY(115vh) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) { .tv-reveal-num, .tv-reveal-title, .confetti { animation: none; } .confetti { display: none; } }
 .dl-select { width: auto; min-width: 0; padding-block: 6px; }
+
+/* Rememberoll storage packs (admin page) */
+.storage-packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.btn.storage-pack { display: grid; gap: 2px; justify-items: start; text-align: left; padding: 14px 16px; border-radius: 14px; height: auto; }
+.btn.storage-pack b { font-size: 1.3rem; }
+.btn.storage-pack small { font-weight: 500; opacity: .75; }
+.btn.storage-pack.current { border-color: var(--brand, #2c45c9); box-shadow: 0 0 0 2px var(--brand, #2c45c9) inset; }

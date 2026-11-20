@@ -2,11 +2,11 @@
 // Usage: node cloud/test/server.mjs [port]  (prints the owner key)
 import http from 'node:http';
 import fs from 'node:fs';
-import { makeEnv } from './harness.mjs';
+import { makeEnv, fakeR2 } from './harness.mjs';
 
 const port = Number(process.argv[2] || 8788);
 const origin = `http://localhost:${port}`;
-const { env, fk, worker } = makeEnv({ GOOGLE_AUTH_BASE: origin + '/__google-auth', SITE_ORIGIN: origin, IMAGE_BASE: origin + '/mock-lh3', DRIVE_BASE: origin + '/mock-drive' });
+const { env, fk, worker } = makeEnv({ STORE: fakeR2(), GOOGLE_AUTH_BASE: origin + '/__google-auth', SITE_ORIGIN: origin, IMAGE_BASE: origin + '/mock-lh3', DRIVE_BASE: origin + '/mock-drive' });
 fs.writeFileSync('/tmp/photoshare-owner-key', env.OWNER_KEY);
 
 http.createServer(async (req, res) => {

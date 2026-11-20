@@ -19,7 +19,7 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 5. **"Best of the night" vote.** Guests get 3 votes; the top 10 show on the TV at the end. *Later.*
 6. **Live photo wall mode.** New photos fly onto the TV as they arrive. *Done.*
 7. **Countdown screen.** The invitation shows "12 days to go" and changes into the camera on the day. *Done.*
-8. **"My photos" page.** Each guest can see and download just the photos they took. *Next.*
+8. **"My photos" page.** Each guest can see and download just the photos they took. *Done.*
 9. **Video guestbook prompts.** "Give the couple one piece of advice" before recording. *Next.*
 10. **Table challenges.** Each table gets its own challenge and the TV shows a table leaderboard. *Later.*
 11. **Photo booth frame.** The host uploads a frame or picks one, and guests can add it to a photo. *Later.*
@@ -48,7 +48,7 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 29. **Prints.** Hosts order prints of chosen photos. You set the price and earn the margin. *Done.*
 30. **Photo book.** A 20-page hardcover book from the best photos. High margin. *Done.*
-31. **Rememberoll Storage.** We keep the originals for the host, so they don't need Google Drive. Costs us about $0.015 per GB a month (Cloudflare R2), so we sell it for $10–15 per event for 1 year. *Next.*
+31. **Rememberoll Storage.** We keep the originals for the host, so they don't need Google Drive. Costs us about $0.015 per GB a month (Cloudflare R2), so we sell it for $10–15 per event for 1 year. *Done* (50× your R2 cost, paid per 12 months).
 32. **Keep-it-forever.** A one-time upgrade that keeps the album and invitation online past the plan. *Later.*
 33. **Time capsule unlock.** $5 to send the anniversary capsule (idea 14). *Later.*
 34. **Highlight video in HD with music.** The free version stays; a paid version gets licensed music and longer cuts. *Later.*
@@ -79,9 +79,8 @@ Camera with no app download, disposable-camera mode (limited shots, develop late
 
 What's left, in order. Each one is a small update.
 
-1. Storage add-on on Rememberoll's own cloud (31)
-2. Reactions (4)
-3. "My photos" page (8)
-4. Timed challenges (1)
-5. Premium invitation designs and custom link names (35, 36)
-6. White label for planners (40)
+1. Reactions (4)
+2. Timed challenges (1)
+3. Premium invitation designs and custom link names (35, 36)
+4. White label for planners (40)
+5. Clean up Rememberoll storage some months after it expires

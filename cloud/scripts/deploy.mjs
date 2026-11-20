@@ -84,6 +84,8 @@ const vars = {
   PRINT_PRICE: env.PRINT_PRICE || '',
   BOOK_PRICE: env.BOOK_PRICE || '',
   GUEST_OFFER_CODE: env.GUEST_OFFER_CODE || '',
+  STORAGE_GB_COST: env.STORAGE_GB_COST || '0.015',
+  STORAGE_MARKUP: env.STORAGE_MARKUP || '50',
   ANDROID_PACKAGE: env.ANDROID_PACKAGE || '',
   ANDROID_CERT_SHA256: (env.ANDROID_CERT_SHA256 || '').toUpperCase().replace(/\s+/g, ''),
   PRICE_EVENT: env.PRICE_EVENT || '5',
@@ -92,9 +94,24 @@ const vars = {
   ACTIVE_SHARD: active,
   OVERRIDE_PCT: env.OVERRIDE_PCT || '5',
 };
+// Rememberoll storage (optional): set the GitHub variable STORAGE_BUCKET (e.g. rememberoll-photos).
+// Needs R2 turned on in Cloudflare and "R2: Edit" on the API token. If anything is missing, the
+// site still deploys, just without the storage add-on.
+let r2 = '';
+const bucketName = String(env.STORAGE_BUCKET || '').trim();
+if (bucketName) {
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucketName)) fail('STORAGE_BUCKET must be 3–63 lowercase letters, numbers or dashes.');
+  try {
+    const list = run(['r2', 'bucket', 'list']);
+    if (!list.includes(bucketName)) { console.log(`Creating storage bucket ${bucketName}…`); run(['r2', 'bucket', 'create', bucketName]); }
+    r2 = `\n[[r2_buckets]]\nbinding = "STORE"\nbucket_name = "${bucketName}"\n`;
+  } catch (e) {
+    console.log('⚠ Rememberoll storage is OFF: couldn’t reach Cloudflare R2. Turn on R2 in the Cloudflare dashboard and give the API token "R2: Edit" permission (docs/LAUNCH.md, Part 12).');
+  }
+}
 let toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8')
   .replace(/database_id = "[^"]*"/, `database_id = "${dbId}"`)
-  .replace('\n[triggers]', shards.map((x) => `\n[[d1_databases]]\nbinding = "${x.binding}"\ndatabase_name = "${x.name}"\ndatabase_id = "${x.id}"\nmigrations_dir = "migrations-shard"\n`).join('') + '\n[triggers]')
+  .replace('\n[triggers]', shards.map((x) => `\n[[d1_databases]]\nbinding = "${x.binding}"\ndatabase_name = "${x.name}"\ndatabase_id = "${x.id}"\nmigrations_dir = "migrations-shard"\n`).join('') + r2 + '\n[triggers]')
   .replace(/\[vars\][\s\S]*$/, '[vars]\n' + Object.entries(vars).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n') + '\n');
 const cfg = path.join(root, 'wrangler.deploy.toml');
 fs.writeFileSync(cfg, toml);

@@ -146,6 +146,15 @@ with sync_playwright() as p:
     expect(page.locator("text=Copies the look")).to_be_visible()
     assert not page.locator("input[name=shotsPerGuest]").is_visible()
     page.screenshot(path=f"{SHOTS}/04c-planner.png", full_page=True)
+    # ---- Rememberoll storage: buy 25 GB, come back, it's on
+    store = page.locator("#storage")
+    expect(store).to_contain_text("Never worry about running out of space")
+    store.locator("button.storage-pack", has_text="25 GB").click()
+    page.wait_for_url("**/admin.html*", timeout=20000)
+    expect(page.locator("text=Rememberoll storage is on: 25 GB")).to_be_visible(timeout=20000)
+    expect(page.locator("#storage")).to_contain_text("of 25 GB used", timeout=15000)
+    assert "storage=" not in page.url
+    page.screenshot(path=f"{SHOTS}/04d-storage.png", full_page=True)
 
     # ---- lost key: sign in with Google
     page.goto(BASE + "/admin.html")

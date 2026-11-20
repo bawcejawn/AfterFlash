@@ -1,7 +1,7 @@
 // Rememberoll Cloud API tests: the real worker with D1 on SQLite and fake Google/Stripe.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { makeEnv, d1 } from './harness.mjs';
+import { makeEnv, d1, fakeR2 } from './harness.mjs';
 
 const tests = [];
 const t = (name, fn) => tests.push([name, fn]);
@@ -819,6 +819,61 @@ t('archive date, recap email, report alert, guest offer', async () => {
   assert.ok((await s.call({ a: 'hostList', e: ev.id, k: hk })).items.length >= 1);
   await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { archiveAt: '' } });
   assert.ok((await s.call({ a: 'event', e: ev.id })).event);
+});
+
+t('Rememberoll storage: buy a pack, uploads go to R2, quota, Drive-full switch, delete frees space', async () => {
+  const R2 = fakeR2();
+  const s = await boot({ STORE: R2 });
+  const k = await hostWithDrive(s);
+  // offered with prices: 50 x $0.015/GB-month, for 12 months
+  const me = (await s.call({ a: 'adminCheck', k })).me;
+  assert.equal(me.storage.active, false);
+  assert.deepEqual(me.storage.packs.map((p) => [p.gb, p.price]), [[25, 1875], [100, 7500], [250, 18750]]);
+  const ev1 = await s.call({ a: 'adminCreate', k, settings: { name: 'Before' } });
+  assert.equal((await s.call({ a: 'hostUseStorage', e: ev1.id, k: 'admin:' + k, on: true })).error, 'storage_needed');
+  assert.equal((await s.call({ a: 'storageCheckout', k, gb: 7 })).error, 'bad_request');
+  const co = await s.call({ a: 'storageCheckout', k, gb: 25, years: 2 });
+  const sid = co.url.split('/').pop();
+  assert.equal(s.fk.sessions.get(sid).amount, 3750, '2 years');
+  assert.equal((await s.call({ a: 'storageClaim', k, session_id: sid })).error, 'not_paid');
+  s.fk.pay(sid);
+  const cl = await s.call({ a: 'storageClaim', k, session_id: sid });
+  assert.equal(cl.storage.active, true); assert.equal(cl.storage.gb, 25);
+  const until = cl.storage.until;
+  assert.ok(until > Date.now() + 2 * 364 * 864e5);
+  await s.call({ a: 'storageClaim', k, session_id: sid });
+  assert.equal((await s.call({ a: 'adminCheck', k })).me.storage.until, until, 'claiming twice adds nothing');
+  const other = await hostWithDrive(s, { sub: 'google-sub-other' });
+  assert.equal((await s.call({ a: 'storageClaim', k: other, session_id: sid })).error, 'not_found', 'not your payment');
+  assert.equal((await s.call({ a: 'hostGet', e: ev1.id, k: 'admin:' + k })).event.store, 'r2', 'open events switched over');
+  // uploads land in R2 with r2- ids and load through the app
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Cloud party' } });
+  assert.equal((await s.call({ a: 'hostGet', e: ev.id, k: 'admin:' + k })).event.store, 'r2', 'new events use it automatically');
+  const g = await s.call({ a: 'join', e: ev.id, label: 'Ann' });
+  const up = await s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid(), w: 10, h: 10 });
+  assert.ok(!up.error, JSON.stringify(up));
+  const items = (await s.call({ a: 'hostList', e: ev.id, k: 'admin:' + k })).items;
+  assert.match(items[0].i, /^r2-[A-Za-z0-9]{30}$/);
+  assert.ok([...R2.objects.keys()].every((x) => x.startsWith(`e/${ev.id}/`) || x.startsWith(`e/${ev1.id}/`)));
+  assert.equal((await s.call({ a: 'photo', e: ev.id, id: items[0].i })).mime, 'image/jpeg');
+  assert.equal((await s.call({ a: 'hostMedia', e: ev.id, k: 'admin:' + k, id: items[0].i, which: 'orig' })).mime, 'image/jpeg');
+  const used = (await s.call({ a: 'adminCheck', k })).me.storage.used;
+  assert.ok(used > 0);
+  // a smaller pack can't be bought to extend a bigger one
+  // (25 is the current size, so 25 is fine and 100 upgrades)
+  assert.ok((await s.call({ a: 'storageCheckout', k, gb: 25 })).url);
+  // deleting the event frees the space
+  await s.call({ a: 'adminDelete', k, e: ev.id, confirm: ev.id });
+  assert.equal([...R2.objects.keys()].filter((x) => x.startsWith(`e/${ev.id}/`)).length, 0);
+  assert.ok((await s.call({ a: 'adminCheck', k })).me.storage.used < used);
+  // Drive full on an event that saves to Drive: it switches to Rememberoll storage and carries on
+  const ev3 = await s.call({ a: 'adminCreate', k, settings: { name: 'Drive first' } });
+  await s.call({ a: 'hostUseStorage', e: ev3.id, k: 'admin:' + k, on: false });
+  s.fk.quota.limit = s.fk.quota.usage; // Google Drive is now full
+  const g3 = await s.call({ a: 'join', e: ev3.id, label: 'Bo' });
+  const up3 = await s.call({ a: 'upload', e: ev3.id, g: g3.guest.id, t: g3.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid(), w: 10, h: 10 });
+  assert.ok(!up3.error, JSON.stringify(up3));
+  assert.equal((await s.call({ a: 'hostGet', e: ev3.id, k: 'admin:' + k })).event.store, 'r2');
 });
 
 let passed = 0;
