@@ -133,7 +133,8 @@ export function fakes() {
       if (m) {
         const s = sessions.get(decodeURIComponent(m[1]));
         if (!s) return reply({ error: { message: 'No such checkout.session' } }, 404);
-        return reply({ id: m[1], payment_status: s.paid ? 'paid' : 'unpaid', customer_details: { email: s.email }, amount_total: s.amount, metadata: s.metadata, livemode: false });
+        return reply({ id: m[1], payment_status: s.paid ? 'paid' : 'unpaid', customer_details: { email: s.email }, amount_total: s.amount, metadata: s.metadata, livemode: false,
+          ...(s.paid ? { collected_information: { shipping_details: { name: 'Sam Host', address: { line1: '1 Main St', city: 'Austin', state: 'TX', postal_code: '78701', country: 'US' } } } } : {}) });
       }
     }
     return null;
@@ -159,7 +160,7 @@ export function makeEnv(extra = {}) {
     DB: d1(),
     SITE_ORIGIN: 'http://localhost:8788',
     GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret',
-    STRIPE_SECRET_KEY: 'sk_test_fake', PRICE_EVENT: '$5', PRICE_MONTH: '$10', PRICE_YEAR: '$30',
+    STRIPE_SECRET_KEY: 'sk_test_fake', PRINT_PRICE: '0.50', BOOK_PRICE: '79', PRICE_EVENT: '$5', PRICE_MONTH: '$10', PRICE_YEAR: '$30',
     DATA_KEY: 'test-data-key-0123456789abcdef0123456789', OWNER_KEY: 'owner-key-for-tests-0123456789',
     ASSETS: { fetch: (req) => serveAsset(new URL(req.url).pathname) },
     ...extra,

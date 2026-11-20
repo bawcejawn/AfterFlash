@@ -3,7 +3,7 @@ import { $, h, clear, toast, store, link, copy, fmtDate, fmtWhen, localInputToIs
 import { api, ping, BACKEND_VERSION } from './api.js';
 import { copyBackendCode } from './backend-code.js';
 import { installButton, rememberPlace } from './install.js';
-import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, CLOUD } from './cloud-admin.js';
+import { cloudLogin, cloudBanner, drivePanel, ownerPanel, cloudKeyScreen, planPanel, partnerPanel, partnersPanel, healthPanel, ordersPanel, CLOUD } from './cloud-admin.js';
 
 frameGuard();
 const root = $('#app');
@@ -108,6 +108,7 @@ async function dashboard(created) {
     !CLOUD && me.role === 'owner' ? adminsPanel() : null,
     CLOUD && me.role === 'owner' ? ownerPanel({ studio, adminKey }) : null,
     CLOUD && me.role === 'owner' ? partnersPanel({ studio, adminKey }) : null,
+    CLOUD && me.role === 'owner' ? ordersPanel({ studio, adminKey }) : null,
     CLOUD && me.role === 'owner' ? healthPanel({ studio, adminKey }) : null,
     me.role === 'owner' || CLOUD ? keyBackupPanel() : null);
 }

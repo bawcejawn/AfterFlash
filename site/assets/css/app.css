@@ -595,3 +595,8 @@ h1 { letter-spacing: -0.02em; }
 .msg-row small { display: block; color: var(--muted); }
 .msg-log { margin: 0; padding-left: 1.2rem; color: var(--ink-2); font-size: var(--step--1); }
 @media (max-width: 520px) { .msg-row { flex-direction: column; align-items: stretch; } }
+
+/* Prints and photo books (host Photos tab) */
+.shop { margin: 14px 0; }
+.shop .row { align-items: center; }
+.shop select { width: auto; min-width: 0; padding-block: 6px; }

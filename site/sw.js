@@ -1,6 +1,6 @@
 // Service worker: lets the guest camera open with no signal. Only caches this site's own
 // files; never touches API calls or Google Drive requests.
-const VERSION = 'ps-v13';
+const VERSION = 'ps-v14';
 const SHELL = [
   './', 'index.html', 'app.html', 'assets/js/app.js', 'cam.html', 'album.html', 'tv.html', 'config.js', 'manifest.webmanifest',
   'assets/css/app.css', 'assets/css/home.css', 'assets/img/prints/toast.svg', 'assets/img/prints/cake.svg', 'assets/img/prints/dance.svg', 'assets/img/prints/dog.svg', 'assets/img/icon.svg', 'assets/img/icon-192.png', 'assets/img/apple-touch-icon.png',

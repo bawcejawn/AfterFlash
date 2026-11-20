@@ -151,6 +151,22 @@ Lets hosts email invitations, reminders, "the camera is open", "the photos are r
 
 Limits built in: each event can send up to 600 emails a day, the same message can't go out twice within an hour, and anyone who clicks "Stop emails" never gets another one about that event.
 
+## Part 10: Sell prints and photo books (optional, about 10 minutes)
+
+Hosts pick photos on their Photos tab and pay through Stripe, and Stripe collects the shipping address. You order the prints or book from any photo lab and have it shipped to the host. You keep the difference.
+
+1. Choose a lab you like (for example a local shop, or an online lab that ships straight to the customer). Look up its current price for 4×6 prints and a 20-page hardcover book, including shipping.
+2. Set your prices well above that cost. Prints often sell for about $1 each and books for $60–90.
+3. GitHub → your repo → **Settings → Secrets and variables → Actions → Variables** → add **PRINT_PRICE** (for example `1`) and/or **BOOK_PRICE** (for example `79`). Leave one out to offer only the other.
+4. **Actions → Deploy Rememberoll Cloud → Run workflow.**
+5. To test, in Stripe test mode, open an event's **Photos** tab, pick a few photos and order prints. Use card `4242 4242 4242 4242`.
+6. When an order comes in: open **admin.html** → **Owner: print orders** → **Download photos** → upload them to your lab with the customer's address → **Mark shipped** and paste the tracking number. The host sees the status on their Photos tab.
+
+Notes:
+- Only Cloud events offer this. Encrypted (private storage) events don't, because you can't open their photos.
+- It is turned off inside the Google Play app for now, to keep the store review simple. Hosts order on the website. (Play does allow outside payment for physical goods, so this can be turned on later.)
+- Shipping is to the US and Canada only. Orders are made to order, so the checkout says all sales are final; still refund in Stripe if a lab ruins an order.
+
 ## Your first sale: step by step
 
 **Week 1: proof**

@@ -85,3 +85,46 @@ export async function readCheckout(env, id) {
     commission: Number.isInteger(pct) && pct >= 0 && pct <= 50 ? pct : 0,
   };
 }
+
+// ---- prints and photo books (add-ons the owner turns on by setting a price; fulfilled by hand)
+export const SHOP = { prints: { min: 1, max: 100, name: 'prints' }, book: { min: 20, max: 60, name: 'photo book' } };
+/** Prices in cents from PRINT_PRICE (per print) and BOOK_PRICE (per book). 0 = not offered. */
+export function shopPrices(env) {
+  return { prints: toCents(env.PRINT_PRICE, '0'), book: toCents(env.BOOK_PRICE, '0') };
+}
+const COUNTRIES = ['US', 'CA'];
+
+/** Stripe Checkout for a print or book order. Stripe collects the shipping address. */
+export async function createOrderCheckout(env, { order, kind, count, copies, amount, event }) {
+  const label = kind === 'book' ? `Photo book (${count} photos)` : `${count * copies} photo print${count * copies === 1 ? '' : 's'} (4×6)`;
+  const form = {
+    mode: 'payment',
+    'metadata[order]': order,
+    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][unit_amount]': String(amount),
+    'line_items[0][price_data][product_data][name]': `${label}: ${event}`.slice(0, 200),
+    'line_items[0][quantity]': '1',
+    success_url: `${env.SITE_ORIGIN}/order.html?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${env.SITE_ORIGIN}/order.html?cancelled=1`,
+    'custom_text[submit][message]': 'Printed and shipped within about 2 weeks. Made to order, so all sales are final.',
+  };
+  COUNTRIES.forEach((cc, i) => { form[`shipping_address_collection[allowed_countries][${i}]`] = cc; });
+  const s = await stripe(env, '/checkout/sessions', { method: 'POST', form });
+  return s.url;
+}
+
+/** { paid, email, amount, order, ship } for an order's Checkout Session. */
+export async function readOrderCheckout(env, id) {
+  if (!/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(String(id))) throw err('bad_request', 'That link isn’t a valid order link.');
+  const s = await stripe(env, `/checkout/sessions/${encodeURIComponent(id)}`);
+  const meta = s.metadata || {};
+  const sd = (s.collected_information && s.collected_information.shipping_details) || s.shipping_details || null;
+  const a = (sd && sd.address) || {};
+  const clip = (v) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120);
+  return {
+    paid: s.payment_status === 'paid',
+    email: clip(s.customer_details && s.customer_details.email), amount: s.amount_total || 0,
+    order: /^[A-Za-z0-9]{12}$/.test(meta.order || '') ? meta.order : '',
+    ship: sd ? { name: clip(sd.name), line1: clip(a.line1), line2: clip(a.line2), city: clip(a.city), state: clip(a.state), zip: clip(a.postal_code), country: clip(a.country) } : null,
+  };
+}
