@@ -96,7 +96,15 @@ function sanitizeSettings(s) {
     font: ['modern', 'elegant', 'script'].includes(s.font) ? s.font : 'modern',
     tagline: cleanText(s.tagline, 80),
     invite: sanitizeInvite(s.invite),
+    captions: s.captions !== false,
+    challenges: sanitizeChallenges(s.challenges),
   };
+}
+/** Photo challenges: up to 15 short prompts the host picks ("Selfie with the couple"). */
+function sanitizeChallenges(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const list = Array.isArray(v.list) ? v.list.map((x) => cleanText(x, 60)).filter(Boolean).slice(0, 15) : [];
+  return { on: v.on === true && list.length > 0, list };
 }
 /** Text that keeps line breaks (for the invitation note). Same safety rules as cleanText. */
 function cleanLines(v, max) {
@@ -140,6 +148,7 @@ function publicEvent(ev) {
     accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted,
     enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pin_hash, revealed: isRevealed(s), now: Date.now(),
     invite: s.invite.on, coverV: ev.cover ? ev.cover.v : '',
+    captions: s.captions && !s.encrypted, challenges: s.challenges.on ? s.challenges.list : [],
   };
 }
 async function wallKey(ev) { return (await sha256Hex(ev.host_hash + ':wall')).slice(0, 32); }
@@ -395,8 +404,12 @@ A.upload = async (c, req) => {
   if (!enc && status === 'visible' && !(await share(c, ev, [fileId, thumbId], true))) flags.push('share-failed');
   if (enc) flags.push('encrypted');
   try {
-    await S(c, ev).run('INSERT INTO media (event, id, thumb, guest, kind, mime, bytes, sha, w, h, dur, created, status, client, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ev.id, fileId, thumbId, g.id, kind, mime, bytes.length, plainSha, int(req.w, 0, 20000, 0), int(req.h, 0, 20000, 0), int(req.dur, 0, 600, 0), now, status, clientId, flags.join(','));
+    // Captions are plain text from the guest (never on private-storage events, which promise the
+    // server can't read guest content). A challenge must be one of the host's own prompts.
+    const caption = s.captions && !enc ? cleanText(req.caption, 80) : '';
+    const challenge = s.challenges.on && s.challenges.list.includes(cleanText(req.challenge, 60)) ? cleanText(req.challenge, 60) : '';
+    await S(c, ev).run('INSERT INTO media (event, id, thumb, guest, kind, mime, bytes, sha, w, h, dur, created, status, client, flags, caption, challenge) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ev.id, fileId, thumbId, g.id, kind, mime, bytes.length, plainSha, int(req.w, 0, 20000, 0), int(req.h, 0, 20000, 0), int(req.dur, 0, 600, 0), now, status, clientId, flags.join(','), caption, challenge);
   } catch (e) {
     await d.trash(fileId).catch(() => {}); if (thumbId) await d.trash(thumbId).catch(() => {});
     await refund();
@@ -423,7 +436,7 @@ A.list = async (c, req) => {
   base.pending = rows.filter((m) => m.status === 'pending').length;
   if (s.encrypted && revealed && (s.guestGallery || isWall)) base.key = await eventKey(c, ev);
   if (!revealed || (!s.guestGallery && !isWall)) { base.items = []; return base; }
-  base.items = visible.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), c: m.created, w: m.w, h: m.h, d: m.dur || 0, f: m.fav ? 1 : 0 }));
+  base.items = visible.map((m) => ({ i: m.id, t: m.thumb || '', k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), c: m.created, w: m.w, h: m.h, d: m.dur || 0, f: m.fav ? 1 : 0, cap: m.caption || '', ch: m.challenge || '' }));
   return base;
 };
 
@@ -596,7 +609,7 @@ A.hostList = async (c, req) => {
   if (!ev.v) { ev.v = randomId(8); await c.run('UPDATE events SET v = ? WHERE id = ?', ev.v, ev.id); }
   return {
     items: rows.map((m) => ({ i: m.id, t: m.thumb, k: m.kind === 'video' ? 'v' : 'p', g: m.glabel || (m.guest === 'recovered' ? 'Recovered from Drive' : ''), gid: m.guest,
-      c: m.created, w: m.w, h: m.h, s: m.status, r: m.reports || 0, b: m.bytes, sha: m.sha, ai: null, f: m.flags || '', fv: !!m.fav })),
+      c: m.created, w: m.w, h: m.h, s: m.status, r: m.reports || 0, b: m.bytes, sha: m.sha, ai: null, f: m.flags || '', fv: !!m.fav, cap: m.caption || '', ch: m.challenge || '' })),
     v: ev.v, event: await hostEvent(ev),
   };
 };
@@ -619,6 +632,16 @@ A.hostModerate = async (c, req) => {
   }
   await bump(c, ev);
   return { changed };
+};
+
+/** Remove a guest's caption (the photo stays). */
+A.hostClearCaption = async (c, req) => {
+  const ev = await authHost(c, req);
+  const m = await mediaRow(c, ev, req.id);
+  if (!m) throw err('not_found', 'Not found');
+  await S(c, ev).run("UPDATE media SET caption = '' WHERE seq = ?", m.seq);
+  await bump(c, ev);
+  return { ok: true };
 };
 
 A.hostFavorite = async (c, req) => {

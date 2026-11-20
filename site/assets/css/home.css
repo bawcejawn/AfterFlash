@@ -14,7 +14,7 @@
 .home .topbar a { color: #fff; }
 .home .topbar .btn.flash { color: var(--flash-ink); border-color: var(--flash); }
 .home .brand-mark { background: #fff; }
-.home .brand-mark::after { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--cobalt); background: var(--cobalt); }
+.home .brand-mark::after { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--cobalt); background: var(--flash); }
 
 .home .hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 3rem; align-items: center; padding: 2rem 0 4.5rem; }
 .home .hero h1 { font-size: clamp(2.6rem, 5.6vw, 4.6rem); line-height: 1.02; letter-spacing: -0.015em; margin-bottom: 0.45em; }

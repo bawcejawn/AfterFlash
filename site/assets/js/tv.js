@@ -166,7 +166,7 @@ function advance() {
   const img = imgs[which = 1 - which];
   const other = imgs[1 - which];
   wallImage(img, it, 1920, () => { img.classList.add('on'); other.classList.remove('on'); });
-  els.who.textContent = it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || '';
+  els.who.textContent = [it.cap ? `“${it.cap}”` : '', it.k === 'v' ? `${it.g || 'Guest'}, video` : it.g || ''].filter(Boolean).join(', ');
   els.who.hidden = !els.who.textContent;
   if (it.k === 'v') playVideo(it); else scheduleNext(SHOW_MS);
 }

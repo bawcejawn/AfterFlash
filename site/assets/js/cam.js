@@ -142,6 +142,9 @@ const BEAUTY = 0.3; // light touch: smooths skin a little, keeps detail
 const MAX_EDGE = 4032;
 let hdOn = false, hdChosen = false;
 let els = {};
+// Extras for the next photo: an optional caption, and the photo challenge it answers.
+let nextCaption = '';
+let challengeIdx = 0, challengeArmed = false;
 
 function shotsLeft() { return Math.max(0, shotsLeftServer - pending); }
 
@@ -204,13 +207,40 @@ async function startCamera() {
   els.hdChip.setAttribute('aria-label', 'HD photos with your phone’s camera');
   { const saved = store.get('ps:hd'); if (saved === 'on' || saved === 'off') { hdChosen = true; hdOn = saved === 'on'; } }
 
+  const challenges = Array.isArray(ev.challenges) ? ev.challenges : [];
+  if (challenges.length) challengeIdx = Math.abs(Number(store.get(`ps:chi:${evKey}`)) || 0) % challenges.length;
+  els.chText = h('b');
+  els.chArm = h('button', { class: 'btn small flash', type: 'button', 'aria-pressed': 'false', onclick: () => { challengeArmed = !challengeArmed; drawChallenge(); } });
+  els.challenge = challenges.length ? h('div', { class: 'challenge-card', role: 'group', 'aria-label': 'Photo challenge' },
+    h('div', null, h('small', null, 'Photo challenge'), els.chText),
+    h('div', { class: 'row' }, els.chArm, h('button', { class: 'btn small', type: 'button', onclick: () => { challengeIdx = (challengeIdx + 1) % challenges.length; challengeArmed = false; drawChallenge(); } }, 'Skip'))) : null;
+  const drawChallenge = () => {
+    if (!els.challenge) return;
+    els.chText.textContent = challenges[challengeIdx];
+    els.chArm.textContent = challengeArmed ? 'Ready: take the photo' : 'Shoot it';
+    els.chArm.setAttribute('aria-pressed', String(challengeArmed));
+    store.set(`ps:chi:${evKey}`, challengeIdx);
+  };
+  els.drawChallenge = drawChallenge;
+  drawChallenge();
+
+  els.capPill = h('button', { class: 'caption-pill', type: 'button', hidden: true, 'aria-label': 'Remove caption', onclick: () => { nextCaption = ''; drawCaption(); } });
+  const capInput = h('input', { type: 'text', maxlength: 80, placeholder: 'Write a caption for your next photo', 'aria-label': 'Caption' });
+  els.capBar = h('form', { class: 'caption-bar', hidden: true }, capInput, h('button', { class: 'btn small flash', type: 'submit' }, 'Done'));
+  els.capBar.addEventListener('submit', (e) => { e.preventDefault(); nextCaption = capInput.value.trim().slice(0, 80); els.capBar.hidden = true; drawCaption(); });
+  const drawCaption = () => { els.capPill.hidden = !nextCaption; els.capPill.textContent = nextCaption ? `“${nextCaption}”  ✕` : ''; };
+  els.drawCaption = drawCaption;
+  els.capChip = ev.captions ? h('button', { class: 'chip', type: 'button', onclick: () => { els.capBar.hidden = !els.capBar.hidden; if (!els.capBar.hidden) { capInput.value = nextCaption; capInput.focus(); } } }, 'Aa Caption') : null;
+  els.vf.append(els.capPill);
+
   clear(root).append(h('div', { class: 'cam-shell' },
     h('header', { class: 'cam-top' },
       h('div', { class: 'cam-title-wrap' }, logoEl(studio, eventId, ev), h('div', { class: 'cam-title' }, ev.name)),
       h('div', { class: 'counter' }, els.counter, h('span', null, 'left'))),
     els.vf,
     h('footer', { class: 'cam-bottom' },
-      h('div', { class: 'chips' }, ...modeChips, els.hdChip, els.flashChip, els.beautyChip, libChip, ...lookChips),
+      els.challenge, els.capBar,
+      h('div', { class: 'chips' }, ...modeChips, els.hdChip, els.flashChip, els.beautyChip, els.capChip, libChip, ...lookChips),
       h('div', { class: 'controls' }, els.albumBtn, els.shutter, flip),
       els.queue,
       h('div', { class: 'cam-links' },
@@ -543,6 +573,14 @@ function showLastShot(blob) {
 
 async function enqueue({ kind, blob, thumb, w, h: hh, dur = 0, blur = -1 }) {
   const item = { clientId: randomId(20), ev: `${studio}:${eventId}`, kind, blob, thumb, w, h: hh, dur, blur, createdAt: Date.now(), attempts: 0 };
+  if (nextCaption) { item.caption = nextCaption; nextCaption = ''; if (els.drawCaption) els.drawCaption(); }
+  if (challengeArmed && Array.isArray(ev.challenges) && ev.challenges.length) {
+    item.challenge = ev.challenges[challengeIdx];
+    challengeArmed = false;
+    challengeIdx = (challengeIdx + 1) % ev.challenges.length;
+    if (els.drawChallenge) els.drawChallenge();
+    toast('Challenge done! Here’s the next one.', 'ok');
+  }
   await queue.add(item);
   pending++;
   renderCounter(true);

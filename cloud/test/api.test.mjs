@@ -633,6 +633,29 @@ t('Google Play: assetlinks.json only when package and fingerprint are set and va
   assert.notEqual((await s.get('/.well-known/assetlinks.json')).headers.get('content-type'), 'application/json');
 });
 
+t('captions and photo challenges: cleaned, only host prompts count, host can remove a caption', async () => {
+  const s = await boot();
+  const k = await hostWithDrive(s);
+  const ev = await s.call({ a: 'adminCreate', k, settings: { name: 'Fun' } });
+  const hk = 'admin:' + k;
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { challenges: { on: true, list: ['Selfie with the hosts', '<b>Dance</b>'] } } });
+  const pub = (await s.call({ a: 'event', e: ev.id })).event;
+  assert.deepEqual(pub.challenges, ['Selfie with the hosts', 'bDance/b']); assert.equal(pub.captions, true);
+  const g = await s.call({ a: 'join', e: ev.id, label: 'Nana' });
+  const up = (extra) => s.call({ a: 'upload', e: ev.id, g: g.guest.id, t: g.token, kind: 'photo', data: b64(jpegWithExif()), clientId: cid(), w: 10, h: 10, ...extra });
+  await up({ caption: '=SUM(1) <script>hi</script>', challenge: 'Selfie with the hosts' });
+  await up({ caption: 'ok', challenge: 'Something the host never asked' });
+  const items = (await s.call({ a: 'list', e: ev.id })).items;
+  assert.equal(items[0].cap, 'SUM(1) scripthi/script'); assert.equal(items[0].ch, 'Selfie with the hosts');
+  assert.equal(items[1].ch, '', 'unknown challenge dropped');
+  assert.equal((await s.call({ a: 'hostClearCaption', e: ev.id, k: 'nope', id: items[0].i })).error, 'unauthorized');
+  await s.call({ a: 'hostClearCaption', e: ev.id, k: hk, id: items[0].i });
+  assert.equal((await s.call({ a: 'list', e: ev.id })).items[0].cap, '');
+  await s.call({ a: 'hostUpdate', e: ev.id, k: hk, settings: { captions: false } });
+  await up({ caption: 'nope' });
+  assert.equal((await s.call({ a: 'list', e: ev.id })).items[2].cap, '', 'captions off');
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

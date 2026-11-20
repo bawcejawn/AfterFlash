@@ -71,6 +71,7 @@ export function createUploader({ studio, ev, getAuth, onEvent }) {
           const payload = {
             e: ev.split(':')[1], g: auth.g, t: auth.t, kind: item.kind, clientId: item.clientId,
             w: item.w, h: item.h, dur: item.dur, blur: item.blur,
+            caption: item.caption || undefined, challenge: item.challenge || undefined,
             data: await blobToBase64(mainBlob),
             thumb: thumbBlob ? await blobToBase64(thumbBlob) : undefined,
             mime: key ? String(item.blob.type || '').split(';')[0] : undefined,

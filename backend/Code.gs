@@ -18,7 +18,7 @@
  * Setup: see docs/SETUP.md. Run `setup()` once from the editor.
  */
 
-var APP_VERSION = '1.11.0';
+var APP_VERSION = '1.12.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
@@ -52,7 +52,7 @@ var LIMITS = {
 };
 
 var MEDIA_COLS = ['seq', 'id', 'thumbId', 'guestId', 'kind', 'mime', 'bytes', 'sha256', 'w', 'h', 'dur',
-  'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav'];
+  'createdAt', 'status', 'reports', 'clientId', 'archIndex', 'archTx', 'flags', 'fav', 'caption', 'challenge'];
 var NOTE_COLS = ['id', 'guestId', 'label', 'text', 'audioId', 'createdAt', 'status', 'clientId', 'dur'];
 var GUEST_COLS = ['guestId', 'tokenHash', 'label', 'shots', 'uploads', 'createdAt', 'reports', 'blocked'];
 var RSVP_COLS = ['id', 'tokenHash', 'name', 'status', 'party', 'kids', 'diet', 'song', 'message', 'photoId', 'clientId', 'createdAt', 'updatedAt', 'deleted'];
@@ -127,6 +127,7 @@ var ACTIONS = {
   hostGuestbook: aHostGuestbook,
   hostGuestbookModerate: aHostGuestbookModerate,
   hostSetCover: aHostSetCover,
+  hostClearCaption: aHostClearCaption,
   hostRsvps: aHostRsvps,
   hostRsvpPhoto: aHostRsvpPhoto,
   hostRsvpDelete: aHostRsvpDelete,
@@ -343,11 +344,15 @@ function aUpload(req) {
     var flags = flagList.join(',');
     var sha = enc ? plainSha : sha256Hex_(bytes);
     var w = int_(req.w, 0, 20000, 0), h = int_(req.h, 0, 20000, 0), dur = int_(req.dur, 0, 600, 0);
+    // Captions: plain guest text, never on private-storage events. A challenge must be one of the host's prompts.
+    var caption = ev.settings.captions && !enc ? cleanText_(req.caption, 80) : '';
+    var chText = cleanText_(req.challenge, 60);
+    var challenge = ev.settings.challenges.on && ev.settings.challenges.list.indexOf(chText) >= 0 ? chText : '';
     withLock_(function () {
       var sh = mediaSheet_(ev);
       var seq = sh.getLastRow();
       sh.appendRow([seq, file.getId(), thumb ? thumb.getId() : '', g.row.guestId, kind, mime, bytes.length, sha,
-        w, h, dur, now, status, 0, clientId, '', '', flags, false]);
+        w, h, dur, now, status, 0, clientId, '', '', flags, false, txt_(caption), txt_(challenge)]);
     });
   } catch (x) {
     // Never leave orphan files in Drive: undo the upload so the phone's retry starts clean.
@@ -380,7 +385,7 @@ function aList(req) {
   }
   var labels = guestLabels_(ev);
   base.items = visible.map(function (m) {
-    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || (m.guestId === 'recovered' ? 'Recovered from Drive' : ''), c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0, f: m.fav === true ? 1 : 0 };
+    return { i: m.id, t: m.thumbId || '', k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || (m.guestId === 'recovered' ? 'Recovered from Drive' : ''), c: m.createdAt, w: m.w, h: m.h, d: Number(m.dur) || 0, f: m.fav === true ? 1 : 0, cap: String(m.caption || ''), ch: String(m.challenge || '') };
   });
   return base;
 }
@@ -999,6 +1004,19 @@ function aHostRecover(req) {
   return { found: found.length, duplicates: dupes, added: rows.length };
 }
 
+/** Remove a guest's caption (the photo stays). */
+function aHostClearCaption(req) {
+  var ev = authHost_(req);
+  var id = str_(req.id, 100);
+  withLock_(function () {
+    var f = findMedia_(ev, id);
+    if (!f) throw err_('not_found', 'Not found');
+    f.sheet.getRange(f.rowIndex, MEDIA_COLS.indexOf('caption') + 1).setValue('');
+  });
+  bumpVersion_(ev.id);
+  return { ok: true };
+}
+
 function aHostFavorite(req) {
   var ev = authHost_(req);
   var fav = req.fav === true;
@@ -1080,7 +1098,7 @@ function aHostList(req) {
   var items = readMedia_(ev).filter(function (m) { return m.status !== 'deleted'; }).map(function (m) {
     return { i: m.id, t: m.thumbId, k: m.kind === 'video' ? 'v' : 'p', g: labels[m.guestId] || (m.guestId === 'recovered' ? 'Recovered from Drive' : ''), gid: m.guestId,
       c: m.createdAt, w: m.w, h: m.h, s: m.status, r: Number(m.reports) || 0, b: m.bytes, sha: m.sha256,
-      ai: m.archIndex === '' ? null : Number(m.archIndex), f: m.flags || '', fv: m.fav === true };
+      ai: m.archIndex === '' ? null : Number(m.archIndex), f: m.flags || '', fv: m.fav === true, cap: String(m.caption || ''), ch: String(m.challenge || '') };
   });
   return { items: items, v: getVersion_(ev.id), event: hostEvent_(ev) };
 }
@@ -1465,8 +1483,17 @@ function sanitizeSettings_(s) {
     accent: color,
     font: ['modern', 'elegant', 'script'].indexOf(s.font) >= 0 ? s.font : 'modern',
     tagline: cleanText_(s.tagline, 80),
-    invite: sanitizeInvite_(s.invite)
+    invite: sanitizeInvite_(s.invite),
+    captions: s.captions !== false,
+    challenges: sanitizeChallenges_(s.challenges)
   };
+}
+
+/** Photo challenges: up to 15 short prompts the host picks. */
+function sanitizeChallenges_(v) {
+  v = v && typeof v === 'object' ? v : {};
+  var list = Array.isArray(v.list) ? v.list.map(function (x) { return cleanText_(x, 60); }).filter(Boolean).slice(0, 15) : [];
+  return { on: v.on === true && list.length > 0, list: list };
 }
 
 function isRevealed_(s) {
@@ -1483,7 +1510,8 @@ function publicEvent_(ev) {
     maxVideoSec: s.maxVideoSec, allowLibrary: s.allowLibrary, guestGallery: s.guestGallery,
     allowReports: s.allowReports, paused: s.paused, look: s.look, guestLooks: s.guestLooks, beauty: s.beauty, dateStamp: s.dateStamp,
     accent: s.accent, font: s.font, tagline: s.tagline, logoV: ev.logo ? ev.logo.v : '', approval: s.approval, encrypted: s.encrypted, enhance: s.enhance, guestbook: s.guestbook, needsPin: !!ev.pinHash, revealed: isRevealed_(s), now: Date.now(),
-    invite: s.invite.on, coverV: ev.cover ? ev.cover.v : ''
+    invite: s.invite.on, coverV: ev.cover ? ev.cover.v : '',
+    captions: s.captions && !s.encrypted, challenges: s.challenges.on ? s.challenges.list : []
   };
 }
 

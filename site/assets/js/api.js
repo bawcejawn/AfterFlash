@@ -4,7 +4,7 @@
 import { config, ownStudio } from './util.js';
 
 /** Backend version this website expects (kept in step with APP_VERSION in backend/Code.gs by CI). */
-export const BACKEND_VERSION = '1.11.0';
+export const BACKEND_VERSION = '1.12.0';
 
 // Personal accounts: /macros/s/ID/exec. Google Workspace accounts: /a/macros/DOMAIN/s/ID/exec.
 const PROD_URL = /^https:\/\/script\.google\.com\/(?:a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
