@@ -84,8 +84,9 @@ const vars = {
   PRINT_PRICE: env.PRINT_PRICE || '',
   BOOK_PRICE: env.BOOK_PRICE || '',
   GUEST_OFFER_CODE: env.GUEST_OFFER_CODE || '',
+  STRIPE_TOS: env.STRIPE_TOS === 'required' ? 'required' : '', // 'required' = buyers tick "I agree to the Terms" at checkout
   STORAGE_GB_COST: env.STORAGE_GB_COST || '0.015',
-  STORAGE_MARKUP: env.STORAGE_MARKUP || '50',
+  STORAGE_MARKUP: env.STORAGE_MARKUP || '', // empty = the default $10 / $40 / $100
   ANDROID_PACKAGE: env.ANDROID_PACKAGE || '',
   ANDROID_CERT_SHA256: (env.ANDROID_CERT_SHA256 || '').toUpperCase().replace(/\s+/g, ''),
   PRICE_EVENT: env.PRICE_EVENT || '5',

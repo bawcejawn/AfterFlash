@@ -11,7 +11,7 @@ Your to-do list, in order. Tick items off as you go. Step-by-step instructions a
 
 ## The name: Rememberoll (before you recruit partners or print anything)
 
-- [x] Name chosen: **Rememberoll** (Nov 19). AfterFlash was dropped because an "Afterflash" camera app already exists.
+- [ ] **Lock the final name.** Working name **Rememberoll** (Nov 19); **Our Night** is also being considered (Nov 20). Its only US trademark found (OUR NIGHT, liquor, class 33) is dead/cancelled. Check for live marks in classes 9, 41, 42, 45 and the domains/handles, then tell Claude to rename everything.
 - [ ] Buy **rememberoll.com** and **rememberroll.com** (double r, because people will type it that way) in Cloudflare: **Domain Registration → Register Domains**. Turn on auto-renew.
 - [ ] Search **Rememberoll** at **tmsearch.uspto.gov** (classes 9 and 42).
 - [ ] Get a trademark attorney's clearance search. Mention "Memory Roll" (getmemoryroll.com), the closest name found. Then file the Rememberoll trademark.
@@ -40,6 +40,11 @@ Your to-do list, in order. Tick items off as you go. Step-by-step instructions a
 - [ ] **Part 6:** Stripe in test mode: add the secret key as a GitHub secret. Prices are already set ($5 / $10 / $30).
 - [ ] **Part 7:** test everything with card 4242 4242 4242 4242: buy each plan, connect Drive, run a test event, add a test partner, buy with their link.
 - [ ] **Part 8:** go live: activate Stripe, swap in the `sk_live_` key and redeploy. Optional: turn on **Crypto** (USDC) payments in Stripe.
+- [ ] **Part 9:** turn on email (Resend + DNS + `RESEND_API_KEY` + `MAIL_FROM`). Move to Resend Pro ($20/month) before big invitation sends.
+- [ ] **Part 10 (optional):** prints and photo books: pick a photo lab, set `PRINT_PRICE` / `BOOK_PRICE`.
+- [ ] **Part 11 (optional):** guest-to-host offer: create code GUEST20, set `GUEST_OFFER_CODE`.
+- [ ] **Part 12 (optional):** Rememberoll storage ($10 / $40 / $100): turn on R2, add "R2: Edit" to the token, set `STORAGE_BUCKET`.
+- [ ] **Part 13:** fewer refunds and disputes: Terms URL in Stripe, `STRIPE_TOS` = `required`, statement descriptor, receipts.
 
 ## Partners
 
