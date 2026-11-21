@@ -876,6 +876,18 @@ t('Rememberoll storage: buy a pack, uploads go to R2, quota, Drive-full switch, 
   assert.equal((await s.call({ a: 'hostGet', e: ev3.id, k: 'admin:' + k })).event.store, 'r2');
 });
 
+t('metadata strip keeps colour profile and orientation, drops GPS and comments', async () => {
+  const { stripJpegMeta } = await import('../src/lib.js');
+  const seg = (m, data) => [0xff, m, ((data.length + 2) >> 8), (data.length + 2) & 255, ...data];
+  const exifLE = [0x45, 0x78, 0x69, 0x66, 0, 0, 0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 2, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 8, 0, 0, 0, 0x25, 0x88, 4, 0, 1, 0, 0, 0, 9, 9, 9, 9, 0, 0, 0, 0];
+  const icc = [...'ICC_PROFILE'].map((c) => c.charCodeAt(0)).concat([0, 1, 1, 7, 7, 7, 7]);
+  const jpg = new Uint8Array([0xff, 0xd8, ...seg(0xe1, exifLE), ...seg(0xe2, icc), ...seg(0xe2, [0x4d, 0x50, 0x46, 0, 5]), ...seg(0xfe, [65]), 0xff, 0xda, 0, 2, 1, 0xff, 0xd9]);
+  const hex = Buffer.from(stripJpegMeta(jpg)).toString('hex');
+  assert.ok(hex.includes(Buffer.from('ICC_PROFILE').toString('hex')));
+  assert.ok(!hex.includes('09090909') && !hex.includes('fffe') && !hex.includes('4d50460005'));
+  assert.ok(hex.startsWith('ffd8ffe100224578696600004d4d002a00000008000101120003000000010008'), 'orientation 8 kept');
+});
+
 let passed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); passed++; console.log('ok -', name); }

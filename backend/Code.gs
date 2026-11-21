@@ -22,9 +22,9 @@ var APP_VERSION = '1.14.0';
 
 var LIMITS = {
   BODY_BYTES: 30 * 1024 * 1024,
-  PHOTO_BYTES: 8 * 1024 * 1024,
+  PHOTO_BYTES: 16 * 1024 * 1024, // full-size phone photos (24 MP and up) kept as taken
   VIDEO_BYTES: 20 * 1024 * 1024,
-  THUMB_BYTES: 400 * 1024,
+  THUMB_BYTES: 700 * 1024,
   MANIFEST_BYTES: 4 * 1024 * 1024,
   NAME: 80,
   WELCOME: 280,
@@ -1844,24 +1844,56 @@ function sniffMime_(bytes) {
  * Removes APP1..APP15 and COM segments (EXIF, GPS, XMP, comments) from a JPEG.
  * Keeps APP0 (JFIF) and everything from SOS onward. Returns the original on parse errors.
  */
+/** The EXIF orientation (1-8) in an APP1 segment whose data starts at index d0, or 1. */
+function exifOrientation_(bytes, d0, end) {
+  try {
+    var b = function (o) { return u8_(bytes[o]); };
+    if (end - d0 < 14 || b(d0) !== 0x45 || b(d0 + 1) !== 0x78 || b(d0 + 2) !== 0x69 || b(d0 + 3) !== 0x66 || b(d0 + 4) || b(d0 + 5)) return 1;
+    var t = d0 + 6, le = b(t) === 0x49;
+    var r16 = function (o) { return le ? b(o) | (b(o + 1) << 8) : (b(o) << 8) | b(o + 1); };
+    var r32 = function (o) { return le ? (b(o) | (b(o + 1) << 8) | (b(o + 2) << 16)) + b(o + 3) * 16777216 : b(o) * 16777216 + ((b(o + 1) << 16) | (b(o + 2) << 8) | b(o + 3)); };
+    var ifd = t + r32(t + 4);
+    if (ifd + 2 > end) return 1;
+    var count = Math.min(r16(ifd), 200);
+    for (var k = 0; k < count; k++) {
+      var e = ifd + 2 + k * 12;
+      if (e + 12 > end) break;
+      if (r16(e) === 0x0112) { var v = r16(e + 8); return v >= 1 && v <= 8 ? v : 1; }
+    }
+  } catch (x) { /* treat as upright */ }
+  return 1;
+}
+
+/**
+ * Remove private metadata (EXIF camera/time/GPS, XMP, comments, other APP segments). Keeps the
+ * colour profile (APP2 ICC) and the orientation (as a tiny new EXIF block). Same as the Cloud version.
+ */
 function stripJpegMeta_(bytes) {
   // Works on the signed byte arrays Apps Script uses; copies whole segments with slice().
   var slice = Array.prototype.slice;
   var parts = [slice.call(bytes, 0, 2)];
-  var i = 2, n = bytes.length;
+  var i = 2, n = bytes.length, orient = 1;
+  var isIcc = function (at) {
+    var want = 'ICC_PROFILE';
+    if (n <= at + 16) return false;
+    for (var k = 0; k < want.length; k++) if (u8_(bytes[at + 4 + k]) !== want.charCodeAt(k)) return false;
+    return true;
+  };
   while (i + 4 <= n) {
     if (u8_(bytes[i]) !== 0xff) return bytes;
     var marker = u8_(bytes[i + 1]);
     if (marker === 0xd9) break;
     if (marker === 0xda) { // start of scan: keep the rest verbatim
+      if (orient > 1) parts.splice(1, 0, toSigned_([0xff, 0xe1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orient, 0, 0, 0, 0, 0, 0]));
       parts.push(slice.call(bytes, i));
       return Array.prototype.concat.apply([], parts);
     }
     if (marker >= 0xd0 && marker <= 0xd7 || marker === 0x01) { parts.push(slice.call(bytes, i, i + 2)); i += 2; continue; }
     var len = (u8_(bytes[i + 2]) << 8) | u8_(bytes[i + 3]);
     if (len < 2 || i + 2 + len > n) return bytes;
-    var drop = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe;
-    if (!drop) parts.push(slice.call(bytes, i, i + 2 + len));
+    if (marker === 0xe1 && orient === 1) orient = exifOrientation_(bytes, i + 4, i + 2 + len);
+    var keep = !((marker >= 0xe1 && marker <= 0xef) || marker === 0xfe) || (marker === 0xe2 && isIcc(i));
+    if (keep) parts.push(slice.call(bytes, i, i + 2 + len));
     i += 2 + len;
   }
   return bytes;

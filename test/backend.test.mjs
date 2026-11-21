@@ -397,6 +397,20 @@ t('co-host link and archive date (self-host)', () => {
   assert.equal(env.post({ a: 'hostGet', e: ev.id, k: ev.hostKey }).ok, true);
 });
 
+t('metadata strip keeps colour profile and orientation, drops GPS (self-host matches Cloud)', () => {
+  const gas = createGas();
+  const seg = (m, data) => [0xff, m, ((data.length + 2) >> 8), (data.length + 2) & 255, ...data];
+  const exif = [0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 2, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0x88, 0x25, 0, 4, 0, 0, 0, 1, 9, 9, 9, 9, 0, 0, 0, 0];
+  const icc = [...'ICC_PROFILE'].map((c) => c.charCodeAt(0)).concat([0, 1, 1, 7, 7, 7, 7]);
+  const jpg = [0xff, 0xd8, ...seg(0xe1, exif), ...seg(0xe2, icc), ...seg(0xfe, [65]), 0xff, 0xda, 0, 2, 1, 0xff, 0xd9];
+  const signed = jpg.map((b) => (b > 127 ? b - 256 : b));
+  const out = Buffer.from(gas.ctx.stripJpegMeta_(signed).map((b) => (b < 0 ? b + 256 : b))).toString('hex');
+  assert.ok(out.includes(Buffer.from('ICC_PROFILE').toString('hex')), 'colour profile kept');
+  assert.ok(!out.includes('09090909'), 'GPS gone');
+  assert.ok(!out.includes('fffe'), 'comment gone');
+  assert.ok(out.startsWith('ffd8ffe100224578696600004d4d002a00000008000101120003000000010006'), 'orientation 6 kept');
+});
+
 t('host of event A cannot touch files of event B or arbitrary Drive files', () => {
   const env = boot();
   const A = makeEvent(env);

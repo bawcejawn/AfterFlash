@@ -9,6 +9,8 @@ import { applyBrand, logoEl, plannerCredit, madeWith, guestOffer } from './brand
 import { api } from './api.js';
 import { enhance, canvasToBlob } from './film.js';
 import { openComposer, renderNotes } from './guestbook.js';
+// Lightbox size: the screen's real pixels (sharp on 3x phone screens and 4K TVs), up to 4000 px.
+const FULL_W = Math.min(4000, Math.max(2000, Math.ceil(Math.max(screen.width || 0, screen.height || 0) * (window.devicePixelRatio || 1))));
 
 frameGuard();
 registerSW();
@@ -256,7 +258,7 @@ function showLb() {
       if ((ev.encrypted || isCloudId(it.i)) && !(enhanceOn && ev.enhance)) {
         fullMedia(it).then((b) => { if (token === showToken && !media.dataset.enhanced) { media.dataset.full = '1'; media.src = keepUrl(URL.createObjectURL(b)); } }).catch(() => {});
       }
-    } else loadDriveImage(media, it.i, 2000, { proxy: () => proxyThumb(it.i) });
+    } else loadDriveImage(media, it.i, FULL_W, { proxy: () => proxyThumb(it.i) });
     if (enhanceOn && ev.enhance) applyEnhanced(media, it, token);
   }
   clear(lb.stage).append(media);
