@@ -387,3 +387,20 @@ export async function encodePreview(canvas) {
   }
   return canvasToBlob(drawScaled(c, c.width, c.height, 1600), 'image/jpeg', 0.78);
 }
+
+/** Re-encode a JPEG no larger than maxEdge and maxBytes (for servers with smaller limits). */
+export async function shrinkJpeg(blob, maxEdge, maxBytes) {
+  const bmp = await createImageBitmap(blob);
+  try {
+    let edge = maxEdge;
+    for (let tries = 0; tries < 4; tries++) {
+      const c = drawScaled(bmp, bmp.width, bmp.height, edge);
+      for (const q of [0.9, 0.82, 0.74]) {
+        const out = await canvasToBlob(c, 'image/jpeg', q);
+        if (out.size <= maxBytes) return out;
+      }
+      edge = Math.round(edge * 0.75);
+    }
+    throw new Error('too big');
+  } finally { bmp.close(); }
+}

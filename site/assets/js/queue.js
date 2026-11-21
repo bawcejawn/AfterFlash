@@ -82,6 +82,18 @@ export function createUploader({ studio, ev, getAuth, onEvent }) {
           onEvent({ type: 'uploaded', item, result });
         } catch (e) {
           const code = e instanceof ApiError ? e.code : 'network';
+          // An older server (e.g. a self-hosted script that hasn't been updated) takes smaller files:
+          // shrink this photo and its preview to the old limits once and try again, instead of losing it.
+          if ((code === 'bad_type' || code === 'too_large') && item.kind === 'photo' && !item.shrunk && !(item.blob.type || '').startsWith('video')) {
+            try {
+              const { shrinkJpeg } = await import('./film.js');
+              item.blob = await shrinkJpeg(item.blob, 4032, 7.6 * 1024 * 1024);
+              if (item.thumb) item.thumb = await shrinkJpeg(item.thumb, 1600, 380 * 1024);
+              item.shrunk = true;
+              await queue.update(item);
+              continue;
+            } catch { /* fall through and report it */ }
+          }
           if (FATAL.has(code)) {
             await queue.remove(item.clientId);
             onEvent({ type: 'dropped', item, error: e });
