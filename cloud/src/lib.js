@@ -96,26 +96,57 @@ export function sniffImage(b) {
 export const ENC_OVERHEAD = 32;
 export const isEnc = (b) => b.length > ENC_OVERHEAD && b[0] === 0x50 && b[1] === 0x53 && b[2] === 0x45 && b[3] === 0x31;
 
-/** Remove APP1..APP15 and COM segments (EXIF, GPS, XMP, comments). Returns the input on parse errors. */
+/** The EXIF orientation (1-8) in an APP1 "Exif" segment's data, or 1. */
+function exifOrientation(d) {
+  try {
+    if (d.length < 14 || d[0] !== 0x45 || d[1] !== 0x78 || d[2] !== 0x69 || d[3] !== 0x66 || d[4] || d[5]) return 1;
+    const t = 6, le = d[t] === 0x49;
+    const r16 = (o) => (le ? d[o] | (d[o + 1] << 8) : (d[o] << 8) | d[o + 1]);
+    const r32 = (o) => (le ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16)) + d[o + 3] * 16777216 : d[o] * 16777216 + ((d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]));
+    const ifd = t + r32(t + 4);
+    if (ifd + 2 > d.length) return 1;
+    const count = Math.min(r16(ifd), 200);
+    for (let k = 0; k < count; k++) {
+      const e = ifd + 2 + k * 12;
+      if (e + 12 > d.length) break;
+      if (r16(e) === 0x0112) { const v = r16(e + 8); return v >= 1 && v <= 8 ? v : 1; }
+    }
+  } catch { /* not readable: treat as upright */ }
+  return 1;
+}
+/** A tiny APP1 segment that holds only the orientation (no camera, time or location data). */
+function orientationSegment(v) {
+  return new Uint8Array([0xff, 0xe1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8,
+    0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, v, 0, 0, 0, 0, 0, 0]);
+}
+const isIcc = (b, i) => b.length > i + 16 && String.fromCharCode(...b.subarray(i + 4, i + 15)) === 'ICC_PROFILE';
+
+/**
+ * Remove private metadata: EXIF (camera, time, GPS), XMP, comments and other APP segments.
+ * Keeps the colour profile (APP2 ICC, so wide-colour phone photos keep their colours) and the
+ * orientation (as a tiny new EXIF block, so photos aren't sideways). Returns the input on parse errors.
+ */
 export function stripJpegMeta(bytes) {
   const parts = [bytes.subarray(0, 2)];
-  let i = 2; const n = bytes.length;
+  let i = 2, orient = 1; const n = bytes.length;
+  const finish = (rest) => {
+    if (orient > 1) parts.splice(1, 0, orientationSegment(orient));
+    parts.push(rest);
+    const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+    let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
   while (i + 4 <= n) {
     if (bytes[i] !== 0xff) return bytes;
     const marker = bytes[i + 1];
     if (marker === 0xd9) break;
-    if (marker === 0xda) {
-      parts.push(bytes.subarray(i));
-      const total = parts.reduce((a, p) => a + p.length, 0);
-      const out = new Uint8Array(total);
-      let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
-      return out;
-    }
+    if (marker === 0xda) return finish(bytes.subarray(i));
     if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { parts.push(bytes.subarray(i, i + 2)); i += 2; continue; }
     const len = (bytes[i + 2] << 8) | bytes[i + 3];
     if (len < 2 || i + 2 + len > n) return bytes;
-    const drop = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe;
-    if (!drop) parts.push(bytes.subarray(i, i + 2 + len));
+    if (marker === 0xe1 && orient === 1) orient = exifOrientation(bytes.subarray(i + 4, i + 2 + len));
+    const keep = !((marker >= 0xe1 && marker <= 0xef) || marker === 0xfe) || (marker === 0xe2 && isIcc(bytes, i));
+    if (keep) parts.push(bytes.subarray(i, i + 2 + len));
     i += 2 + len;
   }
   return bytes;

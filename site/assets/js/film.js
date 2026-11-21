@@ -232,13 +232,29 @@ export function stampDate(canvas, date = new Date()) {
   ctx.restore();
 }
 
-/** Draw a source onto a canvas no larger than maxEdge on its long side. */
+/**
+ * Wide colour: phones with P3 screens take P3 photos. Canvases in sRGB would squash those colours
+ * (duller reds, greens and skin tones), so on such phones photos are drawn in Display P3 and the
+ * saved JPEG carries the P3 colour profile.
+ */
+export const WIDE_COLOR = (() => {
+  try {
+    if (typeof matchMedia !== 'function' || !matchMedia('(color-gamut: p3)').matches) return false;
+    const x = document.createElement('canvas').getContext('2d', { colorSpace: 'display-p3' });
+    return !!(x && x.getContextAttributes && x.getContextAttributes().colorSpace === 'display-p3');
+  } catch { return false; }
+})();
+export const ctx2d = (c, extra = {}) => c.getContext('2d', WIDE_COLOR ? { colorSpace: 'display-p3', ...extra } : extra);
+
+/** Draw a source onto a canvas no larger than maxEdge on its long side (high-quality scaling). */
 export function drawScaled(source, sw, sh, maxEdge) {
   const scale = Math.min(1, maxEdge / Math.max(sw, sh));
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(sw * scale));
   c.height = Math.max(1, Math.round(sh * scale));
-  c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+  const x = ctx2d(c);
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(source, 0, 0, c.width, c.height);
   return c;
 }
 
@@ -353,8 +369,8 @@ export function blurScore(source, sw, sh) {
  * JPEG at the best quality that fits the upload limit: starts at 0.92 and only steps down
  * (quality first, then size) for very detailed or very large photos.
  */
-export async function encodeBest(canvas, maxBytes = 7.6 * 1024 * 1024) {
-  for (const q of [0.92, 0.88, 0.84]) {
+export async function encodeBest(canvas, maxBytes = 15.5 * 1024 * 1024) {
+  for (const q of [0.95, 0.92, 0.88]) {
     const b = await canvasToBlob(canvas, 'image/jpeg', q);
     if (b.size <= maxBytes) return b;
   }
@@ -362,12 +378,12 @@ export async function encodeBest(canvas, maxBytes = 7.6 * 1024 * 1024) {
   return canvasToBlob(smaller, 'image/jpeg', 0.86);
 }
 
-/** Album/TV preview: sharp enough for full-screen phones and TVs, small enough to load fast. */
+/** Album/TV preview: 2048 px, sharp on full-screen phones, tablets and TVs, small enough to load fast. */
 export async function encodePreview(canvas) {
-  const c = drawScaled(canvas, canvas.width, canvas.height, 1600);
-  for (const q of [0.82, 0.74, 0.66]) {
+  const c = drawScaled(canvas, canvas.width, canvas.height, 2048);
+  for (const q of [0.88, 0.82, 0.74]) {
     const b = await canvasToBlob(c, 'image/jpeg', q);
-    if (b.size <= 380 * 1024) return b;
+    if (b.size <= 660 * 1024) return b;
   }
-  return canvasToBlob(drawScaled(c, c.width, c.height, 1080), 'image/jpeg', 0.7);
+  return canvasToBlob(drawScaled(c, c.width, c.height, 1600), 'image/jpeg', 0.78);
 }

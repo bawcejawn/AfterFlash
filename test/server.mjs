@@ -54,7 +54,7 @@ http.createServer((req, res) => {
     return;
   }
   if (url.pathname === '/mock-files') { // test-only: what Drive holds (name, first bytes, sharing)
-    const out = [...gas.files.values()].filter((f) => f.blob && f.blob.bytes && !f.trashed).map((f) => ({ name: f.getName(), head: String.fromCharCode(...gas.unsigned(f.blob.bytes.slice(0, 4))), shared: f.sharing !== 'PRIVATE' }));
+    const out = [...gas.files.values()].filter((f) => f.blob && f.blob.bytes && !f.trashed).map((f) => ({ id: f.getId(), size: f.blob.bytes.length, name: f.getName(), head: String.fromCharCode(...gas.unsigned(f.blob.bytes.slice(0, 4))), shared: f.sharing !== 'PRIVATE' }));
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); return;
   }
   if (url.pathname.startsWith('/mock-drive/')) {

@@ -421,13 +421,14 @@ async function processPhoto(canvas, name, opts) {
   if (wk) {
     try {
       const img = ctx.getImageData(0, 0, w, hh);
+      const space = img.colorSpace || 'srgb';
       const id = ++jobId;
       const buf = await new Promise((resolve, reject) => {
         jobs.set(id, { resolve, reject });
         wk.postMessage({ id, buf: img.data.buffer, w, h: hh, look: name, opts }, [img.data.buffer]);
         setTimeout(() => { if (jobs.has(id)) { jobs.delete(id); reject(new Error('timeout')); } }, 20000);
       });
-      ctx.putImageData(new ImageData(new Uint8ClampedArray(buf), w, hh), 0, 0);
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(buf), w, hh, { colorSpace: space }), 0, 0);
       return;
     } catch { /* fall through to main thread */ }
   }
@@ -475,16 +476,34 @@ async function onShutter() {
 
 /** Finish a photo in the background, one at a time, so the shutter is ready again right away. */
 let developChain = Promise.resolve();
-function develop(canvas, { look: lk, beauty }) {
+/**
+ * The phone's own photo, kept exactly as taken (full size, its colour profile) when nothing needs
+ * to be added to it. The server still removes location, time and camera details.
+ */
+const ORIGINAL_MAX = 15.5 * 1024 * 1024;
+async function isPlainJpeg(file) {
+  if (!file || file.size > ORIGINAL_MAX || file.size < 1024 || (file.type && file.type !== 'image/jpeg')) return false;
+  const b = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+  return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+}
+async function originalFor(file) {
+  if (look !== 'none' || beautyOn || ev.dateStamp || ev.encrypted) return null; // something to add, or private storage (server can't clean it)
+  return (await isPlainJpeg(file).catch(() => false)) ? file : null;
+}
+
+function develop(canvas, { look: lk, beauty, original = null }) {
   developing++;
   renderCounter(true);
   developChain = developChain.then(async () => {
     try {
       let blur = -1;
       try { blur = blurScore(canvas, canvas.width, canvas.height); } catch { /* optional */ }
-      await processPhoto(canvas, lk, { beauty });
-      if (ev.dateStamp) stampDate(canvas);
-      const blob = await encodeBest(canvas);
+      let blob = original;
+      if (!blob) {
+        await processPhoto(canvas, lk, { beauty });
+        if (ev.dateStamp) stampDate(canvas);
+        blob = await encodeBest(canvas);
+      }
       const thumb = await encodePreview(canvas);
       developing--;
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height, blur });
@@ -535,7 +554,7 @@ async function fromCameraApp(file) {
     const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
     src.done();
     els.flashFx.classList.remove('go'); void els.flashFx.offsetWidth; els.flashFx.classList.add('go');
-    develop(canvas, { look, beauty: beautyOn ? BEAUTY : 0 });
+    develop(canvas, { look, beauty: beautyOn ? BEAUTY : 0, original: await originalFor(file) });
   } catch {
     toast('Couldn’t read that photo. Try again.', 'error');
   } finally {
@@ -630,7 +649,8 @@ async function fromFiles(files) {
       const src = await decodeImage(file);
       const canvas = drawScaled(src.img, src.w, src.h, MAX_EDGE);
       src.done();
-      const blob = await encodeBest(canvas); // re-encode: strips location data
+      // Plain JPEGs upload as they are (the server removes location data); others are re-encoded.
+      const blob = (!ev.encrypted && await isPlainJpeg(file).catch(() => false)) ? file : await encodeBest(canvas);
       const thumb = await encodePreview(canvas);
       await enqueue({ kind: 'photo', blob, thumb, w: canvas.width, h: canvas.height });
     } catch {
